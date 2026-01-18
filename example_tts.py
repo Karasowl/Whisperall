@@ -1,7 +1,7 @@
 import torchaudio as ta
 import torch
-from chatterbox.tts import ChatterboxTTS
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+from whisperall.tts import ChatterboxTTS
+from whisperall.mtl_tts import ChatterboxMultilingualTTS
 
 # Automatically detect the best available device
 if torch.cuda.is_available():
@@ -29,3 +29,5 @@ ta.save("test-2.wav", wav, multilingual_model.sr)
 AUDIO_PROMPT_PATH = "YOUR_FILE.wav"
 wav = model.generate(text, audio_prompt_path=AUDIO_PROMPT_PATH)
 ta.save("test-3.wav", wav, model.sr)
+
+

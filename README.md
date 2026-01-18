@@ -1,7 +1,25 @@
+# Whisperall
+
+Whisperall is a local speech suite (TTS, STT, voice conversion, diarization).
+It includes Resemble AI's Chatterbox models; model names and citations remain
+below in the upstream section.
+
+## Installation (this repo)
+```shell
+pip install -e .
+```
+
+### GPU or CPU installs (Windows)
+- CPU-only: `scripts/install_cpu.ps1`
+- NVIDIA (CUDA 12.1): `scripts/install_cuda.ps1`
+
+### WhisperX (accurate mode)
+WhisperX currently requires `numpy<2.1.0`, while diarization via pyannote needs `numpy>=2.2.2`.
+If you need WhisperX, install it in a separate venv with `pip install -e .[whisperx]`.
+
+# Upstream: Chatterbox TTS
+
 ![Chatterbox Turbo Image](./Chatterbox-Turbo.jpg)
-
-
-# Chatterbox TTS
 
 [![Alt Text](https://img.shields.io/badge/listen-demo_samples-blue)](https://resemble-ai.github.io/chatterbox_turbo_demopage/)
 [![Alt Text](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/ResembleAI/chatterbox-turbo-demo)
@@ -32,16 +50,16 @@ Choose the right model for your application.
 
 ## Installation
 ```shell
-pip install chatterbox-tts
+pip install whisperall-tts
 ```
 
 Alternatively, you can install from source:
 ```shell
-# conda create -yn chatterbox python=3.11
-# conda activate chatterbox
+# conda create -yn whisperall python=3.11
+# conda activate whisperall
 
-git clone https://github.com/resemble-ai/chatterbox.git
-cd chatterbox
+git clone https://github.com/Karasowl/whisperall.git
+cd whisperall
 pip install -e .
 ```
 We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions of the dependencies are pinned in `pyproject.toml` to ensure consistency. You can modify the code or dependencies in this installation mode.
@@ -53,7 +71,7 @@ We developed and tested Chatterbox on Python 3.11 on Debian 11 OS; the versions 
 ```python
 import torchaudio as ta
 import torch
-from chatterbox.tts_turbo import ChatterboxTurboTTS
+from whisperall.tts_turbo import ChatterboxTurboTTS
 
 # Load the Turbo model
 model = ChatterboxTurboTTS.from_pretrained(device="cuda")
@@ -72,8 +90,8 @@ ta.save("test-turbo.wav", wav, model.sr)
 ```python
 
 import torchaudio as ta
-from chatterbox.tts import ChatterboxTTS
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+from whisperall.tts import ChatterboxTTS
+from whisperall.mtl_tts import ChatterboxMultilingualTTS
 
 # English example
 model = ChatterboxTTS.from_pretrained(device="cuda")

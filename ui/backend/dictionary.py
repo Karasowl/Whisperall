@@ -1,0 +1,61 @@
+"""
+Personal dictionary storage for STT post-processing.
+Stores user-defined replacements to correct common errors.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from typing import Dict, List
+
+from app_paths import get_data_dir
+
+
+DATA_DIR = get_data_dir()
+DICTIONARY_FILE = DATA_DIR / "dictionary.json"
+
+
+def _load_entries() -> List[Dict]:
+    if not DICTIONARY_FILE.exists():
+        return []
+    try:
+        with DICTIONARY_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except Exception:
+        return []
+    return []
+
+
+def _save_entries(entries: List[Dict]) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with DICTIONARY_FILE.open("w", encoding="utf-8") as f:
+        json.dump(entries, f, indent=2, ensure_ascii=False)
+
+
+def list_entries() -> List[Dict]:
+    return _load_entries()
+
+
+def add_entry(source: str, target: str, enabled: bool = True) -> Dict:
+    entries = _load_entries()
+    entry = {
+        "id": str(uuid.uuid4())[:8],
+        "source": source,
+        "target": target,
+        "enabled": enabled,
+    }
+    entries.append(entry)
+    _save_entries(entries)
+    return entry
+
+
+def delete_entry(entry_id: str) -> bool:
+    entries = _load_entries()
+    filtered = [e for e in entries if e.get("id") != entry_id]
+    if len(filtered) == len(entries):
+        return False
+    _save_entries(filtered)
+    return True

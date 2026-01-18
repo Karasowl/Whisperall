@@ -1,6 +1,6 @@
 import torch
 import gradio as gr
-from chatterbox.vc import ChatterboxVC
+from whisperall.vc import ChatterboxVC
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -25,3 +25,5 @@ demo = gr.Interface(
 
 if __name__ == "__main__":
     demo.launch()
+
+

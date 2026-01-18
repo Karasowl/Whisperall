@@ -1,6 +1,6 @@
 import torchaudio as ta
 import torch
-from chatterbox.tts_turbo import ChatterboxTurboTTS
+from whisperall.tts_turbo import ChatterboxTurboTTS
 
 # Load the Turbo model
 model = ChatterboxTurboTTS.from_pretrained(device="cuda")
@@ -12,3 +12,5 @@ text = "Oh, that's hilarious! [chuckle] Um anyway, we do have a new model in sto
 # wav = model.generate(text, audio_prompt_path="your_10s_ref_clip.wav")
 wav = model.generate(text)
 ta.save("test-turbo.wav", wav, model.sr)
+
+

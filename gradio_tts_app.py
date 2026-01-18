@@ -2,7 +2,7 @@ import random
 import numpy as np
 import torch
 import gradio as gr
-from chatterbox.tts import ChatterboxTTS
+from whisperall.tts import ChatterboxTTS
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -91,3 +91,5 @@ if __name__ == "__main__":
         max_size=50,
         default_concurrency_limit=1,
     ).launch(share=True)
+
+

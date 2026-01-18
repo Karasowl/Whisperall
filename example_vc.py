@@ -1,7 +1,7 @@
 import torch
 import torchaudio as ta
 
-from chatterbox.vc import ChatterboxVC
+from whisperall.vc import ChatterboxVC
 
 # Automatically detect the best available device
 if torch.cuda.is_available():
@@ -22,3 +22,5 @@ wav = model.generate(
     target_voice_path=TARGET_VOICE_PATH,
 )
 ta.save("testvc.wav", wav, model.sr)
+
+
