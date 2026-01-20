@@ -7,8 +7,9 @@ import asyncio
 import subprocess
 import sys
 import datetime
+import threading
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, List
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request
@@ -46,6 +47,20 @@ from audio_cache import (
     clear_audio_cache,
     get_cached_audio_path,
 )
+from media_import import (
+    download_media_from_url,
+    is_http_url,
+    sanitize_filename,
+    DownloadCancelled,
+)
+from provider_catalog import get_supported_provider_catalog, normalize_provider_id
+from providers.catalog import (
+    get_providers_for_service,
+    get_available_providers,
+    get_all_providers,
+    get_provider_options_for_frontend,
+)
+from providers.usage import ProviderUsageError, resolve_tts_provider_usage
 from app_paths import (
     get_temp_dir,
     get_output_dir,
@@ -131,6 +146,8 @@ DEFAULT_PRESETS = [
 
 # Job status storage (in-memory for simplicity)
 jobs: dict[str, dict] = {}
+book_cancelled_jobs: set[str] = set()
+book_paused_jobs: set[str] = set()
 
 # STT sessions (in-memory)
 stt_sessions: dict[str, dict] = {}
@@ -165,6 +182,7 @@ def _cleanup_orphaned_transcription_jobs():
         job_data["status"] = "completed"
         job_data["previous_status"] = previous_status
         job_data["progress"] = 100
+        job_data["active_started_at"] = None
         if previous_status == "diarizing":
             msg = "Diarization interrupted on restart; transcript preserved"
             job_data["current_step"] = msg
@@ -196,7 +214,7 @@ def _cleanup_orphaned_transcription_jobs():
                 continue
 
             # Jobs that were in progress when app closed
-            if status in ("pending", "transcribing", "diarizing", "cleaning", "extracting_audio"):
+            if status in ("pending", "transcribing", "diarizing", "cleaning", "extracting_audio", "downloading"):
                 job_id = job_file.stem
                 now_iso = datetime.datetime.now().isoformat()
 
@@ -210,6 +228,7 @@ def _cleanup_orphaned_transcription_jobs():
                     job_data["previous_status"] = status
                     job_data["current_step"] = f"Interrupted at {progress:.1f}% - {len(segments)} segments saved"
                     job_data["interrupted_at"] = now_iso
+                    job_data["active_started_at"] = None
                     orphaned_count += 1
                     print(f"[Startup] Marked orphaned job {job_id} as interrupted ({len(segments)} segments preserved)")
 
@@ -241,8 +260,20 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         print(f"[Startup] Pyannote audio decoder fallback not applied: {exc}")
 
-    # Pre-load default model on startup (optional, can be slow)
-    # get_tts_service()
+    preload_enabled = settings_service.get("performance.preload_models", True)
+    if preload_enabled:
+        def _preload_tts_models():
+            print("[Startup] Pre-loading TTS models (background)...")
+            tts = get_tts_service()
+            try:
+                tts._load_model("multilingual")
+                print("[Startup] Multilingual TTS model loaded successfully")
+            except Exception as e:
+                print(f"[Startup] TTS pre-load failed (will load on first request): {e}")
+
+        threading.Thread(target=_preload_tts_models, daemon=True).start()
+    else:
+        print("[Startup] TTS pre-load disabled (will load on first request)")
     yield
     print("Shutting down Whisperall backend...")
 
@@ -272,9 +303,11 @@ app.mount("/voice-files", StaticFiles(directory=str(VOICES_DIR)), name="voice-fi
 
 class GenerateRequest(BaseModel):
     text: str
-    model: str = "multilingual"  # original, turbo, multilingual
+    provider: str = "chatterbox"  # TTS provider: chatterbox, f5-tts, orpheus, kokoro
+    model: str = "multilingual"  # Model variant (provider-specific)
     language: str = "en"
-    voice_id: Optional[str] = None  # ID of saved voice
+    voice_id: Optional[str] = None  # ID of saved voice (for cloning providers)
+    preset_voice_id: Optional[str] = None  # ID of preset voice (for Kokoro)
     temperature: float = 0.8
     exaggeration: float = 0.5
     cfg_weight: float = 0.5
@@ -283,18 +316,35 @@ class GenerateRequest(BaseModel):
     speed: float = 1.0
     seed: Optional[int] = None
     output_format: str = "wav"  # wav, mp3, flac
+    fast_mode: bool = False  # Disables CFG for ~50% faster generation
+    device: Optional[str] = None
+    # F5-TTS specific
+    nfe_step: int = 32
+    # Provider-specific extra params
+    extra_params: Optional[dict] = None
 
 
 class GenerateBookRequest(BaseModel):
     chapters: list[dict]  # [{number, title, content}]
+    provider: str = "chatterbox"
     model: str = "multilingual"
     language: str = "en"
     voice_id: Optional[str] = None
+    preset_voice_id: Optional[str] = None
     temperature: float = 0.8
     exaggeration: float = 0.5
     cfg_weight: float = 0.5
+    top_p: float = 0.95
+    top_k: int = 1000
     speed: float = 1.0
+    seed: Optional[int] = None
     output_format: str = "wav"
+    fast_mode: bool = False  # Disables CFG for ~50% faster generation
+    device: Optional[str] = None
+    # F5-TTS specific
+    nfe_step: int = 32
+    # Provider-specific extra params
+    extra_params: Optional[dict] = None
 
 
 class VoiceCreate(BaseModel):
@@ -356,6 +406,8 @@ class ReaderRequest(BaseModel):
     language: str = "en"
     voice: Optional[str] = None
     speed: float = 1.0
+    fast_mode: bool = False  # Halves generation time by disabling CFG
+    device: Optional[str] = None
 
 
 class DictionaryCreate(BaseModel):
@@ -610,6 +662,39 @@ async def get_ffmpeg_status():
     return check_ffmpeg_available()
 
 
+@app.get("/api/system/capabilities")
+async def get_system_capabilities():
+    """Get system capabilities (GPU, devices, etc.)"""
+    import torch
+
+    cuda_available = torch.cuda.is_available()
+    mps_available = torch.backends.mps.is_available() if hasattr(torch.backends, 'mps') else False
+
+    gpu_info = None
+    if cuda_available:
+        gpu_info = {
+            "name": torch.cuda.get_device_name(0),
+            "memory_total_gb": round(torch.cuda.get_device_properties(0).total_memory / 1e9, 2),
+            "cuda_version": torch.version.cuda,
+        }
+
+    # Get current TTS device
+    tts = get_tts_service()
+
+    return {
+        "cuda_available": cuda_available,
+        "mps_available": mps_available,
+        "gpu": gpu_info,
+        "current_tts_device": tts.device,
+        "torch_version": torch.__version__,
+        "performance_settings": {
+            "fast_mode": settings_service.get("performance.fast_mode", False),
+            "device": settings_service.get("performance.device", "auto"),
+            "preload_models": settings_service.get("performance.preload_models", True),
+        }
+    }
+
+
 @app.post("/api/system/install-ffmpeg")
 async def install_ffmpeg():
     """Install FFmpeg via imageio-ffmpeg (downloads if needed)"""
@@ -626,7 +711,7 @@ async def install_ffmpeg():
         )
 
         if result.returncode != 0:
-            raise Exception(f"pip install failed: {result.stderr}")
+            raise Exception("FFmpeg installation failed. Please try restarting the application.")
 
         # Verify installation
         import importlib
@@ -1095,57 +1180,74 @@ async def delete_preset(preset_id: str):
 
 # --- History Endpoints ---
 
-def get_history_file():
-    """Get path to history file"""
-    return HISTORY_DIR / "history.json"
+HISTORY_MODULES = {"tts", "stt", "reader", "ai_edit", "translation"}
 
 
-def load_history() -> list:
-    """Load generation history"""
-    history_file = get_history_file()
+def normalize_history_module(module: Optional[str]) -> str:
+    """Normalize and validate history module."""
+    normalized = (module or "tts").strip().lower()
+    if normalized not in HISTORY_MODULES:
+        raise HTTPException(400, f"Unsupported history module: {normalized}")
+    return normalized
+
+
+def get_history_file(module: str):
+    """Get path to history file for a module."""
+    if module == "tts":
+        return HISTORY_DIR / "history.json"
+    return HISTORY_DIR / f"history_{module}.json"
+
+
+def load_history(module: str) -> list:
+    """Load history for a module."""
+    history_file = get_history_file(module)
     if history_file.exists():
         with open(history_file) as f:
             return json.load(f)
     return []
 
 
-def save_history(history: list):
-    """Save generation history"""
-    history_file = get_history_file()
+def save_history(module: str, history: list):
+    """Save history for a module."""
+    history_file = get_history_file(module)
     with open(history_file, "w") as f:
         json.dump(history, f, indent=2)
 
 
-def save_history_entry(entry: dict):
-    """Add a new entry to history"""
-    history = load_history()
+def save_history_entry(module: str, entry: dict):
+    """Add a new entry to a module history."""
+    if not settings_service.get("ui.save_history", True):
+        return
+    entry["module"] = module
+    history = load_history(module)
     history.insert(0, entry)  # Add at beginning (most recent first)
-    # Keep only last 100 entries
     history = history[:100]
-    save_history(history)
+    save_history(module, history)
 
 
 @app.get("/api/history")
-async def get_history_list(limit: int = 50, offset: int = 0):
-    """Get generation history"""
-    history = load_history()
+async def get_history_list(limit: int = 50, offset: int = 0, module: Optional[str] = None):
+    """Get module history (default: tts)."""
+    module_id = normalize_history_module(module)
+    history = load_history(module_id)
 
-    # Verify files still exist
     valid_history = []
     for entry in history:
-        output_path = OUTPUT_DIR / entry["filename"]
-        if output_path.exists():
-            entry["file_exists"] = True
-            entry["file_size_bytes"] = output_path.stat().st_size
-            entry["file_size_mb"] = round(output_path.stat().st_size / (1024 * 1024), 2)
-        else:
-            entry["file_exists"] = False
+        if module_id in {"tts", "reader"} and entry.get("filename"):
+            output_path = OUTPUT_DIR / entry["filename"]
+            if output_path.exists():
+                entry["file_exists"] = True
+                entry["file_size_bytes"] = output_path.stat().st_size
+                entry["file_size_mb"] = round(output_path.stat().st_size / (1024 * 1024), 2)
+            else:
+                entry["file_exists"] = False
         valid_history.append(entry)
 
     total = len(valid_history)
     paginated = valid_history[offset:offset + limit]
 
     return {
+        "module": module_id,
         "history": paginated,
         "total": total,
         "limit": limit,
@@ -1154,42 +1256,42 @@ async def get_history_list(limit: int = 50, offset: int = 0):
 
 
 @app.get("/api/history/{history_id}")
-async def get_history_entry(history_id: str):
-    """Get a specific history entry"""
-    history = load_history()
+async def get_history_entry(history_id: str, module: Optional[str] = None):
+    """Get a specific history entry."""
+    module_id = normalize_history_module(module)
+    history = load_history(module_id)
     entry = next((h for h in history if h["id"] == history_id), None)
     if not entry:
         raise HTTPException(404, "History entry not found")
 
-    # Check if file still exists
-    output_path = OUTPUT_DIR / entry["filename"]
-    entry["file_exists"] = output_path.exists()
-    if entry["file_exists"]:
-        entry["file_size_bytes"] = output_path.stat().st_size
+    if module_id in {"tts", "reader"} and entry.get("filename"):
+        output_path = OUTPUT_DIR / entry["filename"]
+        entry["file_exists"] = output_path.exists()
+        if entry["file_exists"]:
+            entry["file_size_bytes"] = output_path.stat().st_size
 
     return entry
 
 
 @app.delete("/api/history/{history_id}")
-async def delete_history_entry(history_id: str, delete_file: bool = True):
-    """Delete a history entry and optionally its audio file"""
-    history = load_history()
+async def delete_history_entry(history_id: str, delete_file: bool = True, module: Optional[str] = None):
+    """Delete a history entry and optionally its audio file."""
+    module_id = normalize_history_module(module)
+    history = load_history(module_id)
 
     entry = next((h for h in history if h["id"] == history_id), None)
     if not entry:
         raise HTTPException(404, "History entry not found")
 
-    # Delete audio file if requested
     freed_space = 0
-    if delete_file:
+    if delete_file and module_id in {"tts", "reader"} and entry.get("filename"):
         output_path = OUTPUT_DIR / entry["filename"]
         if output_path.exists():
             freed_space = output_path.stat().st_size
             output_path.unlink()
 
-    # Remove from history
     history = [h for h in history if h["id"] != history_id]
-    save_history(history)
+    save_history(module_id, history)
 
     return {
         "message": "History entry deleted",
@@ -1200,19 +1302,23 @@ async def delete_history_entry(history_id: str, delete_file: bool = True):
 
 
 @app.delete("/api/history")
-async def clear_history(delete_files: bool = False):
-    """Clear all history entries"""
-    history = load_history()
+async def clear_history(delete_files: bool = False, module: Optional[str] = None):
+    """Clear all history entries for a module."""
+    module_id = normalize_history_module(module)
+    history = load_history(module_id)
     freed_space = 0
 
-    if delete_files:
+    if delete_files and module_id in {"tts", "reader"}:
         for entry in history:
-            output_path = OUTPUT_DIR / entry["filename"]
+            filename = entry.get("filename")
+            if not filename:
+                continue
+            output_path = OUTPUT_DIR / filename
             if output_path.exists():
                 freed_space += output_path.stat().st_size
                 output_path.unlink()
 
-    save_history([])
+    save_history(module_id, [])
 
     return {
         "message": "History cleared",
@@ -1222,13 +1328,303 @@ async def clear_history(delete_files: bool = False):
     }
 
 
+ # =====================================================
+ # TTS PROVIDERS ENDPOINTS
+ # =====================================================
+
+POINT_BASED_TTS_PROVIDERS = {"elevenlabs"}
+
+
+def build_tts_billing(provider_id: str, text: str, chunks: list[str]) -> dict[str, Any]:
+    normalized = (provider_id or "chatterbox").lower()
+    char_count = sum(len(chunk) for chunk in chunks if chunk)
+    if char_count == 0:
+        char_count = len(text or "")
+    is_point_provider = normalized in POINT_BASED_TTS_PROVIDERS
+    unit = "points" if is_point_provider else "characters"
+    provider_label = provider_id or "TTS provider"
+    details = (
+        f"{char_count} ElevenLabs points ({char_count} characters)"
+        if is_point_provider
+        else f"{char_count} characters via {provider_label}"
+    )
+    return {
+        "value": char_count,
+        "unit": unit,
+        "details": details,
+        "provider": normalized,
+        "amount": None,
+        "currency": "points" if is_point_provider else None,
+    }
+
+
+@app.get("/api/tts/providers")
+async def list_tts_providers():
+    """List all implemented TTS providers."""
+    from tts_providers import list_providers, get_provider_info
+    from tts_providers.registry import is_provider_ready, get_missing_dependencies
+
+    providers = []
+
+    # 1. Add all implemented providers from TTS registry
+    for provider_id in list_providers():
+        info = get_provider_info(provider_id)
+        if info:
+            models = []
+            for m in info.models:
+                if isinstance(m, dict):
+                    models.append(m)
+                elif hasattr(m, "__dict__"):
+                    models.append({
+                        "id": getattr(m, "id", None),
+                        "name": getattr(m, "name", None),
+                        "size_gb": getattr(m, "size_gb", None),
+                        "vram_gb": getattr(m, "vram_gb", None),
+                        "description": getattr(m, "description", None),
+                    })
+                else:
+                    models.append({"id": m, "name": m})
+
+            # Determine type (local vs API)
+            api_provider_ids = [
+                "openai-tts", "elevenlabs", "fishaudio", "cartesia", "playht",
+                "siliconflow", "minimax", "zyphra", "narilabs"
+            ]
+            is_api = provider_id in api_provider_ids
+
+            deps = get_missing_dependencies(provider_id)
+            providers.append({
+                "id": info.id,
+                "name": info.name,
+                "description": info.description,
+                "voice_cloning": info.voice_cloning.value,
+                "supported_languages": info.supported_languages,
+                "models": models,
+                "default_model": info.default_model,
+                "sample_rate": info.sample_rate,
+                "vram_gb": info.vram_requirement_gb,
+                "supports_streaming": info.supports_streaming,
+                "supports_emotion_tags": info.supports_emotion_tags,
+                "requires_reference_text": info.requires_reference_text,
+                "min_reference_duration": info.min_reference_duration,
+                "max_reference_duration": info.max_reference_duration,
+                "extra_params": info.extra_params,
+                "preset_voices": [
+                    {
+                        "id": v.id,
+                        "name": v.name,
+                        "language": v.language,
+                        "gender": v.gender,
+                        "description": v.description,
+                        "sample_url": v.sample_url,
+                    }
+                    for v in info.preset_voices
+                ],
+                "is_ready": deps.get("ready", is_provider_ready(provider_id)),
+                "is_implemented": True,
+                "type": "api" if is_api else "local",
+                "readiness": deps,
+            })
+    return {"providers": providers}
+
+
+@app.get("/api/tts/providers/{provider_id}")
+async def get_tts_provider_info(provider_id: str):
+    """Get detailed info about a specific TTS provider"""
+    from tts_providers import get_provider_info
+
+    info = get_provider_info(provider_id)
+    if not info:
+        raise HTTPException(404, f"TTS provider not found: {provider_id}")
+
+    models = []
+    for m in info.models:
+        if isinstance(m, dict):
+            models.append(m)
+        elif hasattr(m, "__dict__"):
+            models.append({
+                "id": getattr(m, "id", None),
+                "name": getattr(m, "name", None),
+                "size_gb": getattr(m, "size_gb", None),
+                "vram_gb": getattr(m, "vram_gb", None),
+                "description": getattr(m, "description", None),
+            })
+        else:
+            models.append({"id": m, "name": m})
+
+    return {
+        "id": info.id,
+        "name": info.name,
+        "description": info.description,
+        "voice_cloning": info.voice_cloning.value,
+        "supported_languages": info.supported_languages,
+        "models": models,
+        "default_model": info.default_model,
+        "sample_rate": info.sample_rate,
+        "vram_gb": info.vram_requirement_gb,
+        "supports_streaming": info.supports_streaming,
+        "supports_emotion_tags": info.supports_emotion_tags,
+        "requires_reference_text": info.requires_reference_text,
+        "preset_voices": [
+            {
+                "id": v.id,
+                "name": v.name,
+                "language": v.language,
+                "gender": v.gender,
+                "description": v.description,
+                "sample_url": v.sample_url,
+            }
+            for v in info.preset_voices
+        ],
+        "extra_params": info.extra_params,
+    }
+
+
+@app.get("/api/tts/providers/{provider_id}/usage")
+async def get_tts_provider_usage(provider_id: str):
+    """Expose usage/quota info for API-based TTS providers."""
+    try:
+        usage = resolve_tts_provider_usage(provider_id)
+    except ProviderUsageError as exc:
+        raise HTTPException(exc.status_code, str(exc))
+
+    return {"provider": provider_id, "usage": usage}
+
+
+@app.get("/api/tts/providers/{provider_id}/voices")
+async def get_tts_provider_voices(provider_id: str, language: Optional[str] = None):
+    """Get preset voices for a provider (mainly for Kokoro)"""
+    from tts_providers import get_provider
+    from tts_providers.registry import get_missing_dependencies
+
+    try:
+        provider = get_provider(provider_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+    deps = get_missing_dependencies(provider_id)
+    if deps.get("missing_api_key"):
+        raise HTTPException(400, deps.get("error_message") or "API key not configured")
+
+    try:
+        voices = provider.get_preset_voices(language)
+    except Exception as exc:
+        detail = str(exc) or "Failed to load voices"
+        raise HTTPException(400, detail)
+
+    if language:
+        language = language.lower()
+        lang_base = language.split("-")[0] if "-" in language else language
+
+        def _matches_lang(voice_lang: Optional[str]) -> bool:
+            if not voice_lang:
+                return False
+            tokens = [part.strip().lower() for part in voice_lang.replace(";", ",").split(",")]
+            for token in tokens:
+                if not token:
+                    continue
+                if token == language:
+                    return True
+                token_base = token.split("-")[0] if "-" in token else token
+                if token_base == lang_base:
+                    return True
+            return False
+
+        if any(v.language for v in voices):
+            voices = [v for v in voices if _matches_lang(v.language) or not v.language]
+
+    return {
+        "voices": [
+            {
+                "id": v.id,
+                "name": v.name,
+                "language": v.language,
+                "gender": v.gender,
+                "description": v.description,
+                "sample_url": v.sample_url,
+            }
+            for v in voices
+        ]
+    }
+
+
+@app.get("/api/tts/providers/for-language/{language}")
+async def get_providers_for_language(language: str):
+    """Get TTS providers that support a specific language"""
+    from tts_providers.registry import get_providers_for_language, get_best_provider_for_language, get_provider_info
+
+    providers = get_providers_for_language(language)
+    best = get_best_provider_for_language(language)
+
+    result = []
+    for pid in providers:
+        info = get_provider_info(pid)
+        if info:
+            result.append({
+                "id": pid,
+                "name": info.name,
+                "recommended": pid == best,
+                "voice_cloning": info.voice_cloning.value,
+            })
+
+    return {
+        "language": language,
+        "providers": result,
+        "recommended": best,
+    }
+
+
+@app.post("/api/tts/providers/{provider_id}/load")
+async def load_tts_provider(provider_id: str, model: Optional[str] = None):
+    """Pre-load a TTS provider model"""
+    from tts_providers import get_provider
+
+    try:
+        provider = get_provider(provider_id)
+        provider.load(model)
+        return {"provider": provider_id, "loaded": True, "device": provider.device}
+    except Exception as e:
+        raise HTTPException(400, f"Failed to load provider: {e}")
+
+
+@app.post("/api/tts/providers/{provider_id}/unload")
+async def unload_tts_provider(provider_id: str):
+    """Unload a TTS provider to free memory"""
+    from tts_providers.registry import unload_provider
+
+    unloaded = unload_provider(provider_id)
+    return {"provider": provider_id, "unloaded": unloaded}
+
+
 @app.post("/api/generate")
 async def generate_audio(request: GenerateRequest):
-    """Generate audio from text"""
-    service = get_tts_service()
+    """Generate audio from text using the selected TTS provider"""
+    from tts_providers import get_provider
+    from tts_providers.registry import list_providers
 
-    # Get voice reference path
+    # Determine provider
+    provider_id = request.provider or "chatterbox"
+
+    # Fallback to chatterbox if provider not available
+    if provider_id not in list_providers():
+        print(f"[Generate] Provider {provider_id} not available, falling back to chatterbox")
+        provider_id = "chatterbox"
+
+    # Pre-flight dependency check
+    from tts_providers.registry import get_missing_dependencies
+    deps = get_missing_dependencies(provider_id)
+    if not deps["ready"]:
+        raise HTTPException(400, f"Provider not ready: {deps['error_message']}")
+
+    # Get provider instance
+    try:
+        provider = get_provider(provider_id, device=request.device)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to initialize TTS provider: {e}")
+
+    # Get voice reference path (for voice cloning providers)
     voice_path = None
+    voice_text = None
     if request.voice_id:
         metadata_file = VOICES_DIR / "metadata.json"
         if metadata_file.exists():
@@ -1237,38 +1633,179 @@ async def generate_audio(request: GenerateRequest):
             voice = next((v for v in voices if v["id"] == request.voice_id), None)
             if voice:
                 voice_path = str(VOICES_DIR / voice["filename"])
+                # Some providers need reference text
+                voice_text = voice.get("transcription")
 
     # Chunk the text
     chunks = chunk_text(request.text, max_chars=250)
+    billing_info = build_tts_billing(provider_id, request.text, chunks)
+
+    # Build provider-specific kwargs
+    gen_kwargs = {
+        "language": request.language,
+        "speed": request.speed,
+        "seed": request.seed,
+    }
+
+    # Provider-specific parameters
+    if provider_id == "chatterbox":
+        effective_cfg = 0.0 if request.fast_mode else request.cfg_weight
+        gen_kwargs.update({
+            "model": request.model,
+            "temperature": request.temperature,
+            "exaggeration": request.exaggeration,
+            "cfg_weight": effective_cfg,
+            "top_p": request.top_p,
+            "top_k": request.top_k,
+        })
+    elif provider_id == "f5-tts":
+        gen_kwargs.update({
+            "model": request.model if request.model != "multilingual" else None,
+            "nfe_step": request.nfe_step,
+        })
+    elif provider_id == "orpheus":
+        gen_kwargs.update({
+            "model": request.model if request.model not in ["multilingual", "original", "turbo"] else None,
+            "temperature": request.temperature,
+            "top_p": request.top_p,
+        })
+    elif provider_id == "kokoro":
+        gen_kwargs.update({
+            "voice_id": request.preset_voice_id,
+        })
+    elif provider_id == "zonos":
+        gen_kwargs.update({
+            "model": request.model if request.model not in ["multilingual", "original"] else None,
+        })
+    elif provider_id == "vibevoice":
+        gen_kwargs.update({
+            "model": request.model if request.model not in ["multilingual", "original"] else None,
+            "temperature": request.temperature,
+        })
+    elif provider_id == "voxcpm":
+        gen_kwargs.update({
+            "model": request.model if request.model not in ["multilingual", "original"] else None,
+            "temperature": request.temperature,
+            "top_p": request.top_p,
+        })
+    elif provider_id == "dia":
+        gen_kwargs.update({
+            "model": request.model if request.model not in ["multilingual", "original"] else None,
+            "voice_id": request.preset_voice_id,  # S1, S2, narrator
+        })
+    elif provider_id == "openvoice":
+        gen_kwargs.update({
+            "model": request.model if request.model not in ["multilingual", "original"] else None,
+        })
+    elif provider_id == "fish-speech":
+        gen_kwargs.update({
+            "model": request.model if request.model not in ["multilingual", "original"] else None,
+            "temperature": request.temperature,
+            "top_p": request.top_p,
+        })
+    # API Providers
+    elif provider_id == "openai-tts":
+        gen_kwargs.update({
+            "model": request.model or "tts-1",
+            "voice_id": request.preset_voice_id or "alloy",
+        })
+    elif provider_id == "elevenlabs":
+        gen_kwargs.update({
+            "model": request.model or "eleven_multilingual_v2",
+            "voice_id": request.preset_voice_id,
+        })
+    elif provider_id == "fishaudio":
+        gen_kwargs.update({
+            "model": request.model or "default",
+            "voice_id": request.preset_voice_id,
+        })
+    elif provider_id == "cartesia":
+        gen_kwargs.update({
+            "model": request.model or "sonic-2",
+            "voice_id": request.preset_voice_id,
+        })
+    elif provider_id == "playht":
+        gen_kwargs.update({
+            "model": request.model or "PlayHT2.0-turbo",
+            "voice_id": request.preset_voice_id,
+        })
+    elif provider_id == "siliconflow":
+        gen_kwargs.update({
+            "model": request.model or "CosyVoice-300M-SFT",
+            "voice_id": request.preset_voice_id,
+        })
+    elif provider_id == "minimax":
+        gen_kwargs.update({
+            "model": request.model or "speech-01-turbo",
+            "voice_id": request.preset_voice_id,
+        })
+    elif provider_id == "zyphra":
+        gen_kwargs.update({
+            "model": request.model or "zonos-v1",
+            "voice_id": request.preset_voice_id,
+        })
+    elif provider_id == "narilabs":
+        gen_kwargs.update({
+            "model": request.model or "dia-1.6b",
+            "voice_id": request.preset_voice_id,  # S1, S2, narrator
+        })
+
+    # Add extra params if provided (overrides defaults)
+    if request.extra_params:
+        gen_kwargs.update(request.extra_params)
 
     # Generate audio for each chunk
     audio_segments = []
+    sample_rate = 24000
+
     for chunk in chunks:
-        audio, sr = service.generate(
-            text=chunk,
-            model_type=request.model,
-            language_id=request.language,
-            audio_prompt_path=voice_path,
-            temperature=request.temperature,
-            exaggeration=request.exaggeration,
-            cfg_weight=request.cfg_weight,
-            top_p=request.top_p,
-            top_k=request.top_k,
-            seed=request.seed,
-        )
-        audio_segments.append(audio)
+        try:
+            audio, sr = provider.generate(
+                text=chunk,
+                voice_audio_path=voice_path,
+                voice_audio_text=voice_text,
+                **gen_kwargs
+            )
+            audio_segments.append(audio)
+            sample_rate = sr
+        except ImportError as e:
+            # Missing package - provide helpful error message
+            from tts_providers.registry import get_missing_dependencies
+            deps = get_missing_dependencies(provider_id)
+            if deps.get("error_message"):
+                raise HTTPException(500, f"Generation failed: {deps['error_message']}")
+            raise HTTPException(500, f"Generation failed: {e}")
+        except Exception as e:
+            error_msg = str(e)
+            # Check for common import-related errors in the message
+            if "not installed" in error_msg.lower() or "no module" in error_msg.lower():
+                from tts_providers.registry import get_missing_dependencies
+                deps = get_missing_dependencies(provider_id)
+                if deps.get("error_message"):
+                    raise HTTPException(500, f"Generation failed: {deps['error_message']}")
+            raise HTTPException(500, f"Generation failed: {e}")
 
     # Concatenate segments
-    final_audio = concatenate_audio(audio_segments, sample_rate=service.SAMPLE_RATE)
+    final_audio = concatenate_audio(audio_segments, sample_rate=sample_rate)
 
-    # Apply speed change if needed
-    if request.speed != 1.0:
-        final_audio = change_speed(final_audio, service.SAMPLE_RATE, request.speed)
+    # Apply speed change if needed (for providers that don't handle speed internally)
+    # API providers and some local providers handle speed in their own API
+    providers_with_internal_speed = [
+        "f5-tts", "kokoro", "openai-tts", "elevenlabs", "fishaudio",
+        "cartesia", "playht", "siliconflow", "minimax", "zyphra", "narilabs"
+    ]
+    if request.speed != 1.0 and provider_id not in providers_with_internal_speed:
+        final_audio = change_speed(final_audio, sample_rate, request.speed)
 
     # Save output
     output_id = str(uuid.uuid4())[:8]
     output_path = OUTPUT_DIR / f"{output_id}.wav"
-    service.save_audio(final_audio, str(output_path), service.SAMPLE_RATE)
+
+    # Use torchaudio to save
+    import torchaudio
+    import torch as torch_module
+    audio_tensor = torch_module.from_numpy(final_audio).unsqueeze(0)
+    torchaudio.save(str(output_path), audio_tensor, sample_rate)
 
     # Convert format if needed
     if request.output_format != "wav":
@@ -1286,9 +1823,11 @@ async def generate_audio(request: GenerateRequest):
         "id": output_id,
         "text": request.text[:500],  # Truncate long texts
         "text_full": request.text,
+        "provider": provider_id,
         "model": request.model,
         "language": request.language,
         "voice_id": request.voice_id,
+        "preset_voice_id": request.preset_voice_id,
         "temperature": request.temperature,
         "exaggeration": request.exaggeration,
         "cfg_weight": request.cfg_weight,
@@ -1298,8 +1837,9 @@ async def generate_audio(request: GenerateRequest):
         "output_url": f"/output/{output_path.name}",
         "created_at": datetime.now().isoformat(),
         "chunks_processed": len(chunks),
+        "billing": billing_info,
     }
-    save_history_entry(history_entry)
+    save_history_entry("tts", history_entry)
 
     return {
         "success": True,
@@ -1312,7 +1852,7 @@ async def generate_audio(request: GenerateRequest):
 @app.post("/api/generate-preview")
 async def generate_preview(request: GenerateRequest):
     """Generate preview (first chunk only) for quick testing"""
-    service = get_tts_service()
+    service = get_tts_service(request.device)
 
     # Get voice reference path
     voice_path = None
@@ -1329,6 +1869,9 @@ async def generate_preview(request: GenerateRequest):
     chunks = chunk_text(request.text, max_chars=250)
     first_chunk = chunks[0] if chunks else request.text[:250]
 
+    # fast_mode disables CFG for ~50% faster generation
+    effective_cfg = 0.0 if request.fast_mode else request.cfg_weight
+
     audio, sr = service.generate(
         text=first_chunk,
         model_type=request.model,
@@ -1336,7 +1879,7 @@ async def generate_preview(request: GenerateRequest):
         audio_prompt_path=voice_path,
         temperature=request.temperature,
         exaggeration=request.exaggeration,
-        cfg_weight=request.cfg_weight,
+        cfg_weight=effective_cfg,
         seed=request.seed,
     )
 
@@ -1415,11 +1958,42 @@ async def generate_book(request: GenerateBookRequest, background_tasks: Backgrou
 
 async def generate_book_task(job_id: str, request: GenerateBookRequest):
     """Background task for audiobook generation"""
-    service = get_tts_service()
+    from tts_providers import get_provider
+    from tts_providers.registry import list_providers
+
+    provider_id = request.provider or "chatterbox"
+    if provider_id not in list_providers():
+        print(f"[Audiobook] Provider {provider_id} not available, falling back to chatterbox")
+        provider_id = "chatterbox"
+
+    try:
+        provider = get_provider(provider_id, device=request.device)
+    except Exception as exc:
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["error"] = f"Failed to initialize TTS provider: {exc}"
+        return
+
     jobs[job_id]["status"] = "processing"
+
+    async def check_job_control() -> bool:
+        if job_id in book_cancelled_jobs:
+            jobs[job_id]["status"] = "cancelled"
+            jobs[job_id]["error"] = "Cancelled by user"
+            return False
+        while job_id in book_paused_jobs:
+            jobs[job_id]["status"] = "paused"
+            await asyncio.sleep(0.5)
+            if job_id in book_cancelled_jobs:
+                jobs[job_id]["status"] = "cancelled"
+                jobs[job_id]["error"] = "Cancelled by user"
+                return False
+        if jobs[job_id].get("status") == "paused":
+            jobs[job_id]["status"] = "processing"
+        return True
 
     # Get voice reference path
     voice_path = None
+    voice_text = None
     if request.voice_id:
         metadata_file = VOICES_DIR / "metadata.json"
         if metadata_file.exists():
@@ -1428,9 +2002,125 @@ async def generate_book_task(job_id: str, request: GenerateBookRequest):
             voice = next((v for v in voices if v["id"] == request.voice_id), None)
             if voice:
                 voice_path = str(VOICES_DIR / voice["filename"])
+                voice_text = voice.get("transcription")
+
+    # fast_mode disables CFG for ~50% faster generation
+    effective_cfg = 0.0 if request.fast_mode else request.cfg_weight
 
     try:
+        gen_kwargs = {
+            "language": request.language,
+            "speed": request.speed,
+            "seed": request.seed,
+        }
+
+        if provider_id == "chatterbox":
+            gen_kwargs.update({
+                "model": request.model,
+                "temperature": request.temperature,
+                "exaggeration": request.exaggeration,
+                "cfg_weight": effective_cfg,
+                "top_p": request.top_p,
+                "top_k": request.top_k,
+            })
+        elif provider_id == "f5-tts":
+            gen_kwargs.update({
+                "model": request.model if request.model != "multilingual" else None,
+                "nfe_step": request.nfe_step,
+            })
+        elif provider_id == "orpheus":
+            gen_kwargs.update({
+                "model": request.model if request.model not in ["multilingual", "original", "turbo"] else None,
+                "temperature": request.temperature,
+                "top_p": request.top_p,
+            })
+        elif provider_id == "kokoro":
+            gen_kwargs.update({
+                "voice_id": request.preset_voice_id,
+            })
+        elif provider_id == "zonos":
+            gen_kwargs.update({
+                "model": request.model if request.model not in ["multilingual", "original"] else None,
+            })
+        elif provider_id == "vibevoice":
+            gen_kwargs.update({
+                "model": request.model if request.model not in ["multilingual", "original"] else None,
+                "temperature": request.temperature,
+            })
+        elif provider_id == "voxcpm":
+            gen_kwargs.update({
+                "model": request.model if request.model not in ["multilingual", "original"] else None,
+                "temperature": request.temperature,
+                "top_p": request.top_p,
+            })
+        elif provider_id == "dia":
+            gen_kwargs.update({
+                "model": request.model if request.model not in ["multilingual", "original"] else None,
+                "voice_id": request.preset_voice_id,
+            })
+        elif provider_id == "openvoice":
+            gen_kwargs.update({
+                "model": request.model if request.model not in ["multilingual", "original"] else None,
+            })
+        elif provider_id == "fish-speech":
+            gen_kwargs.update({
+                "model": request.model if request.model not in ["multilingual", "original"] else None,
+                "temperature": request.temperature,
+                "top_p": request.top_p,
+            })
+        # API Providers
+        elif provider_id == "openai-tts":
+            gen_kwargs.update({
+                "model": request.model or "tts-1",
+                "voice_id": request.preset_voice_id or "alloy",
+            })
+        elif provider_id == "elevenlabs":
+            gen_kwargs.update({
+                "model": request.model or "eleven_multilingual_v2",
+                "voice_id": request.preset_voice_id,
+            })
+        elif provider_id == "fishaudio":
+            gen_kwargs.update({
+                "model": request.model or "default",
+                "voice_id": request.preset_voice_id,
+            })
+        elif provider_id == "cartesia":
+            gen_kwargs.update({
+                "model": request.model or "sonic-2",
+                "voice_id": request.preset_voice_id,
+            })
+        elif provider_id == "playht":
+            gen_kwargs.update({
+                "model": request.model or "PlayHT2.0-turbo",
+                "voice_id": request.preset_voice_id,
+            })
+        elif provider_id == "siliconflow":
+            gen_kwargs.update({
+                "model": request.model or "CosyVoice-300M-SFT",
+                "voice_id": request.preset_voice_id,
+            })
+        elif provider_id == "minimax":
+            gen_kwargs.update({
+                "model": request.model or "speech-01-turbo",
+                "voice_id": request.preset_voice_id,
+            })
+        elif provider_id == "zyphra":
+            gen_kwargs.update({
+                "model": request.model or "zonos-v1",
+                "voice_id": request.preset_voice_id,
+            })
+        elif provider_id == "narilabs":
+            gen_kwargs.update({
+                "model": request.model or "dia-1.6b",
+                "voice_id": request.preset_voice_id,
+            })
+
+        if request.extra_params:
+            gen_kwargs.update(request.extra_params)
+
         for i, chapter in enumerate(request.chapters):
+            if not await check_job_control():
+                return
             jobs[job_id]["current_chapter"] = i + 1
 
             # Chunk the chapter content
@@ -1438,17 +2128,18 @@ async def generate_book_task(job_id: str, request: GenerateBookRequest):
 
             # Generate audio for each chunk
             audio_segments = []
+            sample_rate = 24000
             for j, chunk in enumerate(chunks):
-                audio, sr = service.generate(
+                if not await check_job_control():
+                    return
+                audio, sr = provider.generate(
                     text=chunk,
-                    model_type=request.model,
-                    language_id=request.language,
-                    audio_prompt_path=voice_path,
-                    temperature=request.temperature,
-                    exaggeration=request.exaggeration,
-                    cfg_weight=request.cfg_weight,
+                    voice_audio_path=voice_path,
+                    voice_audio_text=voice_text,
+                    **gen_kwargs,
                 )
                 audio_segments.append(audio)
+                sample_rate = sr
 
                 # Update progress
                 chunk_progress = (j + 1) / len(chunks)
@@ -1456,16 +2147,23 @@ async def generate_book_task(job_id: str, request: GenerateBookRequest):
                 jobs[job_id]["progress"] = int((chapter_progress + chunk_progress / len(request.chapters)) * 100)
 
             # Concatenate chapter audio
-            chapter_audio = concatenate_audio(audio_segments, sample_rate=service.SAMPLE_RATE)
+            chapter_audio = concatenate_audio(audio_segments, sample_rate=sample_rate)
 
             # Apply speed change if needed
-            if request.speed != 1.0:
-                chapter_audio = change_speed(chapter_audio, service.SAMPLE_RATE, request.speed)
+            providers_with_internal_speed = [
+                "f5-tts", "kokoro", "openai-tts", "elevenlabs", "fishaudio",
+                "cartesia", "playht", "siliconflow", "minimax", "zyphra", "narilabs"
+            ]
+            if request.speed != 1.0 and provider_id not in providers_with_internal_speed:
+                chapter_audio = change_speed(chapter_audio, sample_rate, request.speed)
 
             # Save chapter
             chapter_filename = f"chapter_{chapter['number']:02d}_{job_id}.wav"
             chapter_path = OUTPUT_DIR / chapter_filename
-            service.save_audio(chapter_audio, str(chapter_path), service.SAMPLE_RATE)
+            import torchaudio
+            import torch as torch_module
+            audio_tensor = torch_module.from_numpy(chapter_audio).unsqueeze(0)
+            torchaudio.save(str(chapter_path), audio_tensor, sample_rate)
 
             # Convert format if needed
             if request.output_format != "wav":
@@ -1499,6 +2197,39 @@ async def get_job_status(job_id: str):
         raise HTTPException(404, "Job not found")
 
     return jobs[job_id]
+
+
+@app.post("/api/generate-book/{job_id}/cancel")
+async def cancel_book_job(job_id: str):
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    book_cancelled_jobs.add(job_id)
+    jobs[job_id]["status"] = "cancelled"
+    jobs[job_id]["error"] = "Cancelled by user"
+    return {"job_id": job_id, "status": "cancelled"}
+
+
+@app.post("/api/generate-book/{job_id}/pause")
+async def pause_book_job(job_id: str):
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    if job_id in book_cancelled_jobs:
+        raise HTTPException(400, "Job already cancelled")
+    book_paused_jobs.add(job_id)
+    jobs[job_id]["status"] = "paused"
+    return {"job_id": job_id, "status": "paused"}
+
+
+@app.post("/api/generate-book/{job_id}/resume")
+async def resume_book_job(job_id: str):
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    if job_id in book_cancelled_jobs:
+        raise HTTPException(400, "Job already cancelled")
+    book_paused_jobs.discard(job_id)
+    if jobs[job_id].get("status") == "paused":
+        jobs[job_id]["status"] = "processing"
+    return {"job_id": job_id, "status": jobs[job_id]["status"]}
 
 
 @app.get("/api/estimate")
@@ -1550,7 +2281,8 @@ async def stt_stop(
     try:
         raw_text, meta = stt_service.transcribe(temp_path, language=language, prompt=prompt)
     except Exception as exc:
-        raise HTTPException(500, f"STT transcription failed: {exc}") from exc
+        detail = f"STT transcription failed: {exc}"
+        raise HTTPException(400, detail) from exc
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -1564,6 +2296,18 @@ async def stt_stop(
     formatted_text = formatter.format_text(raw_text, list_dictionary_entries(), list_snippet_entries())
 
     stt_sessions.pop(session_id, None)
+
+    history_entry = {
+        "id": session_id,
+        "text": formatted_text[:500],
+        "text_full": formatted_text,
+        "raw_text": raw_text,
+        "language": language,
+        "provider": meta.get("provider") if isinstance(meta, dict) else None,
+        "meta": meta,
+        "created_at": datetime.datetime.now().isoformat(),
+    }
+    save_history_entry("stt", history_entry)
 
     return {
         "session_id": session_id,
@@ -1601,7 +2345,8 @@ async def stt_partial(
                 "partial_text": stt_sessions[session_id].get("partial_text", ""),
                 "meta": {"error": message},
             }
-        raise HTTPException(500, f"STT partial failed: {exc}") from exc
+        detail = f"STT partial failed: {exc}"
+        raise HTTPException(400, detail) from exc
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -1612,11 +2357,53 @@ async def stt_partial(
         stt_sessions[session_id]["partial_text"] = combined
     else:
         combined = stt_sessions[session_id].get("partial_text", "")
+    if isinstance(meta, dict):
+        stt_sessions[session_id]["meta"] = meta
 
     return {
         "session_id": session_id,
         "text": raw_text.strip(),
         "partial_text": combined,
+        "meta": meta,
+    }
+
+
+@app.post("/api/stt/finalize")
+async def stt_finalize(session_id: str = Form(...)):
+    if session_id not in stt_sessions:
+        raise HTTPException(404, "STT session not found")
+
+    session = stt_sessions[session_id]
+    raw_text = (session.get("partial_text") or "").strip()
+    meta = session.get("meta") if isinstance(session.get("meta"), dict) else {}
+    language = session.get("language", "auto")
+
+    stt_cfg = settings_service.settings.stt
+    formatter = SmartFormatter(
+        enable_punctuation=stt_cfg.auto_punctuation or stt_cfg.smart_formatting,
+        enable_backtrack=stt_cfg.backtrack,
+        enable_fillers=stt_cfg.filler_removal,
+    )
+    formatted_text = formatter.format_text(raw_text, list_dictionary_entries(), list_snippet_entries()) if raw_text else ""
+
+    stt_sessions.pop(session_id, None)
+
+    history_entry = {
+        "id": session_id,
+        "text": formatted_text[:500],
+        "text_full": formatted_text,
+        "raw_text": raw_text,
+        "language": language,
+        "provider": meta.get("provider") if isinstance(meta, dict) else None,
+        "meta": meta,
+        "created_at": datetime.datetime.now().isoformat(),
+    }
+    save_history_entry("stt", history_entry)
+
+    return {
+        "session_id": session_id,
+        "text": formatted_text,
+        "raw_text": raw_text,
         "meta": meta,
     }
 
@@ -1680,16 +2467,34 @@ async def snippets_delete(entry_id: str):
 async def reader_speak(request: ReaderRequest):
     reader = get_reader_service()
     output_id = str(uuid.uuid4())[:8]
-    output_path = TEMP_DIR / f"reader_{output_id}.wav"
-    reader.synthesize_to_file(
-        text=request.text,
-        output_path=output_path,
-        language=request.language,
-        voice=request.voice,
-        speed=request.speed
-    )
+    output_path = OUTPUT_DIR / f"reader_{output_id}.wav"
+    try:
+        reader.synthesize_to_file(
+            text=request.text,
+            output_path=output_path,
+            language=request.language,
+            voice=request.voice,
+            speed=request.speed,
+            fast_mode=request.fast_mode,
+            device=request.device,
+        )
+    except Exception as exc:
+        detail = str(exc) or "Reader synthesis failed"
+        raise HTTPException(400, detail) from exc
+    history_entry = {
+        "id": output_id,
+        "text": request.text[:500],
+        "text_full": request.text,
+        "language": request.language,
+        "voice": request.voice,
+        "speed": request.speed,
+        "filename": output_path.name,
+        "output_url": f"/output/{output_path.name}",
+        "created_at": datetime.datetime.now().isoformat(),
+    }
+    save_history_entry("reader", history_entry)
     return {
-        "output_url": f"/temp/{output_path.name}",
+        "output_url": f"/output/{output_path.name}",
         "filename": output_path.name,
     }
 
@@ -1701,7 +2506,22 @@ async def reader_speak(request: ReaderRequest):
 @app.post("/api/ai-edit")
 async def ai_edit(request: AIEditRequest):
     service = get_ai_edit_service()
-    edited_text, meta = service.edit(request.text, request.command, provider=request.provider)
+    try:
+        edited_text, meta = service.edit(request.text, request.command, provider=request.provider)
+    except Exception as exc:
+        detail = str(exc) or "AI edit failed"
+        raise HTTPException(400, detail) from exc
+    history_entry = {
+        "id": str(uuid.uuid4())[:8],
+        "text": edited_text[:500],
+        "text_full": edited_text,
+        "source_text": request.text,
+        "command": request.command,
+        "provider": meta.get("provider") if isinstance(meta, dict) else None,
+        "meta": meta,
+        "created_at": datetime.datetime.now().isoformat(),
+    }
+    save_history_entry("ai_edit", history_entry)
     return {"text": edited_text, "meta": meta}
 
 
@@ -1712,12 +2532,28 @@ async def ai_edit(request: AIEditRequest):
 @app.post("/api/translate")
 async def translate_text(request: TranslateRequest):
     service = get_translation_service()
-    translated, meta = service.translate(
-        request.text,
-        source_lang=request.source_lang,
-        target_lang=request.target_lang,
-        provider=request.provider
-    )
+    try:
+        translated, meta = service.translate(
+            request.text,
+            source_lang=request.source_lang,
+            target_lang=request.target_lang,
+            provider=request.provider
+        )
+    except Exception as exc:
+        detail = str(exc) or "Translation failed"
+        raise HTTPException(400, detail) from exc
+    history_entry = {
+        "id": str(uuid.uuid4())[:8],
+        "text": translated[:500],
+        "text_full": translated,
+        "source_text": request.text,
+        "source_lang": request.source_lang,
+        "target_lang": request.target_lang,
+        "provider": meta.get("provider") if isinstance(meta, dict) else None,
+        "meta": meta,
+        "created_at": datetime.datetime.now().isoformat(),
+    }
+    save_history_entry("translation", history_entry)
     return {"text": translated, "meta": meta}
 
 
@@ -1759,6 +2595,20 @@ class TranscriptionPathRequest(BaseModel):
     engine: str = "fast"  # "fast" (faster-whisper) or "accurate" (whisperx)
 
 
+class TranscriptionLinkRequest(BaseModel):
+    url: str
+    filename: Optional[str] = None
+    job_id: Optional[str] = None  # Client can provide job_id (for Electron)
+    language: str = "auto"
+    enable_diarization: bool = True
+    diarization_mode: str = "auto"  # auto | pyannote | basic
+    min_speakers: int = 1
+    max_speakers: int = 10
+    whisper_model: str = "base"
+    enable_ai_cleanup: bool = False
+    engine: str = "fast"  # "fast" (faster-whisper) or "accurate" (whisperx)
+
+
 def _save_transcription_job(job_id: str, job_data: dict):
     """Save transcription job to disk for persistence."""
     job_path = TRANSCRIPTIONS_DIR / f"{job_id}.json"
@@ -1773,6 +2623,52 @@ def _load_transcription_job(job_id: str) -> Optional[dict]:
         with open(job_path, "r", encoding="utf-8") as f:
             return json.load(f)
     return None
+
+
+def _parse_iso_timestamp(value: Optional[str]) -> Optional[datetime.datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value)
+    except Exception:
+        return None
+
+
+def _start_job_timer(job_id: str) -> None:
+    job = transcription_jobs.get(job_id)
+    if not job:
+        return
+    now_iso = datetime.datetime.now().isoformat()
+    if not job.get("started_at"):
+        job["started_at"] = now_iso
+    if job.get("elapsed_seconds") is None:
+        job["elapsed_seconds"] = 0.0
+    job["active_started_at"] = now_iso
+
+
+def _tick_job_elapsed(job_id: str) -> None:
+    job = transcription_jobs.get(job_id)
+    if not job:
+        return
+    active = job.get("active_started_at")
+    started = _parse_iso_timestamp(active)
+    if not started:
+        return
+    now = datetime.datetime.now()
+    delta = (now - started).total_seconds()
+    if delta < 0:
+        return
+    elapsed = float(job.get("elapsed_seconds") or 0.0)
+    job["elapsed_seconds"] = round(elapsed + delta, 1)
+    job["active_started_at"] = now.isoformat()
+
+
+def _stop_job_timer(job_id: str) -> None:
+    job = transcription_jobs.get(job_id)
+    if not job:
+        return
+    _tick_job_elapsed(job_id)
+    job["active_started_at"] = None
 
 
 def _stage_transcription_upload(source_path: Path, job_id: str) -> Path:
@@ -1829,6 +2725,7 @@ async def transcription_task(
     def update_progress(pct: float, msg: str, segments: list = None):
         """Update progress, check cancellation, optionally save segments for live preview."""
         check_cancelled()
+        _tick_job_elapsed(job_id)
         # Use float with 1 decimal for granular progress (like Windows file copy)
         transcription_jobs[job_id]["progress"] = round(pct, 1)
         transcription_jobs[job_id]["current_step"] = msg
@@ -1840,6 +2737,7 @@ async def transcription_task(
         _save_transcription_job(job_id, transcription_jobs[job_id])
 
     try:
+        _start_job_timer(job_id)
         # Extract audio if video
         update_progress(2, "Checking file format...")
 
@@ -1958,6 +2856,7 @@ async def transcription_task(
             }
 
         # Transcribe
+        transcription_jobs[job_id]["status"] = "transcribing"
         update_progress(10, "Starting transcription...")
         normalized_mode = (diarization_mode or "auto").strip().lower()
         if normalized_mode not in ("auto", "pyannote", "basic"):
@@ -2044,6 +2943,8 @@ async def transcription_task(
 
             # Diarization (also run in thread pool to avoid blocking)
             if enable_diarization and len(segments) > 1:
+                # Update status to diarizing so frontend shows correct state
+                transcription_jobs[job_id]["status"] = "diarizing"
                 if normalized_mode == "pyannote":
                     update_progress(82, "Identifying speakers (AI)...")
                 elif normalized_mode == "basic":
@@ -2194,6 +3095,9 @@ async def transcription_task(
         _save_transcription_job(job_id, transcription_jobs[job_id])
 
     finally:
+        if job_id in transcription_jobs:
+            _stop_job_timer(job_id)
+            _save_transcription_job(job_id, transcription_jobs[job_id])
         # Clean up cancellation tracking
         cancelled_jobs.discard(job_id)
         # Clean up temp audio if extracted from video
@@ -2202,6 +3106,100 @@ async def transcription_task(
                 audio_path.unlink()
             except Exception:
                 pass
+
+
+async def import_link_task(
+    job_id: str,
+    payload: TranscriptionLinkRequest,
+):
+    def _update_download_progress(pct: float, msg: str) -> None:
+        job = transcription_jobs.get(job_id)
+        if not job:
+            return
+        _tick_job_elapsed(job_id)
+        job["status"] = "downloading"
+        scaled = max(0.0, min(2.0, (pct / 100.0) * 2.0))
+        job["progress"] = round(scaled, 1)
+        job["current_step"] = msg
+        _save_transcription_job(job_id, job)
+
+    def _is_cancelled() -> bool:
+        job = transcription_jobs.get(job_id, {})
+        return job_id in cancelled_jobs or job.get("status") == "cancelled"
+
+    try:
+        _start_job_timer(job_id)
+        _update_download_progress(0.0, "Preparing download...")
+        download_info = download_media_from_url(
+            payload.url,
+            TEMP_DIR,
+            job_id,
+            progress_callback=_update_download_progress,
+            should_cancel=_is_cancelled,
+        )
+
+        if _is_cancelled():
+            return
+
+        file_path = Path(download_info["path"])
+        if not file_path.exists():
+            raise RuntimeError("Downloaded media file not found")
+
+        title = sanitize_filename(download_info.get("title"))
+        if title == "imported_media":
+            title = None
+        ext = download_info.get("ext")
+        filename = payload.filename or title or file_path.name
+        if ext and filename and not filename.lower().endswith(f".{ext}"):
+            filename = f"{filename}.{ext}"
+
+        job = transcription_jobs.get(job_id)
+        if not job:
+            return
+        job.update(
+            {
+                "status": "pending",
+                "progress": 2,
+                "current_step": "Download complete",
+                "filename": filename,
+                "file_size_bytes": file_path.stat().st_size,
+                "file_path": str(file_path),
+                "source_url": download_info.get("source_url") or payload.url,
+            }
+        )
+        _save_transcription_job(job_id, job)
+
+        await transcription_task(
+            job_id,
+            file_path,
+            payload.language,
+            payload.enable_diarization,
+            payload.diarization_mode,
+            payload.min_speakers,
+            payload.max_speakers,
+            payload.whisper_model,
+            payload.enable_ai_cleanup,
+            payload.engine,
+        )
+    except DownloadCancelled:
+        job = transcription_jobs.get(job_id)
+        if job and job.get("status") != "cancelled":
+            job["status"] = "cancelled"
+            job["current_step"] = "Cancelled by user"
+            _save_transcription_job(job_id, job)
+    except Exception as exc:
+        job = transcription_jobs.get(job_id)
+        if not job:
+            return
+        job["status"] = "error"
+        job["error"] = str(exc)
+        job["current_step"] = "Failed to import media"
+        _save_transcription_job(job_id, job)
+
+    finally:
+        if job_id in transcription_jobs:
+            _stop_job_timer(job_id)
+            _save_transcription_job(job_id, transcription_jobs[job_id])
 
 
 async def resume_transcription_task(
@@ -2228,6 +3226,7 @@ async def resume_transcription_task(
 
     def update_progress(pct: float, msg: str):
         check_cancelled()
+        _tick_job_elapsed(job_id)
         transcription_jobs[job_id]["progress"] = round(pct, 1)
         transcription_jobs[job_id]["current_step"] = msg
         _save_transcription_job(job_id, transcription_jobs[job_id])
@@ -2235,6 +3234,7 @@ async def resume_transcription_task(
     temp_audio_path = None
 
     try:
+        _start_job_timer(job_id)
         normalized_mode = (diarization_mode or "auto").strip().lower()
         if normalized_mode not in ("auto", "pyannote", "basic"):
             normalized_mode = "auto"
@@ -2480,6 +3480,9 @@ async def resume_transcription_task(
         _save_transcription_job(job_id, transcription_jobs[job_id])
 
     finally:
+        if job_id in transcription_jobs:
+            _stop_job_timer(job_id)
+            _save_transcription_job(job_id, transcription_jobs[job_id])
         cancelled_jobs.discard(job_id)
         # Clean up temp audio
         if temp_audio_path and temp_audio_path.exists():
@@ -2718,6 +3721,8 @@ async def upload_for_transcription_path(
         "processed_duration": 0.0,
         "segments": [],
         "speakers_detected": 0,
+        "elapsed_seconds": 0.0,
+        "active_started_at": None,
         "error": None,
         "created_at": datetime.datetime.now().isoformat(),
         "completed_at": None,
@@ -2756,6 +3761,52 @@ async def upload_for_transcription_path(
         content={"job_id": job_id},
         headers={"Connection": "close"}
     )
+
+
+@app.post("/api/transcribe/import-link")
+async def import_transcription_link(
+    payload: TranscriptionLinkRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+):
+    """Import audio/video from a public URL for transcription."""
+    if not is_http_url(payload.url):
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
+
+    job_id = payload.job_id if payload.job_id else str(uuid.uuid4())[:8]
+    url_label = sanitize_filename(payload.filename) if payload.filename else None
+
+    transcription_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "downloading",
+        "progress": 0,
+        "current_step": "Preparing download...",
+        "total_duration": 0.0,
+        "processed_duration": 0.0,
+        "segments": [],
+        "speakers_detected": 0,
+        "elapsed_seconds": 0.0,
+        "active_started_at": None,
+        "error": None,
+        "created_at": datetime.datetime.now().isoformat(),
+        "completed_at": None,
+        "filename": url_label or "Imported link",
+        "file_size_bytes": 0,
+        "file_path": "",
+        "source_url": payload.url,
+        "language": payload.language,
+        "whisper_model": payload.whisper_model,
+        "enable_diarization": payload.enable_diarization,
+        "diarization_mode": payload.diarization_mode,
+        "enable_ai_cleanup": payload.enable_ai_cleanup,
+        "engine": payload.engine,
+    }
+
+    _save_transcription_job(job_id, transcription_jobs[job_id])
+
+    background_tasks.add_task(import_link_task, job_id, payload)
+
+    return {"job_id": job_id}
 
 
 @app.post("/api/transcribe/upload")
@@ -2804,6 +3855,8 @@ async def upload_for_transcription(
         "processed_duration": 0.0,
         "segments": [],
         "speakers_detected": 0,
+        "elapsed_seconds": 0.0,
+        "active_started_at": None,
         "error": None,
         "created_at": datetime.datetime.now().isoformat(),
         "completed_at": None,
@@ -2871,6 +3924,7 @@ async def cancel_transcription_job(job_id: str):
 
     # Mark as cancelled
     cancelled_jobs.add(job_id)
+    _stop_job_timer(job_id)
     transcription_jobs[job_id]["status"] = "cancelled"
     transcription_jobs[job_id]["current_step"] = "Cancelled by user"
     _save_transcription_job(job_id, transcription_jobs[job_id])
@@ -2891,11 +3945,12 @@ async def pause_transcription_job(job_id: str):
     job = transcription_jobs[job_id]
     status = job.get("status", "")
 
-    if status in ("completed", "error", "cancelled", "paused", "interrupted"):
+    if status in ("completed", "error", "cancelled", "paused", "interrupted", "downloading"):
         return {"paused": False, "reason": f"Job already {status}"}
 
     # Mark as paused (uses same cancellation mechanism internally)
     cancelled_jobs.add(job_id)
+    _stop_job_timer(job_id)
     segments = job.get("segments", [])
     last_time = segments[-1]["end_time"] if segments else 0
 
@@ -3363,18 +4418,23 @@ async def download_model(model_id: str, background_tasks: BackgroundTasks):
     }
 
 
-async def download_model_task(model_id: str, manager):
-    """Background task for model download"""
+def download_model_task(model_id: str, manager):
+    """Background task for model download (sync function for BackgroundTasks)"""
     def progress_callback(progress: float):
-        download_progress[model_id]["progress"] = int(progress)
+        pct = int(progress)
+        download_progress[model_id]["progress"] = pct
+        print(f"[Download] {model_id}: {pct}%")
 
     try:
+        print(f"[Download] Starting download for {model_id}")
         manager.download_model(model_id, progress_callback)
         download_progress[model_id]["status"] = "completed"
         download_progress[model_id]["progress"] = 100
+        print(f"[Download] Completed: {model_id}")
     except Exception as e:
         download_progress[model_id]["status"] = "error"
         download_progress[model_id]["error"] = str(e)
+        print(f"[Download] Error for {model_id}: {e}")
 
 
 @app.get("/api/model-manager/download/{model_id}/progress")
@@ -3425,29 +4485,15 @@ async def get_all_settings():
     return settings_service.get_all()
 
 
-@app.get("/api/settings/{path:path}")
-async def get_setting(path: str):
-    """Get a specific setting by path (e.g., 'providers.tts.selected')"""
-    value = settings_service.get(path)
-    if value is None:
-        raise HTTPException(404, f"Setting not found: {path}")
-    return {"path": path, "value": value}
-
-
-@app.put("/api/settings/{path:path}")
-async def update_setting(path: str, value: dict):
-    """Update a specific setting"""
-    success = settings_service.set(path, value.get("value"))
-    if not success:
-        raise HTTPException(400, f"Could not update setting: {path}")
-    return {"path": path, "value": value.get("value"), "updated": True}
-
-
 @app.post("/api/settings/reset")
 async def reset_settings(section: Optional[str] = None):
     """Reset settings to defaults (optionally just one section)"""
     settings_service.reset_to_defaults(section)
     return {"message": f"Settings reset {'for ' + section if section else 'completely'}"}
+
+
+class SettingUpdate(BaseModel):
+    value: Any
 
 
 # =====================================================
@@ -3457,6 +4503,256 @@ async def reset_settings(section: Optional[str] = None):
 class APIKeyUpdate(BaseModel):
     provider: str
     key: str
+
+
+class ProviderEnsureRequest(BaseModel):
+    model_id: Optional[str] = None
+    auto_install: bool = True
+
+
+def _extract_api_error(resp) -> Optional[str]:
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+
+    detail = None
+    if isinstance(data, dict):
+        for key in ("error", "message", "detail", "msg"):
+            if data.get(key):
+                detail = data.get(key)
+                break
+        if isinstance(detail, dict):
+            detail = detail.get("message") or detail.get("detail") or str(detail)
+        if not detail and data.get("code"):
+            detail = str(data.get("code"))
+
+    if not detail:
+        text = (resp.text or "").strip()
+        if text:
+            detail = text[:200] + ("..." if len(text) > 200 else "")
+
+    if detail:
+        detail = " ".join(str(detail).split())
+    return detail
+
+
+_PROVIDER_ERROR_HINTS = {
+    "openai": "Check that the key was created in the OpenAI dashboard and billing is enabled.",
+    "elevenlabs": "Use the XI API key from ElevenLabs settings.",
+    "claude": "Use a Claude API key from the Anthropic console.",
+    "gemini": "Create the key in Google AI Studio (Gemini API).",
+    "deepseek": "Use a DeepSeek API key from the DeepSeek console.",
+    "moonshot": "Use a Moonshot API key from the Moonshot console.",
+    "minimax": "Use a MiniMax API key from the MiniMax console.",
+    "groq": "Use a Groq API key from the Groq console.",
+    "deepgram": "Use a Deepgram project API key.",
+    "dashscope": "Use a DashScope API key (not Alibaba Cloud AccessKey/Secret).",
+    "fishaudio": "Use an API key from Fish Audio.",
+    "siliconflow": "Use an API key from the SiliconFlow account page.",
+    "assemblyai": "Use an API key from the AssemblyAI dashboard.",
+    "gladia": "Use an API key from the Gladia app.",
+    "deepl": "Ensure you are using the correct DeepL API key (Free vs Pro).",
+    "google": "Enable Cloud Translation API in your Google Cloud project.",
+}
+
+
+def _format_api_error(provider_id: str, resp) -> str:
+    status = resp.status_code
+    detail = _extract_api_error(resp)
+
+    if status == 401:
+        base = "Unauthorized: API key invalid or missing permission."
+    elif status == 403:
+        base = "Forbidden: key lacks access or terms not accepted."
+    elif status == 402:
+        base = "Payment required or quota exhausted."
+    elif status == 429:
+        base = "Rate limit or quota exceeded."
+    elif status == 404:
+        base = "Endpoint not found (provider API may have changed)."
+    elif status >= 500:
+        base = "Provider error (server)."
+    else:
+        base = f"HTTP {status}"
+
+    hint = _PROVIDER_ERROR_HINTS.get(provider_id)
+    if hint and status in (401, 402, 403):
+        base = f"{base} {hint}"
+
+    if detail:
+        return f"{base} ({detail})"
+    return base
+
+
+def _result_from_response(provider_id: str, resp, extra: Optional[dict] = None) -> dict:
+    if resp.status_code == 200:
+        result = {"provider": provider_id, "valid": True}
+        if extra:
+            result.update(extra)
+        return result
+    return {"provider": provider_id, "valid": False, "error": _format_api_error(provider_id, resp)}
+
+
+@app.get("/api/providers/catalog")
+async def list_provider_catalog():
+    """Return the provider catalog for UI descriptions and links."""
+    catalog = get_supported_provider_catalog()
+    providers = sorted(catalog.values(), key=lambda p: p.get("name", p.get("id", "")))
+    return {"providers": providers}
+
+
+@app.get("/api/providers/{service}")
+async def get_service_providers(service: str):
+    """
+    Get available providers for a service type.
+
+    Args:
+        service: One of 'tts', 'stt', 'ai_edit', 'translation'
+
+    Returns:
+        List of providers with availability status
+    """
+    valid_services = ["tts", "stt", "ai_edit", "translation"]
+    if service not in valid_services:
+        raise HTTPException(400, f"Invalid service. Valid options: {valid_services}")
+
+    providers = get_providers_for_service(service)
+    return {"service": service, "providers": providers}
+
+
+@app.get("/api/providers/{service}/available")
+async def get_available_service_providers(service: str):
+    """Get only providers that are ready to use (API key set or model installed)."""
+    valid_services = ["tts", "stt", "ai_edit", "translation"]
+    if service not in valid_services:
+        raise HTTPException(400, f"Invalid service. Valid options: {valid_services}")
+
+    providers = get_available_providers(service)
+    return {"service": service, "providers": providers}
+
+
+@app.get("/api/providers/{service}/options")
+async def get_service_provider_options(service: str):
+    """Get providers formatted for frontend select menu."""
+    valid_services = ["tts", "stt", "ai_edit", "translation"]
+    if service not in valid_services:
+        raise HTTPException(400, f"Invalid service. Valid options: {valid_services}")
+
+    options = get_provider_options_for_frontend(service)
+    return {"service": service, "options": options}
+
+
+# Track provider auto-install status
+provider_install_status: dict[str, dict] = {}
+
+
+def _install_python_packages(packages: list[str]) -> dict:
+    if not packages:
+        return {"success": True, "output": ""}
+
+    from providers.readiness import resolve_pip_package
+
+    pip_packages = []
+    for pkg in packages:
+        pip_packages.append(resolve_pip_package(pkg))
+
+    cmd = [sys.executable, "-m", "pip", "install", *sorted(set(pip_packages))]
+    result = subprocess.run(cmd, capture_output=True, text=True, shell=False)
+    output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
+    return {"success": result.returncode == 0, "output": output.strip()}
+
+
+def _ensure_provider_install_task(task_key: str, packages: list[str], model_id: Optional[str]):
+    provider_install_status[task_key] = {
+        "status": "installing",
+        "packages": packages,
+        "model_id": model_id,
+        "error": None,
+    }
+    try:
+        install_result = _install_python_packages(packages)
+        if not install_result["success"]:
+            provider_install_status[task_key]["status"] = "error"
+            provider_install_status[task_key]["error"] = install_result["output"] or "Package install failed"
+            return
+
+        if model_id:
+            from model_manager import get_model_manager
+            manager = get_model_manager()
+            download_progress.setdefault(model_id, {"status": "downloading", "progress": 0, "error": None})
+            download_model_task(model_id, manager)
+
+        provider_install_status[task_key]["status"] = "completed"
+    except Exception as exc:
+        provider_install_status[task_key]["status"] = "error"
+        provider_install_status[task_key]["error"] = str(exc)
+
+
+@app.post("/api/providers/{service}/{provider_id}/ensure")
+async def ensure_provider_ready(
+    service: str,
+    provider_id: str,
+    request: ProviderEnsureRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Ensure provider dependencies/models are installed (auto-install when possible)."""
+    valid_services = ["tts", "stt", "ai_edit", "translation"]
+    if service not in valid_services:
+        raise HTTPException(400, f"Invalid service. Valid options: {valid_services}")
+
+    if service == "tts":
+        from tts_providers.registry import get_provider_info
+        provider_info = get_provider_info(provider_id)
+        if not provider_info:
+            raise HTTPException(404, f"TTS provider not found: {provider_id}")
+
+        api_provider_ids = {
+            "openai-tts", "elevenlabs", "fishaudio", "cartesia", "playht",
+            "siliconflow", "minimax", "zyphra", "narilabs"
+        }
+        provider = {"id": provider_id, "type": "api" if provider_id in api_provider_ids else "local"}
+    else:
+        provider = next((p for p in get_providers_for_service(service) if p.get("id") == provider_id), None)
+        if not provider:
+            raise HTTPException(404, f"Provider not found: {provider_id}")
+
+    from providers.readiness import get_provider_readiness
+    readiness = get_provider_readiness(service, provider, preferred_model_id=request.model_id)
+    if readiness["ready"] or not request.auto_install:
+        return {"ready": readiness["ready"], "readiness": readiness}
+
+    task_key = f"{service}:{provider_id}"
+    if provider_install_status.get(task_key, {}).get("status") == "installing":
+        return {"ready": False, "readiness": readiness, "install_status": "installing"}
+
+    packages = readiness.get("missing_packages") or []
+    model_id = readiness.get("install_model_id") if readiness.get("missing_model") else None
+    if packages or model_id:
+        background_tasks.add_task(_ensure_provider_install_task, task_key, packages, model_id)
+        return {"ready": False, "readiness": readiness, "install_started": True}
+
+    return {"ready": False, "readiness": readiness}
+
+
+@app.get("/api/providers/tts/{provider_id}/usage")
+async def get_provider_tts_usage(provider_id: str):
+    """Return usage/quota info for API-based TTS providers via the legacy /api/providers path."""
+    try:
+        usage = resolve_tts_provider_usage(provider_id)
+    except ProviderUsageError as exc:
+        raise HTTPException(exc.status_code, str(exc))
+
+    if usage is None:
+        raise HTTPException(404, f"Usage data not available for provider: {provider_id}")
+
+    return {"provider": provider_id, "usage": usage}
+
+
+@app.get("/api/providers/all")
+async def get_all_service_providers():
+    """Get all providers for all services."""
+    return get_all_providers()
 
 
 @app.get("/api/settings/api-keys")
@@ -3473,67 +4769,183 @@ async def get_api_keys():
 
 
 @app.put("/api/settings/api-keys/{provider}")
-async def set_api_key(provider: str, data: APIKeyUpdate):
-    """Set API key for a provider"""
-    success = settings_service.set_api_key(provider, data.key)
+async def set_api_key_legacy(provider: str, data: APIKeyUpdate):
+    """Set API key for a provider (legacy endpoint - use POST /api/settings/api-key/{provider} instead)"""
+    provider_id = normalize_provider_id(provider)
+    catalog = get_supported_provider_catalog()
+    if provider_id not in catalog and provider_id != "huggingface":
+        raise HTTPException(400, f"Unknown provider: {provider_id}")
+    success = settings_service.set_api_key(provider_id, data.key)
     if not success:
-        raise HTTPException(400, f"Could not set API key for: {provider}")
-    return {"provider": provider, "updated": True}
+        raise HTTPException(400, f"Could not set API key for: {provider_id}")
+    return {"provider": provider_id, "updated": True}
 
 
 @app.post("/api/settings/api-keys/{provider}/test")
 async def test_api_key(provider: str):
     """Test if an API key is valid"""
-    key = settings_service.get_api_key(provider)
+    provider_id = normalize_provider_id(provider)
+    key = settings_service.get_api_key(provider_id)
     if not key:
-        return {"provider": provider, "valid": False, "error": "No API key configured"}
+        return {"provider": provider_id, "valid": False, "error": "No API key configured"}
 
     # Test the key based on provider
     try:
-        if provider == "openai":
-            import openai
-            client = openai.OpenAI(api_key=key)
-            client.models.list()
-            return {"provider": provider, "valid": True}
+        if provider_id == "openai":
+            import requests
+            resp = requests.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
 
-        elif provider == "elevenlabs":
+        elif provider_id == "elevenlabs":
             import requests
             resp = requests.get(
                 "https://api.elevenlabs.io/v1/user",
                 headers={"xi-api-key": key}
             )
-            if resp.status_code == 200:
-                return {"provider": provider, "valid": True, "user": resp.json().get("first_name")}
-            return {"provider": provider, "valid": False, "error": f"HTTP {resp.status_code}"}
+            return _result_from_response(
+                provider_id,
+                resp,
+                extra={"user": resp.json().get("first_name")} if resp.status_code == 200 else None,
+            )
 
-        elif provider == "gemini":
+        elif provider_id == "gemini":
             import requests
             resp = requests.get(
                 f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
             )
-            return {"provider": provider, "valid": resp.status_code == 200}
+            return _result_from_response(provider_id, resp)
 
-        elif provider == "claude":
-            import anthropic
-            client = anthropic.Anthropic(api_key=key)
-            # Just check if client initializes
-            return {"provider": provider, "valid": True}
+        elif provider_id == "claude":
+            import requests
+            resp = requests.get(
+                "https://api.anthropic.com/v1/models",
+                headers={
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                },
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
 
-        elif provider == "deepl":
+        elif provider_id == "deepl":
             import requests
             resp = requests.get(
                 "https://api-free.deepl.com/v2/usage",
                 headers={"Authorization": f"DeepL-Auth-Key {key}"}
             )
-            return {"provider": provider, "valid": resp.status_code == 200}
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "google":
+            import requests
+            resp = requests.get(
+                "https://translation.googleapis.com/language/translate/v2/languages",
+                params={"key": key, "target": "en"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "deepgram":
+            import requests
+            resp = requests.get(
+                "https://api.deepgram.com/v1/projects",
+                headers={"Authorization": f"Token {key}"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "groq":
+            import requests
+            resp = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "deepseek":
+            import requests
+            resp = requests.get(
+                "https://api.deepseek.com/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "moonshot":
+            import requests
+            resp = requests.get(
+                "https://api.moonshot.ai/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "minimax":
+            import requests
+            base_url = settings_service.get("providers.ai_edit.minimax.base_url", "https://api.minimax.chat")
+            resp = requests.get(
+                f"{base_url.rstrip('/')}/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "assemblyai":
+            import requests
+            resp = requests.get(
+                "https://api.assemblyai.com/v2/me",
+                headers={"authorization": key},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "dashscope":
+            import requests
+            resp = requests.get(
+                "https://dashscope.aliyuncs.com/api/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "fishaudio":
+            import requests
+            resp = requests.get(
+                "https://api.fish.audio/model",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "siliconflow":
+            import requests
+            resp = requests.get(
+                "https://api.siliconflow.cn/v1/audio/voice/list",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
+
+        elif provider_id == "gladia":
+            import requests
+            resp = requests.get(
+                "https://api.gladia.io/v1/history",
+                headers={"x-gladia-key": key},
+                timeout=30
+            )
+            return _result_from_response(provider_id, resp)
 
         else:
-            return {"provider": provider, "valid": False, "error": "Unknown provider"}
+            return {"provider": provider_id, "valid": False, "error": "Unknown or unsupported provider"}
 
     except ImportError as e:
-        return {"provider": provider, "valid": False, "error": f"Missing library: {str(e)}"}
+        return {"provider": provider_id, "valid": False, "error": f"Missing library: {str(e)}"}
     except Exception as e:
-        return {"provider": provider, "valid": False, "error": str(e)}
+        return {"provider": provider_id, "valid": False, "error": str(e)}
 
 
 # =====================================================
@@ -3749,8 +5161,10 @@ async def get_comprehensive_model_status():
         "local_models": {
             "tts": [],
             "stt": [],
+            "translation": [],
         }
     }
+    result["local_providers"] = []
 
     # === Check Pyannote/HuggingFace ===
     hf_token = _get_hf_token()
@@ -3825,22 +5239,55 @@ async def get_comprehensive_model_status():
         result["diarization"]["action"] = "accept_terms"
 
     # === Check API Providers ===
-    api_providers = [
-        {"id": "openai", "name": "OpenAI", "key_path": "api_keys.openai", "features": ["TTS", "STT", "AI Edit"]},
-        {"id": "elevenlabs", "name": "ElevenLabs", "key_path": "api_keys.elevenlabs", "features": ["TTS"]},
-        {"id": "anthropic", "name": "Anthropic Claude", "key_path": "api_keys.anthropic", "features": ["AI Edit"]},
-        {"id": "deepl", "name": "DeepL", "key_path": "api_keys.deepl", "features": ["Translation"]},
-        {"id": "deepgram", "name": "Deepgram", "key_path": "api_keys.deepgram", "features": ["STT"]},
-    ]
-
-    for provider in api_providers:
-        api_key = settings_service.get(provider["key_path"])
-        result["api_providers"][provider["id"]] = {
-            "name": provider["name"],
+    catalog = get_supported_provider_catalog()
+    for provider_id, provider in catalog.items():
+        if provider.get("type") != "api":
+            continue
+        key_id = normalize_provider_id(provider_id)
+        api_key = settings_service.get_api_key(key_id)
+        result["api_providers"][provider_id] = {
+            "name": provider.get("name", provider_id),
             "configured": bool(api_key),
             "key_preview": f"{api_key[:8]}..." if api_key and len(api_key) > 8 else None,
-            "features": provider["features"],
+            "features": provider.get("features", []),
+            "description": provider.get("description"),
+            "pricing_unit": provider.get("pricing_unit"),
+            "pricing_note": provider.get("pricing_note"),
+            "pricing_url": provider.get("pricing_url"),
+            "docs_url": provider.get("docs_url"),
+            "console_url": provider.get("console_url"),
+            "key_label": provider.get("key_label"),
+            "key_instructions": provider.get("key_instructions"),
+            "supported": provider.get("supported", {}),
         }
+
+    # === Check Local Providers (non-downloadable services like Ollama) ===
+    for service in ["ai_edit", "translation", "tts", "stt"]:
+        for provider in get_providers_for_service(service):
+            if provider.get("type") != "local":
+                continue
+            # Skip providers that are represented as downloadable models
+            if provider.get("requires_model_download"):
+                continue
+            provider_id = provider.get("id")
+            if not provider_id:
+                continue
+            entry = {
+                "id": provider_id,
+                "name": provider.get("name", provider_id),
+                "service": service,
+                "description": provider.get("description"),
+                "is_available": provider.get("is_available", False),
+                "is_installed": provider.get("is_installed", False),
+                "docs_url": provider.get("docs_url"),
+                "models": provider.get("models", []),
+                "default_model": provider.get("default_model"),
+            }
+            if provider_id == "ollama":
+                entry["base_url"] = settings_service.get(
+                    "providers.ai_edit.ollama.base_url", "http://localhost:11434"
+                )
+            result["local_providers"].append(entry)
 
     # === Check Local Models ===
     try:
@@ -3856,6 +5303,8 @@ async def get_comprehensive_model_status():
                 result["local_models"]["tts"].append(model_info)
             elif model.category.value == "stt":
                 result["local_models"]["stt"].append(model_info)
+            elif model.category.value == "translation":
+                result["local_models"]["translation"].append(model_info)
     except Exception as e:
         print(f"[Models Status] Error loading local models: {e}")
 
@@ -3942,17 +5391,17 @@ async def set_api_key(provider: str, request: Request):
     """Set API key for a provider."""
     data = await request.json()
     api_key = data.get("api_key", "").strip()
-
-    valid_providers = ["openai", "elevenlabs", "anthropic", "deepl", "deepgram", "huggingface"]
-    if provider not in valid_providers:
+    provider_id = normalize_provider_id(provider)
+    valid_providers = sorted(list(get_supported_provider_catalog().keys()) + ["huggingface"])
+    if provider_id not in valid_providers:
         raise HTTPException(400, f"Invalid provider. Valid: {valid_providers}")
 
-    key_path = f"api_keys.{provider}"
+    key_path = f"api_keys.{provider_id}"
 
     if api_key:
         settings_service.set(key_path, api_key)
         # For HuggingFace, also reset diarization service
-        if provider == "huggingface":
+        if provider_id == "huggingface":
             diarization = get_diarization_service()
             diarization._pyannote_available = None
             diarization._pyannote_pipeline = None
@@ -3963,18 +5412,37 @@ async def set_api_key(provider: str, request: Request):
         # Clear the key
         settings_service.set(key_path, None)
 
-    return {"provider": provider, "configured": bool(api_key)}
+    return {"provider": provider_id, "configured": bool(api_key)}
 
 
 @app.delete("/api/settings/api-key/{provider}")
 async def delete_api_key(provider: str):
     """Remove API key for a provider."""
-    valid_providers = ["openai", "elevenlabs", "anthropic", "deepl", "deepgram", "huggingface"]
-    if provider not in valid_providers:
+    provider_id = normalize_provider_id(provider)
+    valid_providers = sorted(list(get_supported_provider_catalog().keys()) + ["huggingface"])
+    if provider_id not in valid_providers:
         raise HTTPException(400, f"Invalid provider. Valid: {valid_providers}")
 
-    settings_service.set(f"api_keys.{provider}", None)
-    return {"provider": provider, "removed": True}
+    settings_service.set(f"api_keys.{provider_id}", None)
+    return {"provider": provider_id, "removed": True}
+
+
+@app.get("/api/settings/{path:path}")
+async def get_setting(path: str):
+    """Get a specific setting by path (e.g., 'providers.tts.selected')."""
+    value = settings_service.get(path)
+    if value is None:
+        raise HTTPException(404, f"Setting not found: {path}")
+    return {"path": path, "value": value}
+
+
+@app.put("/api/settings/{path:path}")
+async def update_setting(path: str, data: SettingUpdate):
+    """Update a specific setting by path."""
+    success = settings_service.set(path, data.value)
+    if not success:
+        raise HTTPException(400, f"Could not update setting: {path}")
+    return {"path": path, "value": data.value, "updated": True}
 
 
 # =====================================================
@@ -3997,10 +5465,704 @@ async def complete_onboarding():
     return {"message": "Onboarding completed", "completed": True}
 
 
+# =====================================================
+# MUSIC GENERATION ENDPOINTS
+# =====================================================
+
+class MusicGenerateRequest(BaseModel):
+    lyrics: str = ""
+    style_prompt: str
+    duration_seconds: int = 180
+    provider: str = "diffrhythm"
+    model: Optional[str] = None
+    guidance_scale: float = 3.5
+    num_inference_steps: int = 50
+    seed: int = -1
+
+
+@app.get("/api/music/providers")
+async def get_music_providers():
+    """Get list of available music generation providers"""
+    try:
+        from music_service import get_music_service
+        service = get_music_service()
+        return {"providers": service.get_providers()}
+    except ImportError:
+        return {"providers": [], "error": "Music module not available"}
+
+
+@app.post("/api/music/generate")
+async def generate_music(request: MusicGenerateRequest):
+    """Start a music generation job"""
+    from music_service import get_music_service
+
+    service = get_music_service()
+    job_id = service.create_job(
+        lyrics=request.lyrics,
+        style_prompt=request.style_prompt,
+        duration_seconds=request.duration_seconds,
+        provider=request.provider,
+        model=request.model,
+        guidance_scale=request.guidance_scale,
+        num_inference_steps=request.num_inference_steps,
+        seed=request.seed,
+    )
+
+    return {"job_id": job_id, "status": "pending"}
+
+
+@app.get("/api/music/jobs/{job_id}")
+async def get_music_job(job_id: str):
+    """Get status of a music generation job"""
+    from music_service import get_music_service
+
+    service = get_music_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return job
+
+
+@app.get("/api/music/jobs/{job_id}/download")
+async def download_music(job_id: str):
+    """Download generated music file"""
+    from music_service import get_music_service
+
+    service = get_music_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not completed")
+
+    if not job["output_path"]:
+        raise HTTPException(status_code=404, detail="Output file not found")
+
+    output_path = Path(job["output_path"])
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="Output file not found")
+
+    return FileResponse(
+        str(output_path),
+        media_type="audio/wav",
+        filename=output_path.name
+    )
+
+
+@app.post("/api/music/jobs/{job_id}/cancel")
+async def cancel_music_job(job_id: str):
+    """Cancel a music generation job"""
+    from music_service import get_music_service
+
+    service = get_music_service()
+    success = service.cancel_job(job_id)
+
+    if not success:
+        raise HTTPException(status_code=400, detail="Could not cancel job")
+
+    return {"cancelled": True}
+
+
+@app.get("/api/music/jobs")
+async def list_music_jobs(limit: int = 20):
+    """List recent music generation jobs"""
+    from music_service import get_music_service
+
+    service = get_music_service()
+    return {"jobs": service.list_jobs(limit=limit)}
+
+
+# =====================================================
+# SOUND EFFECTS (SFX) ENDPOINTS
+# =====================================================
+
+class SFXGenerateRequest(BaseModel):
+    video_path: str
+    prompt: str = ""
+    provider: str = "mmaudio"
+    model: Optional[str] = None
+    merge_with_video: bool = True
+    mix_original: bool = False
+    original_volume: float = 0.3
+    num_inference_steps: int = 25
+    guidance_scale: float = 4.5
+    seed: int = -1
+
+
+@app.get("/api/sfx/providers")
+async def get_sfx_providers():
+    """Get list of available SFX providers"""
+    try:
+        from sfx_service import get_sfx_service
+        service = get_sfx_service()
+        return {"providers": service.get_providers()}
+    except ImportError:
+        return {"providers": [], "error": "SFX module not available"}
+
+
+@app.post("/api/sfx/generate")
+async def generate_sfx(request: SFXGenerateRequest):
+    """Start a sound effects generation job"""
+    from sfx_service import get_sfx_service
+
+    service = get_sfx_service()
+    try:
+        job_id = service.create_job(
+            video_path=request.video_path,
+            prompt=request.prompt,
+            provider=request.provider,
+            model=request.model,
+            merge_with_video=request.merge_with_video,
+            mix_original=request.mix_original,
+            original_volume=request.original_volume,
+            num_inference_steps=request.num_inference_steps,
+            guidance_scale=request.guidance_scale,
+            seed=request.seed,
+        )
+        return {"job_id": job_id, "status": "pending"}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/sfx/upload")
+async def upload_sfx_video(file: UploadFile = File(...)):
+    """Upload a video file for SFX generation"""
+    from sfx_service import get_sfx_service
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    service = get_sfx_service()
+    file_path = service.upload_video(content, file.filename)
+
+    return {"file_path": file_path, "filename": file.filename}
+
+
+@app.get("/api/sfx/jobs/{job_id}")
+async def get_sfx_job(job_id: str):
+    """Get status of a SFX generation job"""
+    from sfx_service import get_sfx_service
+
+    service = get_sfx_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return job
+
+
+@app.get("/api/sfx/jobs/{job_id}/download/audio")
+async def download_sfx_audio(job_id: str):
+    """Download generated audio file"""
+    from sfx_service import get_sfx_service
+
+    service = get_sfx_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not completed")
+
+    if not job["output_audio_path"]:
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    output_path = Path(job["output_audio_path"])
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return FileResponse(
+        str(output_path),
+        media_type="audio/wav",
+        filename=output_path.name
+    )
+
+
+@app.get("/api/sfx/jobs/{job_id}/download/video")
+async def download_sfx_video(job_id: str):
+    """Download video with generated audio"""
+    from sfx_service import get_sfx_service
+
+    service = get_sfx_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not completed")
+
+    if not job["output_video_path"]:
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    output_path = Path(job["output_video_path"])
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    return FileResponse(
+        str(output_path),
+        media_type="video/mp4",
+        filename=output_path.name
+    )
+
+
+@app.post("/api/sfx/jobs/{job_id}/cancel")
+async def cancel_sfx_job(job_id: str):
+    """Cancel a SFX generation job"""
+    from sfx_service import get_sfx_service
+
+    service = get_sfx_service()
+    success = service.cancel_job(job_id)
+
+    if not success:
+        raise HTTPException(status_code=400, detail="Could not cancel job")
+
+    return {"cancelled": True}
+
+
+@app.get("/api/sfx/jobs")
+async def list_sfx_jobs(limit: int = 20):
+    """List recent SFX generation jobs"""
+    from sfx_service import get_sfx_service
+
+    service = get_sfx_service()
+    return {"jobs": service.list_jobs(limit=limit)}
+
+
+# =====================================================
+# STEM SEPARATION (Demucs)
+# =====================================================
+
+
+@app.get("/api/stems/status")
+async def get_stem_separation_status():
+    """Check if Demucs stem separation is available"""
+    from stem_separation_service import get_stem_separation_service
+
+    service = get_stem_separation_service()
+    return {
+        "available": service.is_available(),
+        "message": "Demucs is ready" if service.is_available() else "Install demucs: pip install demucs",
+    }
+
+
+@app.get("/api/stems/models")
+async def get_stem_separation_models():
+    """Get available stem separation models"""
+    from stem_separation_service import get_stem_separation_service
+
+    service = get_stem_separation_service()
+    return {"models": service.get_models()}
+
+
+class StemSeparationRequest(BaseModel):
+    audio_path: str
+    model: str = "htdemucs"
+    stems: Optional[list] = None
+
+
+@app.post("/api/stems/separate")
+async def start_stem_separation(request: StemSeparationRequest):
+    """Start a stem separation job"""
+    from stem_separation_service import get_stem_separation_service
+
+    service = get_stem_separation_service()
+
+    if not service.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Demucs is not installed. Install with: pip install demucs"
+        )
+
+    try:
+        job_id = service.create_job(
+            audio_path=request.audio_path,
+            model=request.model,
+            stems=request.stems,
+        )
+        return {"job_id": job_id}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/stems/upload")
+async def upload_audio_for_stems(file: UploadFile = File(...)):
+    """Upload an audio file for stem separation"""
+    from stem_separation_service import get_stem_separation_service
+
+    service = get_stem_separation_service()
+
+    # Save uploaded file
+    ext = Path(file.filename).suffix or ".wav"
+    unique_filename = f"stem_upload_{uuid.uuid4().hex[:8]}{ext}"
+    file_path = TEMP_DIR / unique_filename
+
+    with open(file_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    return {"audio_path": str(file_path)}
+
+
+@app.get("/api/stems/jobs/{job_id}")
+async def get_stem_separation_job(job_id: str):
+    """Get stem separation job status"""
+    from stem_separation_service import get_stem_separation_service
+
+    service = get_stem_separation_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return job
+
+
+@app.get("/api/stems/jobs/{job_id}/download/{stem_name}")
+async def download_stem(job_id: str, stem_name: str):
+    """Download a separated stem"""
+    from stem_separation_service import get_stem_separation_service
+
+    service = get_stem_separation_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not completed")
+
+    output_stems = job.get("output_stems", {})
+    if stem_name not in output_stems:
+        raise HTTPException(status_code=404, detail=f"Stem '{stem_name}' not found")
+
+    file_path = Path(output_stems[stem_name])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Stem file not found")
+
+    return FileResponse(
+        path=str(file_path),
+        filename=file_path.name,
+        media_type="audio/wav",
+    )
+
+
+@app.post("/api/stems/jobs/{job_id}/cancel")
+async def cancel_stem_separation_job(job_id: str):
+    """Cancel a stem separation job"""
+    from stem_separation_service import get_stem_separation_service
+
+    service = get_stem_separation_service()
+    success = service.cancel_job(job_id)
+
+    if not success:
+        raise HTTPException(status_code=400, detail="Could not cancel job")
+
+    return {"cancelled": True}
+
+
+@app.get("/api/stems/jobs")
+async def list_stem_separation_jobs(limit: int = 20):
+    """List recent stem separation jobs"""
+    from stem_separation_service import get_stem_separation_service
+
+    service = get_stem_separation_service()
+    return {"jobs": service.list_jobs(limit=limit)}
+
+
+@app.post("/api/stems/unload")
+async def unload_stem_model():
+    """Unload Demucs model to free memory"""
+    from stem_separation_service import get_stem_separation_service
+
+    service = get_stem_separation_service()
+    service.unload_model()
+    return {"unloaded": True}
+
+
+# =====================================================
+# VOICE TRAINING
+# =====================================================
+
+
+@app.get("/api/voice-training/engines")
+async def get_training_engines():
+    """Get available voice training engines"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    return {"engines": service.get_training_engines()}
+
+
+@app.post("/api/voice-training/datasets")
+async def create_training_dataset(name: str = Form("untitled")):
+    """Create a new training dataset"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    dataset_id = service.create_dataset(name)
+    return {"dataset_id": dataset_id}
+
+
+@app.post("/api/voice-training/datasets/{dataset_id}/upload")
+async def upload_audio_to_dataset(
+    dataset_id: str,
+    file: UploadFile = File(...),
+    transcription: str = Form("")
+):
+    """Upload audio file to training dataset"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+
+    # Save uploaded file to temp
+    ext = Path(file.filename).suffix or ".wav"
+    temp_path = TEMP_DIR / f"train_upload_{uuid.uuid4().hex[:8]}{ext}"
+
+    with open(temp_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    try:
+        entry = service.add_audio_to_dataset(
+            dataset_id,
+            str(temp_path),
+            transcription,
+            file.filename
+        )
+        return entry
+    finally:
+        # Clean up temp file
+        temp_path.unlink(missing_ok=True)
+
+
+@app.get("/api/voice-training/datasets/{dataset_id}/entries")
+async def get_dataset_entries(dataset_id: str):
+    """Get all entries in a training dataset"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    try:
+        entries = service.get_dataset_entries(dataset_id)
+        return {"entries": entries}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/voice-training/datasets/{dataset_id}/stats")
+async def get_dataset_stats(dataset_id: str):
+    """Get training dataset statistics"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    try:
+        stats = service.get_dataset_stats(dataset_id)
+        return stats
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.put("/api/voice-training/datasets/{dataset_id}/entries/{entry_id}")
+async def update_dataset_entry(dataset_id: str, entry_id: str, transcription: str = Form(...)):
+    """Update transcription for a dataset entry"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    try:
+        entry = service.update_transcription(dataset_id, entry_id, transcription)
+        return entry
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.delete("/api/voice-training/datasets/{dataset_id}/entries/{entry_id}")
+async def delete_dataset_entry(dataset_id: str, entry_id: str):
+    """Remove entry from training dataset"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    try:
+        success = service.remove_from_dataset(dataset_id, entry_id)
+        return {"deleted": success}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/voice-training/datasets/{dataset_id}/transcribe")
+async def transcribe_dataset(
+    dataset_id: str,
+    entry_id: Optional[str] = None,
+    model: str = "base",
+    language: str = "auto"
+):
+    """Transcribe audio files in dataset using Whisper"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    try:
+        results = service.transcribe_dataset(dataset_id, entry_id, model, language)
+        return {"transcriptions": results}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+class StartTrainingRequest(BaseModel):
+    dataset_id: str
+    voice_name: str
+    engine: str = "styletts2"
+    epochs: int = 100
+    batch_size: int = 4
+    learning_rate: float = 1e-4
+    language: str = "en"
+
+
+@app.post("/api/voice-training/start")
+async def start_voice_training(request: StartTrainingRequest):
+    """Start training a new custom voice"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    try:
+        job_id = service.start_training(
+            dataset_id=request.dataset_id,
+            voice_name=request.voice_name,
+            engine=request.engine,
+            epochs=request.epochs,
+            batch_size=request.batch_size,
+            learning_rate=request.learning_rate,
+            language=request.language,
+        )
+        return {"job_id": job_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.get("/api/voice-training/status")
+async def get_training_status():
+    """Get current training job status"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    status = service.get_training_status()
+    return status if status else {"status": "idle"}
+
+
+@app.post("/api/voice-training/cancel")
+async def cancel_voice_training():
+    """Cancel current training job"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    success = service.cancel_training()
+    return {"cancelled": success}
+
+
+@app.get("/api/voices/custom")
+async def list_custom_voices(engine: Optional[str] = None):
+    """List all custom trained voices"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    voices = service.get_custom_voices(engine)
+    return {"voices": voices}
+
+
+@app.get("/api/voices/custom/{voice_id}")
+async def get_custom_voice(voice_id: str):
+    """Get a specific custom trained voice"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    voice = service.get_custom_voice(voice_id)
+    if not voice:
+        raise HTTPException(status_code=404, detail="Voice not found")
+    return voice
+
+
+@app.delete("/api/voices/custom/{voice_id}")
+async def delete_custom_voice(voice_id: str):
+    """Delete a custom trained voice"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    success = service.delete_custom_voice(voice_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Voice not found")
+    return {"deleted": True}
+
+
+class UpdateVoiceRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+@app.put("/api/voices/custom/{voice_id}")
+async def update_custom_voice(voice_id: str, request: UpdateVoiceRequest):
+    """Update custom voice metadata"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    voice = service.update_custom_voice(
+        voice_id,
+        name=request.name,
+        description=request.description,
+        tags=request.tags
+    )
+    if not voice:
+        raise HTTPException(status_code=404, detail="Voice not found")
+    return voice
+
+
+@app.get("/api/voices/custom/{voice_id}/sample")
+async def get_custom_voice_sample(voice_id: str):
+    """Get sample audio for a custom voice"""
+    from voice_training_service import get_voice_training_service
+
+    service = get_voice_training_service()
+    voice = service.get_custom_voice(voice_id)
+
+    if not voice or not voice.get("sample_audio_path"):
+        raise HTTPException(status_code=404, detail="Sample not found")
+
+    sample_path = Path(voice["sample_audio_path"])
+    if not sample_path.exists():
+        raise HTTPException(status_code=404, detail="Sample file not found")
+
+    return FileResponse(
+        path=str(sample_path),
+        media_type="audio/wav",
+        filename=f"{voice['name']}_sample.wav"
+    )
+
+
 # Serve static frontend in production
+# Check both locations: ui/frontend/out (dev) and electron/frontend (when run via bat)
 FRONTEND_DIR = BASE_DIR / "ui" / "frontend" / "out"
+ELECTRON_FRONTEND_DIR = BASE_DIR / "electron" / "frontend"
+
+# Prefer electron frontend if it exists (when run via ChatterboxUI.bat)
+if ELECTRON_FRONTEND_DIR.exists():
+    FRONTEND_DIR = ELECTRON_FRONTEND_DIR
+
 if FRONTEND_DIR.exists():
-    # Serve static files
+    # Mount static files - API routes are matched BEFORE mounts in FastAPI
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
 
@@ -4008,4 +6170,9 @@ if __name__ == "__main__":
     import uvicorn
     # Note: Large file uploads (up to 5GB) are handled via streaming in chunks
     # See upload_for_transcription endpoint - no body size limit needed
+    
+    # We bind to 0.0.0.0 to:
+    # 1. Allow access from other devices (remote control)
+    # 2. Trigger the OS "Allow Network Access" (Firewall) prompt on first run
+    print("[Startup] Binding to 0.0.0.0 to allow network access (Public/Private networks)")
     uvicorn.run(app, host="0.0.0.0", port=8000)

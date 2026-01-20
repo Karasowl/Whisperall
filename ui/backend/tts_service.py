@@ -22,12 +22,21 @@ class TTSService:
 
     def __init__(self, device: Optional[str] = None):
         if device is None:
-            if torch.cuda.is_available():
-                device = "cuda"
-            elif torch.backends.mps.is_available():
-                device = "mps"
-            else:
+            # Check global performance settings first
+            from settings_service import settings_service
+            device_pref = settings_service.get("performance.device", "auto")
+
+            if device_pref == "cuda":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            elif device_pref == "cpu":
                 device = "cpu"
+            else:  # auto
+                if torch.cuda.is_available():
+                    device = "cuda"
+                elif torch.backends.mps.is_available():
+                    device = "mps"
+                else:
+                    device = "cpu"
 
         self.device = device
         self._models: dict = {}
@@ -156,11 +165,20 @@ class TTSService:
 # Singleton instance
 _service: Optional[TTSService] = None
 
-def get_tts_service() -> TTSService:
-    """Get or create the TTS service singleton"""
+
+def get_tts_service(device: Optional[str] = None) -> TTSService:
+    """Get or create the TTS service singleton (optionally override device)."""
     global _service
+    normalized_device = None if not device or device == "auto" else device
     if _service is None:
-        _service = TTSService()
+        _service = TTSService(device=normalized_device)
+    elif normalized_device and _service.device != normalized_device:
+        try:
+            if _service.device == "cuda":
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+        _service = TTSService(device=normalized_device)
     return _service
 
 

@@ -279,8 +279,8 @@ export function AudioTrimmer({ onVoiceSaved, onClose }: AudioTrimmerProps) {
             <Scissors className="w-5 h-5 text-emerald-200" />
           </div>
           <div>
-            <h3 className="font-semibold text-foreground">Trim Audio/Video</h3>
-            <p className="text-sm text-foreground-muted">Extract up to 30 seconds for voice cloning</p>
+            <h3 className="font-semibold text-slate-100">Trim Audio/Video</h3>
+            <p className="text-sm text-slate-400">Extract up to 30 seconds for voice cloning</p>
           </div>
         </div>
         {onClose && (
@@ -288,7 +288,7 @@ export function AudioTrimmer({ onVoiceSaved, onClose }: AudioTrimmerProps) {
             onClick={onClose}
             className="p-2 hover:bg-white/10 rounded-lg"
           >
-            <X className="w-5 h-5 text-foreground-muted" />
+            <X className="w-5 h-5 text-slate-400" />
           </button>
         )}
       </div>
@@ -296,8 +296,8 @@ export function AudioTrimmer({ onVoiceSaved, onClose }: AudioTrimmerProps) {
       {/* FFmpeg Status */}
       {isCheckingFfmpeg ? (
         <div className="flex items-center justify-center gap-3 p-8 bg-white/5 rounded-xl">
-          <Loader2 className="w-6 h-6 animate-spin text-foreground-muted" />
-          <p className="text-foreground-muted">Checking FFmpeg...</p>
+          <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+          <p className="text-slate-400">Checking FFmpeg...</p>
         </div>
       ) : ffmpegStatus && !ffmpegStatus.available ? (
         <div className="p-6 bg-amber-500/10 border border-amber-500/30 rounded-xl">
@@ -307,7 +307,7 @@ export function AudioTrimmer({ onVoiceSaved, onClose }: AudioTrimmerProps) {
             </div>
             <div className="flex-1">
               <h3 className="font-semibold text-amber-200">FFmpeg required</h3>
-              <p className="text-sm text-foreground-muted mt-1">
+              <p className="text-sm text-slate-400 mt-1">
                 FFmpeg is required to process audio and video. It will be installed locally (~80 MB).
               </p>
               <button
@@ -362,7 +362,7 @@ export function AudioTrimmer({ onVoiceSaved, onClose }: AudioTrimmerProps) {
               {isUploading ? (
                 <div className="flex flex-col items-center gap-3">
                   <Loader2 className="w-10 h-10 text-emerald-300 animate-spin" />
-                  <p className="text-foreground-muted">Processing file...</p>
+                  <p className="text-slate-400">Processing file...</p>
                 </div>
               ) : (
                 <>
@@ -374,10 +374,10 @@ export function AudioTrimmer({ onVoiceSaved, onClose }: AudioTrimmerProps) {
                       <Music className="w-6 h-6 text-emerald-300" />
                     </div>
                   </div>
-                  <p className="text-foreground font-medium">
+                  <p className="text-slate-100 font-medium">
                     {isDragging ? 'Drop the file here' : 'Drag and drop audio or video'}
                   </p>
-                  <p className="text-sm text-foreground-muted mt-1">
+                  <p className="text-sm text-slate-400 mt-1">
                     MP4, MOV, AVI, MKV, MP3, WAV, FLAC, M4A
                   </p>
                 </>
@@ -470,7 +470,7 @@ export function AudioTrimmer({ onVoiceSaved, onClose }: AudioTrimmerProps) {
 
             {/* Selection info */}
             <div className="flex items-center justify-between mt-2 text-sm">
-              <span className="text-foreground-muted">
+              <span className="text-slate-400">
                 Total duration: {formatTime(mediaData.duration)}
               </span>
               <span className={cn(
@@ -518,7 +518,7 @@ export function AudioTrimmer({ onVoiceSaved, onClose }: AudioTrimmerProps) {
           <div className="border-t pt-4 space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">
+                <label className="block text-sm font-medium text-slate-100 mb-1">
                   Voice name *
                 </label>
                 <input
@@ -530,7 +530,7 @@ export function AudioTrimmer({ onVoiceSaved, onClose }: AudioTrimmerProps) {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">
+                <label className="block text-sm font-medium text-slate-100 mb-1">
                   Tags (optional)
                 </label>
                 <input

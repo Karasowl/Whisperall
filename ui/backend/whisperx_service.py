@@ -23,7 +23,8 @@ def _get_whisperx():
             _whisperx = whisperx
         except ImportError:
             raise ImportError(
-                "whisperx is not installed. Install with: pip install whisperx"
+                "Advanced transcription (WhisperX) is not available. "
+                "Use the standard Fast engine, or visit the Models page for installation options."
             )
     return _whisperx
 
@@ -48,6 +49,17 @@ class WhisperXService:
         self._current_model_size = None
         self._current_language = None
         self._current_device = None
+
+    def _normalize_model_size(self, model_size: str) -> str:
+        model_size = (model_size or "large-v3").strip()
+        if model_size.startswith("faster-whisper-"):
+            model_size = model_size.replace("faster-whisper-", "")
+        if model_size.startswith("faster-distil-whisper-"):
+            model_size = model_size.replace("faster-distil-whisper-", "distil-")
+        if model_size in ("distil-whisper-large-v3", "faster-distil-whisper-large-v3"):
+            # WhisperX does not support distil weights; use large-v3.
+            return "large-v3"
+        return model_size
 
     def _detect_device(self) -> str:
         """Detect best available device."""
@@ -154,6 +166,7 @@ class WhisperXService:
         """
         whisperx = _get_whisperx()
         device = self._detect_device()
+        model_size = self._normalize_model_size(model_size)
 
         # Step 1: Load audio
         if progress_callback:

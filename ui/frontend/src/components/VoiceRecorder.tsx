@@ -180,7 +180,7 @@ export default function VoiceRecorder({ onRecordingComplete, disabled }: VoiceRe
           <button
             type="button"
             onClick={() => setShowMicSelector(!showMicSelector)}
-            className="flex items-center gap-1 text-foreground-muted hover:text-foreground"
+            className="flex items-center gap-1 text-slate-400 hover:text-slate-100"
           >
             <Settings className="w-4 h-4" />
             <span className="truncate max-w-[200px]">{selectedMicLabel}</span>
@@ -250,13 +250,13 @@ export default function VoiceRecorder({ onRecordingComplete, disabled }: VoiceRe
       </div>
 
       {isRecording && (
-        <p className="text-sm text-foreground-muted">
+        <p className="text-sm text-slate-400">
           Recording... Speak clearly into your microphone.
         </p>
       )}
 
       {!isRecording && (
-        <p className="text-xs text-foreground-muted">
+        <p className="text-xs text-slate-400">
           Record 5-15 seconds of clear speech for best voice cloning results.
         </p>
       )}

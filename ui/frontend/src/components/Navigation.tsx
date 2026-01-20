@@ -13,7 +13,9 @@ import {
   Headphones,
   Languages,
   Sparkles,
-  FileAudio
+  FileAudio,
+  Music,
+  Volume2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getHotkeys } from '@/lib/api';
@@ -24,6 +26,8 @@ const navItems = [
   { href: '/dictate', label: 'STT', icon: Mic, description: 'Speech to Text' },
   { href: '/ai-edit', label: 'AI Edit', icon: Sparkles, description: 'AI Text Editing' },
   { href: '/translate', label: 'Translate', icon: Languages, description: 'Translation' },
+  { href: '/music', label: 'Music', icon: Music, description: 'AI Music Generation' },
+  { href: '/sfx', label: 'SFX', icon: Volume2, description: 'Sound Effects from Video' },
   { href: '/audiobook', label: 'Audiobook', icon: BookOpen, description: 'Audiobook Creator' },
   { href: '/transcribe', label: 'Transcribe', icon: FileAudio, description: 'Long-form Transcription' },
   { href: '/voices', label: 'Voices', icon: Mic, description: 'Voice Library' },
@@ -38,6 +42,7 @@ const secondaryItems = [
 export function Navigation() {
   const pathname = usePathname();
   const router = useRouter();
+  const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
 
   useEffect(() => {
     if (!window.electronAPI?.onHotkey) return;
@@ -65,7 +70,7 @@ export function Navigation() {
       .then((hotkeys) => {
         window.electronAPI?.updateHotkeys(hotkeys);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   return (
@@ -73,9 +78,9 @@ export function Navigation() {
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="w-9 h-9 bg-gradient-to-br from-emerald-400 via-teal-400 to-amber-400 rounded-xl shadow-lg shadow-emerald-400/20 group-hover:shadow-emerald-400/40 transition-shadow" />
-            <span className="text-xl font-bold text-gradient">Whisperall</span>
+          <Link href="/" prefetch={false} className="flex items-center gap-3 group">
+            <div className="w-9 h-9 bg-gradient-to-br from-accent-primary via-teal-400 to-accent-secondary rounded-xl shadow-lg shadow-accent-primary/20 group-hover:shadow-accent-primary/40 transition-shadow" />
+            <span className="text-xl font-bold text-gradient-accent">Whisperall</span>
           </Link>
 
           {/* Main Navigation */}
@@ -84,6 +89,7 @@ export function Navigation() {
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 className={cn(
                   'nav-item',
                   pathname === href && 'active'
@@ -101,9 +107,10 @@ export function Navigation() {
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 className={cn(
                   'btn-icon btn-ghost',
-                  pathname === href && 'bg-glass text-accent-primary'
+                  pathname === href && 'bg-surface-1 text-[var(--accent-primary)]'
                 )}
                 title={label}
               >

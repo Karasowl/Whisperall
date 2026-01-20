@@ -18,6 +18,16 @@ class TranscriptionService:
     def __init__(self):
         self._models = {}
 
+    def _normalize_model_size(self, model_size: str) -> str:
+        model_size = (model_size or "base").strip()
+        if model_size.startswith("faster-whisper-"):
+            model_size = model_size.replace("faster-whisper-", "")
+        if model_size.startswith("faster-distil-whisper-"):
+            model_size = model_size.replace("faster-distil-whisper-", "distil-")
+        if model_size in ("distil-whisper-large-v3", "faster-distil-whisper-large-v3"):
+            return "distil-large-v3"
+        return model_size
+
     def _detect_device(self, requested: Optional[str] = None) -> str:
         """Detect best available device (CUDA preferred)."""
         if requested and requested != "auto":
@@ -36,6 +46,7 @@ class TranscriptionService:
 
     def _load_model(self, model_size: str, device: str):
         """Lazy load faster-whisper model with caching."""
+        model_size = self._normalize_model_size(model_size)
         cache_key = f"{model_size}_{device}"
         if cache_key in self._models:
             return self._models[cache_key]
@@ -44,7 +55,7 @@ class TranscriptionService:
             from faster_whisper import WhisperModel
         except ImportError as exc:
             raise RuntimeError(
-                "faster-whisper is not installed. Run: pip install faster-whisper"
+                "Speech recognition engine not available. Visit the Models page to install required components."
             ) from exc
 
         model = WhisperModel(
@@ -80,6 +91,7 @@ class TranscriptionService:
             Tuple of (segments_list, metadata_dict)
             Each segment: {id, start_time, end_time, text, words, confidence}
         """
+        model_size = self._normalize_model_size(model_size)
         device = self._detect_device(
             settings_service.get("providers.stt.faster_whisper.device", "auto")
         )
@@ -182,7 +194,7 @@ class TranscriptionService:
         }
 
         if progress_callback:
-            progress_callback(80, "Transcription complete")
+            progress_callback(100, "Transcription complete")
 
         return segments, metadata
 
@@ -192,6 +204,7 @@ class TranscriptionService:
 
         Returns estimated seconds to process.
         """
+        model_size = self._normalize_model_size(model_size)
         # Speed multipliers (how much faster than realtime)
         # Based on RTX 4060 with CUDA float16
         speed_multipliers = {

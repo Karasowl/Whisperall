@@ -8,6 +8,7 @@ interface ModelSelectorProps {
   models: Model[];
   selected: string;
   onSelect: (modelId: string) => void;
+  label?: string;
 }
 
 const modelIcons: Record<string, typeof Cpu> = {
@@ -16,10 +17,10 @@ const modelIcons: Record<string, typeof Cpu> = {
   turbo: Zap,
 };
 
-export function ModelSelector({ models, selected, onSelect }: ModelSelectorProps) {
+export function ModelSelector({ models, selected, onSelect, label = 'Model' }: ModelSelectorProps) {
   return (
     <div className="space-y-3">
-      <label className="label">Model</label>
+      <label className="label">{label}</label>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {models.map((model) => {
           const Icon = modelIcons[model.id] || Cpu;
@@ -39,18 +40,18 @@ export function ModelSelector({ models, selected, onSelect }: ModelSelectorProps
                   'p-2 rounded-lg transition-colors',
                   selected === model.id
                     ? 'bg-emerald-500/20 text-emerald-200'
-                    : 'bg-white/5 text-foreground-muted group-hover:text-foreground'
+                    : 'bg-white/5 text-slate-400 group-hover:text-slate-100'
                 )}>
                   <Icon className="w-5 h-5" />
                 </div>
                 <span className={cn(
                   'font-semibold',
-                  selected === model.id ? 'text-foreground' : 'text-foreground-muted group-hover:text-foreground'
+                  selected === model.id ? 'text-slate-100' : 'text-slate-400 group-hover:text-slate-100'
                 )}>
                   {model.name}
                 </span>
               </div>
-              <p className="text-sm text-foreground-muted leading-relaxed">{model.description}</p>
+              <p className="text-sm text-slate-400 leading-relaxed">{model.description}</p>
               <div className="flex flex-wrap gap-1.5 mt-3">
                 {model.languages.length <= 3 ? (
                   model.languages.map((lang) => (

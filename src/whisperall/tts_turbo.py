@@ -161,6 +161,7 @@ class ChatterboxTurboTTS:
         t3.load_state_dict(t3_state)
         del t3.tfmr.wte
         t3.to(device).eval()
+        t3.try_compile()  # Attempt torch.compile for faster inference
 
         s3gen = S3Gen(meanflow=True)
         weights = load_file(ckpt_dir / "s3gen_meanflow.safetensors")

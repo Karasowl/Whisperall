@@ -111,13 +111,13 @@ export default function PyannoteSetupWizard({
               <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
                 <Info className="w-5 h-5 text-amber-400" />
               </div>
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 className="text-lg font-semibold text-slate-100">
                 Feature Not Available
               </h2>
             </div>
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-foreground-muted hover:text-foreground"
+              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-slate-100"
             >
               <X className="w-5 h-5" />
             </button>
@@ -125,13 +125,13 @@ export default function PyannoteSetupWizard({
 
           <div className="p-6 space-y-4 text-center">
             <AlertCircle className="w-12 h-12 mx-auto text-amber-400" />
-            <h3 className="text-lg font-medium text-foreground">
+            <h3 className="text-lg font-medium text-slate-100">
               AI Speaker Detection
             </h3>
-            <p className="text-sm text-foreground-muted">
+            <p className="text-sm text-slate-400">
               Advanced speaker detection with Pyannote will be available in a future update.
             </p>
-            <p className="text-sm text-foreground-muted">
+            <p className="text-sm text-slate-400">
               For now, basic clustering will be used to identify speakers.
             </p>
             <button onClick={onClose} className="btn btn-primary w-full mt-4">
@@ -152,28 +152,28 @@ export default function PyannoteSetupWizard({
               <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
                 <AlertCircle className="w-5 h-5 text-amber-400" />
               </div>
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 className="text-lg font-semibold text-slate-100">
                 Pyannote Needs Local Setup
               </h2>
             </div>
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-foreground-muted hover:text-foreground"
+              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-slate-100"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
           <div className="p-6 space-y-4 text-center">
-            <p className="text-sm text-foreground-muted">
+            <p className="text-sm text-slate-400">
               The HuggingFace models are accessible, but the local audio decoder is missing or broken.
             </p>
             <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm select-text">
               <p className="font-medium">Details</p>
               <p className="opacity-80">{initialStatus.pyannote_error}</p>
             </div>
-            <p className="text-xs text-foreground-muted">
-              Install/repair torchcodec and FFmpeg, then restart the app and verify again.
+            <p className="text-xs text-slate-400">
+              Some audio processing components may be missing. Try restarting the app or reinstalling dependencies.
             </p>
             <button onClick={onClose} className="btn btn-primary w-full mt-4">
               Got it
@@ -199,17 +199,17 @@ export default function PyannoteSetupWizard({
               <Sparkles className="w-5 h-5 text-emerald-400" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-foreground">
+              <h2 className="text-lg font-semibold text-slate-100">
                 AI Speaker Detection Setup
               </h2>
-              <p className="text-xs text-foreground-muted">
+              <p className="text-xs text-slate-400">
                 Pyannote - More accurate speaker identification
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-foreground-muted hover:text-foreground"
+            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-slate-100"
           >
             <X className="w-5 h-5" />
           </button>
@@ -224,8 +224,8 @@ export default function PyannoteSetupWizard({
                 step.done
                   ? "bg-emerald-500/20 text-emerald-400"
                   : currentStep === step.id
-                    ? "bg-white/10 text-foreground"
-                    : "text-foreground-muted"
+                    ? "bg-white/10 text-slate-100"
+                    : "text-slate-400"
               )}>
                 {step.done ? (
                   <CheckCircle2 className="w-3.5 h-3.5" />
@@ -237,7 +237,7 @@ export default function PyannoteSetupWizard({
                 {step.label}
               </div>
               {i < steps.length - 1 && (
-                <ChevronRight className="w-4 h-4 text-foreground-muted mx-1" />
+                <ChevronRight className="w-4 h-4 text-slate-400 mx-1" />
               )}
             </div>
           ))}
@@ -249,58 +249,78 @@ export default function PyannoteSetupWizard({
           {currentStep === "terms" && (
             <div className="space-y-4">
               <div className="text-center">
-                <ExternalLink className="w-12 h-12 mx-auto text-foreground-muted mb-3" />
-                <h3 className="text-lg font-medium text-foreground mb-2">
+                <ExternalLink className="w-12 h-12 mx-auto text-slate-400 mb-3" />
+                <h3 className="text-lg font-medium text-slate-100 mb-2">
                   Accept HuggingFace Terms
                 </h3>
-                <p className="text-sm text-foreground-muted">
+                <p className="text-sm text-slate-400">
                   Pyannote requires accepting terms for <strong>4 models</strong> on HuggingFace.
                   Click each button below and accept the terms.
                 </p>
               </div>
 
               <div className="space-y-2">
-                <a
-                  href="https://huggingface.co/pyannote/speaker-diarization-3.1"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={() => {
+                    const url = "https://huggingface.co/pyannote/speaker-diarization-3.1";
+                    if (window.electronAPI?.openExternal) {
+                      window.electronAPI.openExternal(url);
+                    } else {
+                      window.open(url, '_blank');
+                    }
+                  }}
                   className="btn btn-secondary w-full text-sm"
                 >
                   <ExternalLink className="w-4 h-4" />
                   1. speaker-diarization-3.1
-                </a>
-                <a
-                  href="https://huggingface.co/pyannote/segmentation-3.0"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                </button>
+                <button
+                  onClick={() => {
+                    const url = "https://huggingface.co/pyannote/segmentation-3.0";
+                    if (window.electronAPI?.openExternal) {
+                      window.electronAPI.openExternal(url);
+                    } else {
+                      window.open(url, '_blank');
+                    }
+                  }}
                   className="btn btn-secondary w-full text-sm"
                 >
                   <ExternalLink className="w-4 h-4" />
                   2. segmentation-3.0
-                </a>
-                <a
-                  href="https://huggingface.co/pyannote/speaker-diarization-community-1"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                </button>
+                <button
+                  onClick={() => {
+                    const url = "https://huggingface.co/pyannote/speaker-diarization-community-1";
+                    if (window.electronAPI?.openExternal) {
+                      window.electronAPI.openExternal(url);
+                    } else {
+                      window.open(url, '_blank');
+                    }
+                  }}
                   className="btn btn-secondary w-full text-sm"
                 >
                   <ExternalLink className="w-4 h-4" />
                   3. speaker-diarization-community-1
-                </a>
-                <a
-                  href="https://huggingface.co/pyannote/embedding"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                </button>
+                <button
+                  onClick={() => {
+                    const url = "https://huggingface.co/pyannote/embedding";
+                    if (window.electronAPI?.openExternal) {
+                      window.electronAPI.openExternal(url);
+                    } else {
+                      window.open(url, '_blank');
+                    }
+                    setTermsAccepted(true);
+                  }}
                   className="btn btn-secondary w-full text-sm"
-                  onClick={() => setTermsAccepted(true)}
                 >
                   <ExternalLink className="w-4 h-4" />
                   4. embedding
-                </a>
+                </button>
               </div>
 
-              <div className="p-3 rounded-lg bg-white/5 text-sm text-foreground-muted">
-                <p className="font-medium text-foreground mb-1">For each model:</p>
+              <div className="p-3 rounded-lg bg-white/5 text-sm text-slate-400">
+                <p className="font-medium text-slate-100 mb-1">For each model:</p>
                 <ol className="list-decimal list-inside space-y-1">
                   <li>Log in to HuggingFace (create account if needed)</li>
                   <li>Click "Agree and access repository"</li>
@@ -326,27 +346,32 @@ export default function PyannoteSetupWizard({
           {currentStep === "token" && (
             <div className="space-y-4">
               <div className="text-center">
-                <Key className="w-12 h-12 mx-auto text-foreground-muted mb-3" />
-                <h3 className="text-lg font-medium text-foreground mb-2">
+                <Key className="w-12 h-12 mx-auto text-slate-400 mb-3" />
+                <h3 className="text-lg font-medium text-slate-100 mb-2">
                   Add Your HuggingFace Token
                 </h3>
-                <p className="text-sm text-foreground-muted">
+                <p className="text-sm text-slate-400">
                   Create an access token on HuggingFace and paste it below.
                 </p>
               </div>
 
-              <a
-                href="https://huggingface.co/settings/tokens/new?tokenType=read"
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                onClick={() => {
+                  const url = "https://huggingface.co/settings/tokens/new?tokenType=read";
+                  if (window.electronAPI?.openExternal) {
+                    window.electronAPI.openExternal(url);
+                  } else {
+                    window.open(url, '_blank');
+                  }
+                }}
                 className="btn btn-secondary w-full"
               >
                 <ExternalLink className="w-4 h-4" />
                 Create Token on HuggingFace
-              </a>
+              </button>
 
-              <div className="p-3 rounded-lg bg-white/5 text-sm text-foreground-muted">
-                <p className="font-medium text-foreground mb-1">Instructions:</p>
+              <div className="p-3 rounded-lg bg-white/5 text-sm text-slate-400">
+                <p className="font-medium text-slate-100 mb-1">Instructions:</p>
                 <ol className="list-decimal list-inside space-y-1">
                   <li>Click the button above to open HuggingFace</li>
                   <li>Name your token (e.g., "Chatterbox")</li>
@@ -399,10 +424,10 @@ export default function PyannoteSetupWizard({
               <div className="w-16 h-16 mx-auto rounded-full bg-emerald-500/20 flex items-center justify-center">
                 <CheckCircle2 className="w-8 h-8 text-emerald-400" />
               </div>
-              <h3 className="text-lg font-medium text-foreground">
+              <h3 className="text-lg font-medium text-slate-100">
                 Setup Complete!
               </h3>
-              <p className="text-sm text-foreground-muted">
+              <p className="text-sm text-slate-400">
                 AI speaker detection is now ready. Your transcriptions will
                 have more accurate speaker identification.
               </p>

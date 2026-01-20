@@ -65,6 +65,7 @@ class T3(nn.Module):
 
         self.dim = self.cfg.hidden_size
         self.deepspeed_patch_applied = False
+        self._torch_compiled = False
 
         # conditioning / embedding
         self.cond_enc = T3CondEnc(hp)
@@ -89,6 +90,46 @@ class T3(nn.Module):
     @property
     def device(self):
         return self.speech_head.weight.device
+
+    def try_compile(self):
+        """Attempt to compile the transformer for faster inference. Safe to call multiple times."""
+        if self._torch_compiled:
+            return
+        try:
+            import os
+            import torch
+            import platform
+
+            if not hasattr(torch, 'compile') or torch.__version__ < '2.0':
+                return
+
+            if os.environ.get("WHISPERALL_DISABLE_TORCH_COMPILE", "").lower() in {"1", "true", "yes"}:
+                logger.info("Skipping torch.compile (WHISPERALL_DISABLE_TORCH_COMPILE=1)")
+                return
+
+            # On Windows CPU, torch.compile requires MSVC (Visual Studio Build Tools)
+            # which most users don't have. Skip unless CUDA is available.
+            if platform.system() == "Windows" and not torch.cuda.is_available():
+                logger.info(
+                    "Skipping torch.compile on Windows CPU (requires Visual Studio Build Tools). "
+                    "Install from: https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+                )
+                return
+
+            if platform.system() == "Windows":
+                try:
+                    import triton  # type: ignore
+                except Exception:
+                    logger.info("Skipping torch.compile on Windows (Triton not available).")
+                    return
+
+            # Use reduce-overhead mode for inference with dynamic shapes
+            self.tfmr = torch.compile(self.tfmr, mode="reduce-overhead", dynamic=True)
+            self._torch_compiled = True
+            logger.info("T3 transformer compiled with torch.compile for faster inference")
+        except Exception as e:
+            # Catch any compilation errors (missing compiler, unsupported platform, etc.)
+            logger.warning(f"torch.compile failed (will use eager mode): {e}")
 
     def prepare_conditioning(self, t3_cond: T3Cond):
         """
@@ -315,13 +356,15 @@ class T3(nn.Module):
         # )
 
         device = embeds.device
+        use_cfg = cfg_weight > 0
 
         bos_token = torch.tensor([[self.hp.start_speech_token]], dtype=torch.long, device=device)
         bos_embed = self.speech_emb(bos_token)  # shape: (B, 1, embed_dim)
         bos_embed = bos_embed + self.speech_pos_emb.get_fixed_embedding(0)
 
-        # batch_size=2 for CFG
-        bos_embed = torch.cat([bos_embed, bos_embed])
+        # batch_size=2 for CFG, batch_size=1 otherwise
+        if use_cfg:
+            bos_embed = torch.cat([bos_embed, bos_embed])
 
         # Combine condition and BOS token for the initial input
         inputs_embeds = torch.cat([embeds, bos_embed], dim=1)
@@ -351,12 +394,16 @@ class T3(nn.Module):
         # ---- Generation Loop using kv_cache ----
         for i in tqdm(range(max_new_tokens), desc="Sampling", dynamic_ncols=True):
             logits_step = output.logits[:, -1, :]
-            # CFG combine  → (1, V)
-            cond   = logits_step[0:1, :]
-            uncond = logits_step[1:2, :]
-            cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
-            logits = cond + cfg * (cond - uncond)
-            
+
+            # CFG combine → (1, V) or use logits directly if no CFG
+            if use_cfg:
+                cond   = logits_step[0:1, :]
+                uncond = logits_step[1:2, :]
+                cfg = torch.as_tensor(cfg_weight, device=cond.device, dtype=cond.dtype)
+                logits = cond + cfg * (cond - uncond)
+            else:
+                logits = logits_step  # Already (1, V)
+
             # Apply alignment stream analyzer integrity checks
             if self.patched_model.alignment_stream_analyzer is not None:
                 if logits.dim() == 1:            # guard in case something upstream squeezed
@@ -368,11 +415,11 @@ class T3(nn.Module):
             # Apply repetition penalty
             ids_for_proc = generated_ids[:1, ...]   # batch = 1
             logits = repetition_penalty_processor(ids_for_proc, logits)  # expects (B,V)
-            
+
             # Apply temperature scaling.
             if temperature != 1.0:
                 logits = logits / temperature
-                
+
             # Apply min_p and top_p filtering
             logits = min_p_warper(ids_for_proc, logits)
             logits = top_p_warper(ids_for_proc, logits)
@@ -393,8 +440,9 @@ class T3(nn.Module):
             next_token_embed = self.speech_emb(next_token)
             next_token_embed = next_token_embed + self.speech_pos_emb.get_fixed_embedding(i + 1)
 
-            #  For CFG
-            next_token_embed = torch.cat([next_token_embed, next_token_embed])
+            # Duplicate for CFG (batch_size=2) only if using CFG
+            if use_cfg:
+                next_token_embed = torch.cat([next_token_embed, next_token_embed])
 
             # Forward pass with only the new token and the cached past.
             output = self.patched_model(

@@ -1,4 +1,4 @@
-export {};
+export { };
 
 declare global {
   interface File {
@@ -11,6 +11,8 @@ declare global {
       platform: string;
       onHotkey: (callback: (action: string) => void) => () => void;
       updateHotkeys: (hotkeys: Record<string, string>) => void;
+      updateTraySettings: (settings: { minimizeToTray?: boolean; showNotifications?: boolean }) => void;
+      updateWindowControls: (colors: { color: string; symbolColor: string }) => void;
       readClipboard: () => Promise<string>;
       getFilePath?: (file: File) => string | null;
       netFetch: (url: string, options: {
@@ -23,6 +25,8 @@ declare global {
         headers: Record<string, string>;
         body: string;
       }>;
+      notify: (payload: { title?: string; body: string }) => void;
+      openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
     };
     __lastHotkey?: string;
   }

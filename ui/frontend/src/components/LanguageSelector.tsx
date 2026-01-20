@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useRef, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Star, ChevronDown, Globe } from 'lucide-react';
 import { Language } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useDropdownPosition } from '@/lib/useDropdownPosition';
 
 interface LanguageSelectorProps {
   languages: Language[];
@@ -17,6 +19,9 @@ const FAVORITES_KEY = 'chatterbox_favorite_languages';
 export function LanguageSelector({ languages, selected, onSelect, disabled }: LanguageSelectorProps) {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const dropdownStyle = useDropdownPosition(isOpen && !disabled, buttonRef);
+  const portalRoot = typeof document !== 'undefined' ? document.body : null;
 
   // Load favorites from localStorage
   useEffect(() => {
@@ -60,6 +65,87 @@ export function LanguageSelector({ languages, selected, onSelect, disabled }: La
   const selectedLang = languages.find(l => l.code === selected);
   const favoriteLanguages = sortedLanguages.filter(l => favorites.includes(l.code));
   const otherLanguages = sortedLanguages.filter(l => !favorites.includes(l.code));
+  const dropdown = isOpen && !disabled ? (
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        onClick={() => setIsOpen(false)}
+      />
+
+      <div
+        className="z-50 dropdown-content max-h-72 overflow-y-auto animate-fade-in custom-scrollbar"
+        style={dropdownStyle}
+      >
+        {/* Favorites section */}
+        {favoriteLanguages.length > 0 && (
+          <>
+            <div className="px-4 py-2 text-xs font-medium text-foreground-muted bg-white/5 border-b border-white/5">
+              Favorites
+            </div>
+            {favoriteLanguages.map((lang) => (
+              <div
+                key={lang.code}
+                className={cn(
+                  "flex items-center justify-between px-4 py-3 cursor-pointer transition-colors border-b border-white/5 last:border-0",
+                  selected === lang.code
+                    ? "bg-accent-primary/20 text-accent-primary"
+                    : "hover:bg-accent-primary/10 text-foreground"
+                )}
+                onClick={() => {
+                  onSelect(lang.code);
+                  setIsOpen(false);
+                }}
+              >
+                <span className={cn(selected === lang.code && "font-medium")}>
+                  {lang.name} ({lang.code})
+                </span>
+                <button
+                  onClick={(e) => toggleFavorite(lang.code, e)}
+                  className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <Star className="w-4 h-4 text-warning fill-warning" />
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* Other languages */}
+        {otherLanguages.length > 0 && (
+          <>
+            <div className="px-4 py-2 text-xs font-medium text-foreground-muted bg-white/5 border-b border-t border-white/5">
+              All Languages
+            </div>
+            {otherLanguages.map((lang) => (
+              <div
+                key={lang.code}
+                className={cn(
+                  "flex items-center justify-between px-4 py-3 cursor-pointer transition-colors border-b border-white/5 last:border-0",
+                  selected === lang.code
+                    ? "bg-accent-primary/20 text-accent-primary"
+                    : "hover:bg-accent-primary/10 text-foreground"
+                )}
+                onClick={() => {
+                  onSelect(lang.code);
+                  setIsOpen(false);
+                }}
+              >
+                <span className={selected === lang.code ? "font-medium" : ""}>
+                  {lang.name} ({lang.code})
+                </span>
+                <button
+                  onClick={(e) => toggleFavorite(lang.code, e)}
+                  className="p-1.5 hover:bg-white/10 rounded-lg opacity-40 hover:opacity-100 transition-all"
+                >
+                  <Star className="w-4 h-4 text-foreground-muted" />
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </>
+  ) : null;
 
   return (
     <div className="space-y-3">
@@ -68,30 +154,31 @@ export function LanguageSelector({ languages, selected, onSelect, disabled }: La
       <div className="relative">
         <button
           type="button"
+          ref={buttonRef}
           onClick={() => !disabled && setIsOpen(!isOpen)}
           disabled={disabled}
           className={cn(
             "w-full px-4 py-3 text-left rounded-xl flex items-center justify-between transition-all",
             disabled
-              ? "glass opacity-50 cursor-not-allowed"
-              : "glass glass-hover cursor-pointer"
+              ? "card opacity-50 cursor-not-allowed border border-glass-border"
+              : "card-interactive hover:bg-surface-2"
           )}
         >
           <span className="flex items-center gap-3">
             <div className={cn(
               "p-2 rounded-lg",
-              disabled ? "bg-white/5" : "bg-emerald-500/20"
+              disabled ? "bg-white/5" : "bg-accent-primary/10"
             )}>
               <Globe className={cn(
                 "w-4 h-4",
-                disabled ? "text-foreground-muted" : "text-emerald-300"
+                disabled ? "text-foreground-muted" : "text-accent-primary"
               )} />
             </div>
             <span className="text-foreground">
               {selectedLang ? `${selectedLang.name} (${selectedLang.code})` : 'Select language'}
             </span>
             {favorites.includes(selected) && (
-              <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
+              <Star className="w-4 h-4 text-warning fill-warning" />
             )}
           </span>
           <ChevronDown className={cn(
@@ -100,86 +187,7 @@ export function LanguageSelector({ languages, selected, onSelect, disabled }: La
           )} />
         </button>
 
-        {isOpen && !disabled && (
-          <>
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 z-10"
-              onClick={() => setIsOpen(false)}
-            />
-
-            {/* Dropdown */}
-            <div className="absolute z-20 w-full mt-2 glass-card overflow-hidden max-h-72 overflow-y-auto animate-fade-in">
-              {/* Favorites section */}
-              {favoriteLanguages.length > 0 && (
-                <>
-                  <div className="px-4 py-2 text-xs font-medium text-foreground-muted bg-white/5 border-b border-glass-border">
-                    Favorites
-                  </div>
-                  {favoriteLanguages.map((lang) => (
-                    <div
-                      key={lang.code}
-                      className={cn(
-                        "flex items-center justify-between px-4 py-3 cursor-pointer transition-colors",
-                        selected === lang.code
-                          ? "bg-emerald-500/20 text-emerald-200"
-                          : "hover:bg-white/5 text-foreground"
-                      )}
-                      onClick={() => {
-                        onSelect(lang.code);
-                        setIsOpen(false);
-                      }}
-                    >
-                      <span className={cn(selected === lang.code && "font-medium")}>
-                        {lang.name} ({lang.code})
-                      </span>
-                      <button
-                        onClick={(e) => toggleFavorite(lang.code, e)}
-                        className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-                      >
-                        <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                      </button>
-                    </div>
-                  ))}
-                </>
-              )}
-
-              {/* Other languages */}
-              {otherLanguages.length > 0 && (
-                <>
-                  <div className="px-4 py-2 text-xs font-medium text-foreground-muted bg-white/5 border-b border-t border-glass-border">
-                    All Languages
-                  </div>
-                  {otherLanguages.map((lang) => (
-                    <div
-                      key={lang.code}
-                      className={cn(
-                        "flex items-center justify-between px-4 py-3 cursor-pointer transition-colors",
-                        selected === lang.code
-                          ? "bg-emerald-500/20 text-emerald-200"
-                          : "hover:bg-white/5 text-foreground"
-                      )}
-                      onClick={() => {
-                        onSelect(lang.code);
-                        setIsOpen(false);
-                      }}
-                    >
-                      <span className={selected === lang.code ? "font-medium" : ""}>
-                        {lang.name} ({lang.code})
-                      </span>
-                      <button
-                        onClick={(e) => toggleFavorite(lang.code, e)}
-                        className="p-1.5 hover:bg-white/10 rounded-lg opacity-40 hover:opacity-100 transition-all"
-                      >
-                        <Star className="w-4 h-4 text-foreground-muted" />
-                      </button>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          </>
-        )}
+        {portalRoot ? createPortal(dropdown, portalRoot) : dropdown}
       </div>
 
       {disabled && (

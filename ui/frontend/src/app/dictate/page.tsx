@@ -1,11 +1,24 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mic, Square, Loader2, Copy, RefreshCw } from 'lucide-react';
-import { startStt, stopStt, cancelStt, partialStt, installSttEngine } from '@/lib/api';
+import {
+  startStt,
+  stopStt,
+  cancelStt,
+  partialStt,
+  installSttEngine,
+  ServiceProviderInfo,
+  getProviderSelection,
+  getAllModels,
+  setProvider,
+} from '@/lib/api';
 import { formatDuration } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { SelectMenu } from '@/components/SelectMenu';
+import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
+import { insertTextAtCursor, setLastSttTranscript } from '@/lib/sttHelper';
+import { playActionSound } from '@/lib/actionSounds';
 
 const languageOptions = [
   { value: 'auto', label: 'Auto' },
@@ -24,6 +37,11 @@ export default function DictatePage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [language, setLanguage] = useState('auto');
   const [prompt, setPrompt] = useState('');
+  const [provider, setProviderState] = useState('faster-whisper');
+  const [providerModel, setProviderModel] = useState('');
+  const [providerConfig, setProviderConfig] = useState<Record<string, any>>({});
+  const [providerInfo, setProviderInfo] = useState<ServiceProviderInfo | null>(null);
+  const [sttModelInstalled, setSttModelInstalled] = useState<Record<string, boolean>>({});
   const [duration, setDuration] = useState(0);
   const [transcript, setTranscript] = useState('');
   const [rawTranscript, setRawTranscript] = useState('');
@@ -40,6 +58,7 @@ export default function DictatePage() {
   const mimeTypeRef = useRef('audio/webm');
   const lastPartialAtRef = useRef(0);
   const disablePartialRef = useRef(false);
+  const didLoadRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -53,6 +72,127 @@ export default function DictatePage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    async function loadProviderSelection() {
+      try {
+        const selection = await getProviderSelection('stt');
+        setProviderState(selection.selected || 'faster-whisper');
+        setProviderConfig(selection.config || {});
+        setProviderModel(selection.config?.model || '');
+      } catch {
+        // Keep defaults if settings are missing.
+      } finally {
+        didLoadRef.current = true;
+      }
+    }
+    loadProviderSelection();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getAllModels('stt')
+      .then(({ models }) => {
+        if (!active) return;
+        const installedMap: Record<string, boolean> = {};
+        models.forEach((model) => {
+          installedMap[model.id] = model.installed;
+        });
+        setSttModelInstalled(installedMap);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!providerInfo) return;
+    const models = providerInfo.models || [];
+    if (!models.length) return;
+    const modelIds = models.map((model) => model.id);
+    const hasInstalled = Object.keys(sttModelInstalled).length > 0;
+    const isLocal = providerInfo.type === 'local';
+
+    const isCurrentValid =
+      providerModel &&
+      modelIds.includes(providerModel) &&
+      (!isLocal || !hasInstalled || sttModelInstalled[providerModel]);
+
+    if (isCurrentValid) return;
+
+    const normalizeModelId = (value: string) => {
+      if (providerInfo.id === 'faster-whisper') {
+        if (value === 'distil-large-v3') return 'faster-distil-whisper-large-v3';
+        if (value.startsWith('faster-whisper-') || value.startsWith('faster-distil-whisper')) {
+          return value;
+        }
+        return `faster-whisper-${value}`;
+      }
+      return value;
+    };
+
+    const candidate = providerConfig.model || providerInfo.default_model || modelIds[0];
+    let nextModel = normalizeModelId(candidate);
+    if (!modelIds.includes(nextModel)) {
+      nextModel = modelIds[0];
+    }
+
+    if (isLocal && hasInstalled && !sttModelInstalled[nextModel]) {
+      const installedModel = models.find((model) => sttModelInstalled[model.id]);
+      if (installedModel) {
+        nextModel = installedModel.id;
+      }
+    }
+
+    if (nextModel && nextModel !== providerModel) {
+      setProviderModel(nextModel);
+    }
+  }, [providerInfo, providerModel, providerConfig.model, sttModelInstalled]);
+
+  const modelOptions = useMemo(() => {
+    if (!providerInfo?.models?.length) return [];
+    const shouldCheckInstall = providerInfo.type === 'local';
+
+    return providerInfo.models.map((model) => {
+      if (!shouldCheckInstall) {
+        return {
+          value: model.id,
+          label: model.name,
+          description: model.description,
+        };
+      }
+
+      const installed = sttModelInstalled[model.id];
+      return {
+        value: model.id,
+        label: model.name,
+        description: installed
+          ? model.description
+          : `${model.description || 'Requires download'} - Install in Models`,
+        disabled: !installed,
+      };
+    });
+  }, [providerInfo, sttModelInstalled]);
+
+  const resolvedModelValue =
+    providerModel || providerInfo?.default_model || providerInfo?.models?.[0]?.id || '';
+
+  useEffect(() => {
+    if (!didLoadRef.current) return;
+    if (!provider) return;
+    const config = {
+      ...providerConfig,
+      model: providerModel || providerInfo?.default_model,
+    };
+    setProviderConfig(config);
+    setProvider('stt', provider, config).catch(() => {});
+  }, [provider, providerModel]);
+
+  const updateProvider = (nextProvider: string) => {
+    setProviderState(nextProvider);
+  };
 
   const handleSttError = useCallback((err: any, fallback: string) => {
     const message = err.response?.data?.detail || err.message || fallback;
@@ -98,6 +238,17 @@ export default function DictatePage() {
     setTranscript('');
     setRawTranscript('');
 
+    if (providerInfo?.type === 'local' && !providerInfo.is_available) {
+      setShowInstallPrompt(true);
+      setIsPreparing(false);
+      return;
+    }
+    if (providerInfo?.type === 'api' && !providerInfo.is_available) {
+      setError('Configure the API key in Settings before using this provider.');
+      setIsPreparing(false);
+      return;
+    }
+
     try {
       const session = await startStt(language, prompt || undefined);
       setSessionId(session.session_id);
@@ -139,15 +290,19 @@ export default function DictatePage() {
           const result = await stopStt(session.session_id, blob, language, prompt || undefined);
           setTranscript(result.text);
           setRawTranscript(result.raw_text);
+          setLastSttTranscript(result.text);
+          insertTextAtCursor(result.text);
         } catch (err: any) {
           handleSttError(err, 'Transcription failed');
         } finally {
           setIsTranscribing(false);
           setSessionId(null);
+          playActionSound('complete');
         }
       };
 
       recorder.start(1000);
+      playActionSound('start');
       setIsRecording(true);
       setIsPreparing(false);
       setDuration(0);
@@ -213,11 +368,11 @@ export default function DictatePage() {
         description={
           installOutput ? (
             <div className="space-y-2">
-              <div className="text-xs text-foreground-muted">Install output (latest)</div>
+              <div className="text-xs text-slate-400">Install output (latest)</div>
               <pre className="text-xs bg-white/5 border border-glass-border rounded-lg p-2 whitespace-pre-wrap max-h-40 overflow-auto">
                 {installOutput.split(/\r?\n/).filter(Boolean).slice(-10).join('\n')}
               </pre>
-              <details className="text-xs text-foreground-muted">
+              <details className="text-xs text-slate-400">
                 <summary className="cursor-pointer">Show full output</summary>
                 <pre className="mt-2 bg-white/5 border border-glass-border rounded-lg p-2 whitespace-pre-wrap max-h-56 overflow-auto">
                   {installOutput}
@@ -262,7 +417,7 @@ export default function DictatePage() {
       />
       <div className="space-y-2">
         <h1 className="text-4xl font-bold text-gradient">Speech to Text</h1>
-        <p className="text-foreground-muted">
+        <p className="text-slate-400">
           Dictate inside Whisperall with smart formatting and backtrack rules.
         </p>
       </div>
@@ -276,13 +431,25 @@ export default function DictatePage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-6">
           <div className="glass-card p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-foreground">Dictation Controls</h2>
+            <h2 className="text-lg font-semibold text-slate-100">Dictation Controls</h2>
 
             <SelectMenu
               label="Language"
               value={language}
               options={languageOptions}
               onChange={setLanguage}
+            />
+
+            <UnifiedProviderSelector
+              service="stt"
+              selected={provider}
+              onSelect={updateProvider}
+              selectedModel={providerModel}
+              onModelChange={setProviderModel}
+              onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
+              variant="dropdown"
+              showModelSelector
+              label="Transcription Engine"
             />
 
             <label className="label mt-4">Prompt (optional)</label>
@@ -324,7 +491,7 @@ export default function DictatePage() {
             </div>
 
             {isRecording && (
-              <div className="flex items-center justify-between text-sm text-foreground-muted">
+              <div className="flex items-center justify-between text-sm text-slate-400">
                 <span>Recording...</span>
                 <span className="font-mono">{formatDuration(duration)}</span>
               </div>
@@ -341,7 +508,7 @@ export default function DictatePage() {
         <div className="lg:col-span-2 space-y-6">
           <div className="glass-card p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-foreground">Transcription</h2>
+              <h2 className="text-lg font-semibold text-slate-100">Transcription</h2>
               <div className="flex gap-2">
                 <button
                   onClick={copyToClipboard}
@@ -365,7 +532,7 @@ export default function DictatePage() {
             </div>
 
             {isTranscribing && (
-              <div className="flex items-center gap-3 text-foreground-muted">
+              <div className="flex items-center gap-3 text-slate-400">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 Transcribing audio...
               </div>
@@ -379,7 +546,7 @@ export default function DictatePage() {
             />
 
             {rawTranscript && (
-              <div className="text-xs text-foreground-muted">
+              <div className="text-xs text-slate-400">
                 Raw transcript: {rawTranscript}
               </div>
             )}

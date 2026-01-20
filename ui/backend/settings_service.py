@@ -21,6 +21,9 @@ class TTSProviderSettings(BaseModel):
     kokoro: Dict[str, Any] = {"voice": "af_sky", "speed": 1.0}
     elevenlabs: Dict[str, Any] = {"voice_id": None, "model": "eleven_turbo_v2"}
     openai: Dict[str, Any] = {"voice": "alloy", "model": "tts-1"}
+    fishaudio: Dict[str, Any] = {"voice_id": None, "model": "default"}
+    siliconflow: Dict[str, Any] = {"voice_id": None, "model": "cosyvoice"}
+    minimax: Dict[str, Any] = {"voice_id": None, "model": "speech-02"}
 
 
 class STTProviderSettings(BaseModel):
@@ -29,6 +32,8 @@ class STTProviderSettings(BaseModel):
     faster_whisper: Dict[str, Any] = {"model": "base", "language": "auto", "device": "auto"}
     openai_whisper: Dict[str, Any] = {"model": "whisper-1"}
     deepgram: Dict[str, Any] = {"model": "nova-2"}
+    groq: Dict[str, Any] = {"model": "whisper-large-v3"}
+    dashscope: Dict[str, Any] = {"model": "paraformer-v2"}
 
 
 class AIEditProviderSettings(BaseModel):
@@ -38,6 +43,10 @@ class AIEditProviderSettings(BaseModel):
     openai: Dict[str, Any] = {"model": "gpt-4o-mini"}
     claude: Dict[str, Any] = {"model": "claude-3-haiku-20240307"}
     gemini: Dict[str, Any] = {"model": "gemini-1.5-flash"}
+    deepseek: Dict[str, Any] = {"model": "deepseek-chat", "base_url": "https://api.deepseek.com"}
+    moonshot: Dict[str, Any] = {"model": "kimi-k2-0905", "base_url": "https://api.moonshot.ai"}
+    minimax: Dict[str, Any] = {"model": "MiniMax-M2", "base_url": "https://api.minimax.chat"}
+    zhipu: Dict[str, Any] = {"model": "glm-4-plus", "base_url": "https://open.bigmodel.cn/api/paas"}
 
 
 class TranslationProviderSettings(BaseModel):
@@ -46,6 +55,8 @@ class TranslationProviderSettings(BaseModel):
     argos: Dict[str, Any] = {"source_lang": "auto", "target_lang": "en"}
     deepl: Dict[str, Any] = {"source_lang": "auto", "target_lang": "EN"}
     google: Dict[str, Any] = {"source_lang": "auto", "target_lang": "en"}
+    deepseek: Dict[str, Any] = {"source_lang": "auto", "target_lang": "en", "model": "deepseek-chat"}
+    zhipu: Dict[str, Any] = {"source_lang": "auto", "target_lang": "en", "model": "glm-4-plus"}
 
 
 class ProvidersSettings(BaseModel):
@@ -65,6 +76,20 @@ class APIKeysSettings(BaseModel):
     google: Optional[str] = None
     deepl: Optional[str] = None
     deepgram: Optional[str] = None
+    groq: Optional[str] = None
+    deepseek: Optional[str] = None
+    zhipu: Optional[str] = None  # GLM-4.7
+    moonshot: Optional[str] = None
+    minimax: Optional[str] = None
+    fishaudio: Optional[str] = None
+    cartesia: Optional[str] = None
+    playht: Optional[str] = None
+    siliconflow: Optional[str] = None
+    zyphra: Optional[str] = None
+    narilabs: Optional[str] = None
+    dashscope: Optional[str] = None
+    assemblyai: Optional[str] = None
+    gladia: Optional[str] = None
     huggingface: Optional[str] = None
 
 
@@ -72,6 +97,7 @@ class HotkeysSettings(BaseModel):
     """Atajos de teclado globales"""
     dictate: str = "Alt+X"
     read_clipboard: str = "Ctrl+Shift+R"
+    stt_paste: str = "Alt+Shift+S"
     pause: str = "Ctrl+Shift+P"
     stop: str = "Ctrl+Shift+S"
     ai_edit: str = "Ctrl+Shift+E"
@@ -98,6 +124,10 @@ class STTSettings(BaseModel):
     backtrack: bool = True
     smart_formatting: bool = True
     language: str = "auto"
+    transcription_mode: str = "final"  # final | live
+    hotkey_mode: str = "toggle"  # toggle | hold
+    auto_paste: bool = False
+    overlay_enabled: bool = True
 
 
 class DiarizationSafetySettings(BaseModel):
@@ -119,6 +149,19 @@ class DiarizationSettings(BaseModel):
     cache: DiarizationCacheSettings = DiarizationCacheSettings()
 
 
+class PerformanceSettings(BaseModel):
+    """Configuracion de rendimiento global"""
+    fast_mode: bool = False  # Deshabilita CFG para ~50% mas rapido
+    device: str = "auto"  # auto | cuda | cpu
+    preload_models: bool = True  # Pre-cargar modelos al inicio
+
+
+class ActionSoundSettings(BaseModel):
+    """Configuracion de sonidos para acciones"""
+    start: bool = True
+    complete: bool = True
+
+
 class UISettings(BaseModel):
     """Configuracion de interfaz"""
     theme: str = "dark"
@@ -128,6 +171,7 @@ class UISettings(BaseModel):
     show_notifications: bool = True
     save_history: bool = True
     analytics: bool = False
+    action_sounds: ActionSoundSettings = ActionSoundSettings()
 
 
 class AppSettings(BaseModel):
@@ -138,6 +182,7 @@ class AppSettings(BaseModel):
     reader: ReaderSettings = ReaderSettings()
     stt: STTSettings = STTSettings()
     diarization: DiarizationSettings = DiarizationSettings()
+    performance: PerformanceSettings = PerformanceSettings()
     ui: UISettings = UISettings()
     models_installed: list = []
     onboarding_completed: bool = False

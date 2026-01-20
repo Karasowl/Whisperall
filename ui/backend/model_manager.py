@@ -14,14 +14,96 @@ import threading
 import json
 
 from huggingface_hub import scan_cache_dir, snapshot_download, hf_hub_download
+from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
 from huggingface_hub.utils import HfHubHTTPError
+import requests
 
 from settings_service import settings_service
 from app_paths import get_models_dir
 
+
+def _get_user_friendly_error(error: Exception, model_name: str = "") -> str:
+    """
+    Convert technical errors into user-friendly messages.
+    """
+    error_str = str(error).lower()
+
+    # Check for HuggingFace HTTP errors
+    if isinstance(error, HfHubHTTPError) or "hfhubhttperror" in error_str:
+        if "401" in error_str or "unauthorized" in error_str:
+            return (
+                f"Authentication required for {model_name or 'this model'}. "
+                "Please configure your HuggingFace token in Settings -> API Keys."
+            )
+        if "403" in error_str or "forbidden" in error_str:
+            return (
+                f"Access denied for {model_name or 'this model'}. "
+                "You may need to accept the model's license agreement on HuggingFace, "
+                "or your token may not have the required permissions."
+            )
+        if "404" in error_str or "not found" in error_str:
+            return (
+                f"Model {model_name or ''} not found on HuggingFace. "
+                "The model may have been removed or the repository name has changed."
+            )
+        if "503" in error_str or "service unavailable" in error_str:
+            return (
+                "HuggingFace servers are temporarily unavailable. "
+                "Please try again in a few minutes."
+            )
+        if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
+            return (
+                "Too many download requests. "
+                "Please wait a few minutes before trying again."
+            )
+
+    # Check for requests HTTP errors
+    if isinstance(error, requests.exceptions.HTTPError):
+        status_code = getattr(error.response, 'status_code', None) if hasattr(error, 'response') else None
+        if status_code == 401:
+            return f"Authentication required for {model_name or 'this model'}."
+        if status_code == 403:
+            return f"Access denied for {model_name or 'this model'}."
+        if status_code == 404:
+            return f"Model {model_name or ''} not found."
+        if status_code == 503:
+            return "Server temporarily unavailable. Please try again later."
+
+    # Check for connection errors
+    if "connection" in error_str or "timeout" in error_str:
+        return (
+            "Unable to connect to download server. "
+            "Please check your internet connection and try again."
+        )
+
+    # Check for disk space errors
+    if "no space" in error_str or "disk full" in error_str or "oserror" in error_str:
+        return (
+            "Not enough disk space to download the model. "
+            "Please free up some space and try again."
+        )
+
+    # Check for permission errors
+    if "permission" in error_str:
+        return (
+            "Unable to write to the models directory. "
+            "Please check folder permissions."
+        )
+
+    # Check for gated model errors
+    if "gated" in error_str or "agreement" in error_str:
+        return (
+            f"This model requires accepting the license agreement on HuggingFace. "
+            "Please visit the model page on HuggingFace, accept the terms, "
+            "then configure your HuggingFace token in Settings."
+        )
+
+    # Default: return original error but cleaned up
+    return str(error)
+
 # Directorios
 MODELS_DIR = get_models_dir()
-HF_CACHE_DIR = Path(os.path.expanduser("~")) / ".cache" / "huggingface" / "hub"
+HF_CACHE_DIR = Path(HUGGINGFACE_HUB_CACHE)
 
 
 class ModelCategory(str, Enum):
@@ -56,6 +138,7 @@ class ModelInfo:
     requires_gpu: bool = False
     is_default: bool = False
     is_chatterbox: bool = False          # Modelo de Chatterbox original
+    uses_hf_cache: bool = False          # Modelo que usa cache de HuggingFace (descargado por libreria externa)
 
 
 # ===============================
@@ -101,17 +184,206 @@ AVAILABLE_MODELS: Dict[str, ModelInfo] = {
     ),
 
     # -------------------------
-    # Kokoro TTS (Reader rapido)
+    # Kokoro TTS - Variantes por tamaño
     # -------------------------
-    "kokoro": ModelInfo(
-        id="kokoro",
-        name="Kokoro TTS",
+    "kokoro-82m": ModelInfo(
+        id="kokoro-82m",
+        name="Kokoro 82M (Pequeño)",
         category=ModelCategory.TTS,
-        description="TTS ultra-rapido de alta calidad. 54 voces, 6 idiomas.",
-        size_mb=150,
+        description="TTS ultra-rapido. 82M params. ~1GB VRAM. 54 voces preset.",
+        size_mb=170,
         repo_id="hexgrad/Kokoro-82M",
         languages=["en", "es", "fr", "ja", "ko", "zh"],
-        is_default=False
+        is_default=False,
+        uses_hf_cache=True
+    ),
+
+    # -------------------------
+    # F5-TTS - Variantes
+    # -------------------------
+    "f5-tts-base": ModelInfo(
+        id="f5-tts-base",
+        name="F5-TTS Base",
+        category=ModelCategory.TTS,
+        description="Voice cloning alta calidad. ~6GB VRAM. Multilenguaje.",
+        size_mb=2500,
+        repo_id="SWivid/F5-TTS",
+        languages=["en", "es", "fr", "de", "it", "pt", "zh", "ja", "ko"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+    "f5-tts-spanish": ModelInfo(
+        id="f5-tts-spanish",
+        name="F5-TTS Spanish",
+        category=ModelCategory.TTS,
+        description="Fine-tuned para espanol. Mejor calidad espanol. ~6GB VRAM.",
+        size_mb=2500,
+        repo_id="jpgallegoar/F5-Spanish",
+        languages=["es"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+    "e2-tts-base": ModelInfo(
+        id="e2-tts-base",
+        name="E2-TTS Base",
+        category=ModelCategory.TTS,
+        description="Variante E2 de F5-TTS. Diferente arquitectura. ~5GB VRAM.",
+        size_mb=2000,
+        repo_id="SWivid/E2-TTS",
+        languages=["en", "zh"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+
+    # -------------------------
+    # Orpheus TTS - Variantes por tamaño (canopylabs)
+    # -------------------------
+    "orpheus-3b": ModelInfo(
+        id="orpheus-3b",
+        name="Orpheus 3B (Grande)",
+        category=ModelCategory.TTS,
+        description="Modelo completo 3B params. Maxima calidad. ~12GB VRAM.",
+        size_mb=6000,
+        repo_id="canopylabs/orpheus-3b-0.1-ft",
+        languages=["en", "es", "fr", "de", "zh", "hi", "ko"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+
+    # -------------------------
+    # Fish-Speech TTS
+    # -------------------------
+    "fish-speech-1.4": ModelInfo(
+        id="fish-speech-1.4",
+        name="Fish-Speech 1.4",
+        category=ModelCategory.TTS,
+        description="TTS multilenguaje con voice cloning. ~4GB VRAM. Excelente espanol.",
+        size_mb=1500,
+        repo_id="fishaudio/fish-speech-1.4",
+        languages=["en", "es", "fr", "de", "zh", "ja", "ko", "ar", "pt", "it", "ru"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+    "fish-speech-1.5": ModelInfo(
+        id="fish-speech-1.5",
+        name="Fish-Speech 1.5 (Preview)",
+        category=ModelCategory.TTS,
+        description="Version preview con mejoras experimentales. ~4.5GB VRAM.",
+        size_mb=1800,
+        repo_id="fishaudio/fish-speech-1.5",
+        languages=["en", "es", "fr", "de", "zh", "ja", "ko", "ar", "pt", "it", "ru"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+
+    # -------------------------
+    # OpenVoice V2 TTS
+    # -------------------------
+    "openvoice-v2": ModelInfo(
+        id="openvoice-v2",
+        name="OpenVoice V2",
+        category=ModelCategory.TTS,
+        description="Voice cloning cross-lingual de MyShell/MIT. ~3GB VRAM. Clona voz y habla en cualquier idioma.",
+        size_mb=1200,
+        repo_id="myshell-ai/OpenVoice",
+        languages=["en", "es", "fr", "de", "zh", "ja", "ko", "it", "pt"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+
+    # -------------------------
+    # Zonos TTS (Zyphra)
+    # -------------------------
+    "zonos-hybrid": ModelInfo(
+        id="zonos-hybrid",
+        name="Zonos Hybrid",
+        category=ModelCategory.TTS,
+        description="TTS de Zyphra con voice cloning. ~6GB VRAM. Balance calidad/velocidad.",
+        size_mb=2500,
+        repo_id="Zyphra/Zonos-v0.1-hybrid",
+        languages=["en", "es", "fr", "de", "zh", "ja", "ko", "it", "pt"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+    "zonos-transformer": ModelInfo(
+        id="zonos-transformer",
+        name="Zonos Transformer",
+        category=ModelCategory.TTS,
+        description="Zonos full transformer. ~7GB VRAM. Maxima calidad.",
+        size_mb=3000,
+        repo_id="Zyphra/Zonos-v0.1-transformer",
+        languages=["en", "es", "fr", "de", "zh", "ja", "ko", "it", "pt"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+
+    # -------------------------
+    # VibeVoice TTS
+    # -------------------------
+    "vibevoice-0.5b": ModelInfo(
+        id="vibevoice-0.5b",
+        name="VibeVoice 0.5B",
+        category=ModelCategory.TTS,
+        description="TTS ligero con voice cloning. ~2.5GB VRAM. Experimental espanol.",
+        size_mb=1000,
+        repo_id="vibevoice/vibevoice-0.5b",
+        languages=["en", "es", "fr", "de", "zh", "ja", "ko"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+
+    # -------------------------
+    # VoxCPM TTS (OpenBMB)
+    # -------------------------
+    "voxcpm-base": ModelInfo(
+        id="voxcpm-base",
+        name="VoxCPM Base",
+        category=ModelCategory.TTS,
+        description="Voice cloning de OpenBMB. ~4GB VRAM. Ingles y chino.",
+        size_mb=2000,
+        repo_id="openbmb/VoxCPM",
+        languages=["en", "zh"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+    "voxcpm-large": ModelInfo(
+        id="voxcpm-large",
+        name="VoxCPM Large",
+        category=ModelCategory.TTS,
+        description="VoxCPM modelo grande. ~6GB VRAM. Mejor calidad.",
+        size_mb=3500,
+        repo_id="openbmb/VoxCPM-large",
+        languages=["en", "zh"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
+    ),
+
+    # -------------------------
+    # Dia TTS (Nari Labs)
+    # -------------------------
+    "dia-1.6b": ModelInfo(
+        id="dia-1.6b",
+        name="Dia 1.6B",
+        category=ModelCategory.TTS,
+        description="TTS de dialogo con emociones de Nari Labs. ~8GB VRAM. Solo ingles. Tags [S1]/[S2].",
+        size_mb=3500,
+        repo_id="nari-labs/Dia-1.6B",
+        languages=["en"],
+        requires_gpu=True,
+        is_default=False,
+        uses_hf_cache=True
     ),
 
     # -------------------------
@@ -205,19 +477,131 @@ AVAILABLE_MODELS: Dict[str, ModelInfo] = {
     # -------------------------
     "argos-es-en": ModelInfo(
         id="argos-es-en",
-        name="Argos Espanol -> Ingles",
+        name="Argos Spanish -> English",
         category=ModelCategory.TRANSLATION,
-        description="Traduccion local espanol a ingles.",
+        description="Local translation Spanish to English.",
         size_mb=100,
         languages=["es", "en"]
     ),
     "argos-en-es": ModelInfo(
         id="argos-en-es",
-        name="Argos Ingles -> Espanol",
+        name="Argos English -> Spanish",
         category=ModelCategory.TRANSLATION,
-        description="Traduccion local ingles a espanol.",
+        description="Local translation English to Spanish.",
         size_mb=100,
         languages=["en", "es"]
+    ),
+    "argos-fr-en": ModelInfo(
+        id="argos-fr-en",
+        name="Argos French -> English",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation French to English.",
+        size_mb=100,
+        languages=["fr", "en"]
+    ),
+    "argos-en-fr": ModelInfo(
+        id="argos-en-fr",
+        name="Argos English -> French",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation English to French.",
+        size_mb=100,
+        languages=["en", "fr"]
+    ),
+    "argos-de-en": ModelInfo(
+        id="argos-de-en",
+        name="Argos German -> English",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation German to English.",
+        size_mb=100,
+        languages=["de", "en"]
+    ),
+    "argos-en-de": ModelInfo(
+        id="argos-en-de",
+        name="Argos English -> German",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation English to German.",
+        size_mb=100,
+        languages=["en", "de"]
+    ),
+    "argos-pt-en": ModelInfo(
+        id="argos-pt-en",
+        name="Argos Portuguese -> English",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation Portuguese to English.",
+        size_mb=100,
+        languages=["pt", "en"]
+    ),
+    "argos-en-pt": ModelInfo(
+        id="argos-en-pt",
+        name="Argos English -> Portuguese",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation English to Portuguese.",
+        size_mb=100,
+        languages=["en", "pt"]
+    ),
+    "argos-it-en": ModelInfo(
+        id="argos-it-en",
+        name="Argos Italian -> English",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation Italian to English.",
+        size_mb=100,
+        languages=["it", "en"]
+    ),
+    "argos-en-it": ModelInfo(
+        id="argos-en-it",
+        name="Argos English -> Italian",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation English to Italian.",
+        size_mb=100,
+        languages=["en", "it"]
+    ),
+    "argos-zh-en": ModelInfo(
+        id="argos-zh-en",
+        name="Argos Chinese -> English",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation Chinese to English.",
+        size_mb=100,
+        languages=["zh", "en"]
+    ),
+    "argos-en-zh": ModelInfo(
+        id="argos-en-zh",
+        name="Argos English -> Chinese",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation English to Chinese.",
+        size_mb=100,
+        languages=["en", "zh"]
+    ),
+    "argos-ja-en": ModelInfo(
+        id="argos-ja-en",
+        name="Argos Japanese -> English",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation Japanese to English.",
+        size_mb=100,
+        languages=["ja", "en"]
+    ),
+    "argos-en-ja": ModelInfo(
+        id="argos-en-ja",
+        name="Argos English -> Japanese",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation English to Japanese.",
+        size_mb=100,
+        languages=["en", "ja"]
+    ),
+    "argos-ru-en": ModelInfo(
+        id="argos-ru-en",
+        name="Argos Russian -> English",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation Russian to English.",
+        size_mb=100,
+        languages=["ru", "en"]
+    ),
+    "argos-en-ru": ModelInfo(
+        id="argos-en-ru",
+        name="Argos English -> Russian",
+        category=ModelCategory.TRANSLATION,
+        description="Local translation English to Russian.",
+        size_mb=100,
+        languages=["en", "ru"]
     ),
 }
 
@@ -264,6 +648,33 @@ class ModelManager:
         for category in ModelCategory:
             (MODELS_DIR / category.value).mkdir(exist_ok=True)
 
+    def _get_hf_cache_status(
+        self,
+        model: ModelInfo,
+        downloaded_repos: Dict[str, float],
+    ) -> tuple[bool, float, float]:
+        """Return (installed, size_gb, completeness) for HF cache-backed models."""
+        if not model.repo_id:
+            return False, 0.0, 0.0
+
+        if model.repo_id not in downloaded_repos:
+            return False, 0.0, 0.0
+
+        actual_size_gb = downloaded_repos[model.repo_id]
+        expected_size_gb = model.size_mb / 1024
+
+        if expected_size_gb <= 0.1:
+            return True, actual_size_gb, 1.0
+
+        completeness = actual_size_gb / expected_size_gb if expected_size_gb else 0.0
+        if completeness >= 0.7:
+            return True, actual_size_gb, completeness
+
+        if settings_service.is_model_installed(model.id):
+            return True, actual_size_gb, completeness
+
+        return False, actual_size_gb, completeness
+
     # ===============================
     # CONSULTAS
     # ===============================
@@ -283,18 +694,16 @@ class ModelManager:
         """Listar modelos instalados con su estado"""
         result = []
 
-        # Chatterbox models (en HF cache)
+        # Models in HF cache (Chatterbox, F5-TTS, Kokoro, Orpheus, etc.)
         downloaded_repos = self._scan_hf_cache()
 
         for model_id, model in AVAILABLE_MODELS.items():
             is_installed = False
             downloaded_size = 0
 
-            if model.is_chatterbox and model.repo_id:
-                # Check HF cache
-                if model.repo_id in downloaded_repos:
-                    is_installed = True
-                    downloaded_size = downloaded_repos[model.repo_id]
+            if (model.is_chatterbox or model.uses_hf_cache) and model.repo_id:
+                # Check HF cache for models that use it
+                is_installed, downloaded_size, _ = self._get_hf_cache_status(model, downloaded_repos)
             else:
                 # Check local models dir or settings
                 is_installed = settings_service.is_model_installed(model_id)
@@ -317,9 +726,10 @@ class ModelManager:
         if not model:
             return False
 
-        if model.is_chatterbox and model.repo_id:
+        if (model.is_chatterbox or model.uses_hf_cache) and model.repo_id:
             downloaded_repos = self._scan_hf_cache()
-            return model.repo_id in downloaded_repos
+            is_installed, _, _ = self._get_hf_cache_status(model, downloaded_repos)
+            return is_installed
 
         return settings_service.is_model_installed(model_id)
 
@@ -341,8 +751,8 @@ class ModelManager:
         if not model:
             return None
 
-        if model.is_chatterbox:
-            # Chatterbox usa cache de HF
+        if model.is_chatterbox or model.uses_hf_cache:
+            # Models using HF cache
             return HF_CACHE_DIR
 
         return MODELS_DIR / model.category.value / model_id
@@ -369,8 +779,9 @@ class ModelManager:
         self._downloads[model_id] = progress
 
         try:
-            if model.is_chatterbox:
-                success = self._download_chatterbox(model, progress, progress_callback)
+            if model.is_chatterbox or model.uses_hf_cache:
+                # Download to HF cache (Chatterbox, F5-TTS, Kokoro, Orpheus, etc.)
+                success = self._download_to_hf_cache(model, progress, progress_callback)
             elif model.repo_id:
                 success = self._download_from_hf(model, progress, progress_callback)
             elif model.download_url:
@@ -398,25 +809,85 @@ class ModelManager:
             if progress_callback:
                 progress_callback(progress.progress_percent)
 
-    def _download_chatterbox(self, model: ModelInfo, progress: DownloadProgress, callback: Callable = None) -> bool:
-        """Descargar modelo Chatterbox"""
+    def _download_to_hf_cache(self, model: ModelInfo, progress: DownloadProgress, callback: Callable = None) -> bool:
+        """Descargar modelo al cache de HuggingFace (Chatterbox, F5-TTS, Kokoro, Orpheus, etc.)"""
+        import time
+
+        # Track download completion status
+        download_complete = threading.Event()
+        download_error = [None]  # Use list to allow modification in thread
+
+        def poll_cache_size():
+            """Poll the cache size during download to track progress"""
+            last_pct = 0
+            while not download_complete.is_set():
+                try:
+                    downloaded_repos = self._scan_hf_cache()
+                    if model.repo_id in downloaded_repos:
+                        actual_size_gb = downloaded_repos[model.repo_id]
+                        expected_size_gb = model.size_mb / 1024
+                        if expected_size_gb > 0:
+                            pct = min(99, (actual_size_gb / expected_size_gb) * 100)
+                            progress.downloaded_bytes = int((pct / 100) * progress.total_bytes)
+                            # Only callback if progress changed by at least 1%
+                            if callback and int(pct) > last_pct:
+                                last_pct = int(pct)
+                                callback(pct)
+                except Exception as e:
+                    print(f"[ModelManager] Poll error: {e}")
+                time.sleep(0.5)  # Poll every 0.5 seconds for smoother progress
+
+        def do_download():
+            """Perform the actual download in a thread"""
+            try:
+                if model.files:
+                    # Descargar archivos especificos
+                    for i, filename in enumerate(model.files):
+                        hf_hub_download(repo_id=model.repo_id, filename=filename)
+                        pct = ((i + 1) / len(model.files)) * 100
+                        progress.downloaded_bytes = int((pct / 100) * progress.total_bytes)
+                        if callback:
+                            callback(pct)
+                else:
+                    # Descargar repo completo
+                    snapshot_download(repo_id=model.repo_id)
+            except Exception as e:
+                download_error[0] = e
+            finally:
+                download_complete.set()
+
         try:
-            if model.files:
-                # Descargar archivos especificos
-                for i, filename in enumerate(model.files):
-                    hf_hub_download(repo_id=model.repo_id, filename=filename)
-                    progress.downloaded_bytes = int((i + 1) / len(model.files) * progress.total_bytes)
-                    if callback:
-                        callback(progress.progress_percent)
-            else:
-                # Descargar repo completo
-                snapshot_download(repo_id=model.repo_id)
-                progress.downloaded_bytes = progress.total_bytes
+            # Signal that download is starting
+            if callback:
+                callback(1)  # 1% to show that download has started
+
+            # Start polling thread for progress updates
+            poll_thread = threading.Thread(target=poll_cache_size, daemon=True)
+            poll_thread.start()
+
+            # Start download thread
+            download_thread = threading.Thread(target=do_download, daemon=True)
+            download_thread.start()
+
+            # Wait for download to complete
+            download_thread.join()
+            download_complete.set()  # Signal polling to stop
+
+            if download_error[0]:
+                raise download_error[0]
+
+            # Final progress update
+            progress.downloaded_bytes = progress.total_bytes
+            if callback:
+                callback(100)
 
             return True
 
         except HfHubHTTPError as e:
-            progress.error = str(e)
+            progress.error = _get_user_friendly_error(e, model.name)
+            return False
+        except Exception as e:
+            progress.error = _get_user_friendly_error(e, model.name)
             return False
 
     def _download_from_hf(self, model: ModelInfo, progress: DownloadProgress, callback: Callable = None) -> bool:
@@ -431,14 +902,15 @@ class ModelManager:
             progress.downloaded_bytes = progress.total_bytes
             return True
 
+        except HfHubHTTPError as e:
+            progress.error = _get_user_friendly_error(e, model.name)
+            return False
         except Exception as e:
-            progress.error = str(e)
+            progress.error = _get_user_friendly_error(e, model.name)
             return False
 
     def _download_from_url(self, model: ModelInfo, progress: DownloadProgress, callback: Callable = None) -> bool:
         """Descargar desde URL directa"""
-        import requests
-
         try:
             model_path = MODELS_DIR / model.category.value / model.id
             model_path.mkdir(parents=True, exist_ok=True)
@@ -447,6 +919,7 @@ class ModelManager:
             file_path = model_path / filename
 
             response = requests.get(model.download_url, stream=True)
+            response.raise_for_status()  # Raise for HTTP errors
             total = int(response.headers.get('content-length', progress.total_bytes))
             progress.total_bytes = total
 
@@ -459,8 +932,11 @@ class ModelManager:
 
             return True
 
+        except requests.exceptions.HTTPError as e:
+            progress.error = _get_user_friendly_error(e, model.name)
+            return False
         except Exception as e:
-            progress.error = str(e)
+            progress.error = _get_user_friendly_error(e, model.name)
             return False
 
     def _download_argos(self, model: ModelInfo, progress: DownloadProgress, callback: Callable = None) -> bool:
@@ -472,11 +948,16 @@ class ModelManager:
             argostranslate.package.update_package_index()
             available_packages = argostranslate.package.get_available_packages()
 
-            if model.id == "argos-es-en":
-                from_code, to_code = "es", "en"
-            elif model.id == "argos-en-es":
-                from_code, to_code = "en", "es"
+            # Parse model ID dynamically: argos-{from}-{to}
+            if model.id.startswith("argos-") and "-" in model.id[6:]:
+                parts = model.id[6:].split("-")
+                if len(parts) == 2:
+                    from_code, to_code = parts[0], parts[1]
+                else:
+                    progress.error = f"Invalid Argos model ID format: {model.id}"
+                    return False
             else:
+                progress.error = f"Unknown Argos model: {model.id}"
                 return False
 
             package = next(
@@ -490,13 +971,17 @@ class ModelManager:
                 progress.downloaded_bytes = progress.total_bytes
                 return True
 
+            progress.error = f"Translation package for {from_code} -> {to_code} not found in Argos repository."
             return False
 
         except ImportError:
-            progress.error = "argostranslate no instalado"
+            progress.error = (
+                "Local translation engine is not available. "
+                "Visit the Models page to install translation packages."
+            )
             return False
         except Exception as e:
-            progress.error = str(e)
+            progress.error = _get_user_friendly_error(e, model.name)
             return False
 
     # ===============================
@@ -520,8 +1005,8 @@ class ModelManager:
             )
 
         try:
-            if model.is_chatterbox:
-                return self._delete_chatterbox(model)
+            if model.is_chatterbox or model.uses_hf_cache:
+                return self._delete_from_hf_cache(model)
             else:
                 model_path = MODELS_DIR / model.category.value / model_id
                 if model_path.exists():
@@ -532,8 +1017,8 @@ class ModelManager:
         except Exception as e:
             raise RuntimeError(f"Error eliminando modelo: {e}")
 
-    def _delete_chatterbox(self, model: ModelInfo) -> bool:
-        """Eliminar modelo Chatterbox del cache de HF"""
+    def _delete_from_hf_cache(self, model: ModelInfo) -> bool:
+        """Eliminar modelo del cache de HuggingFace"""
         try:
             cache_info = scan_cache_dir(str(HF_CACHE_DIR))
             for repo in cache_info.repos:
@@ -558,28 +1043,28 @@ class ModelManager:
             cache_info = scan_cache_dir(str(HF_CACHE_DIR))
             for repo in cache_info.repos:
                 downloaded[repo.repo_id] = repo.size_on_disk / (1024**3)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ModelManager] Warning: Could not scan HF cache at {HF_CACHE_DIR}: {e}")
         return downloaded
 
     def get_total_size_installed(self) -> float:
         """Obtener tamano total en GB de modelos instalados"""
         total = 0.0
 
-        # Chatterbox en HF cache
+        # Models in HF cache (Chatterbox, F5-TTS, Kokoro, Orpheus, etc.)
         downloaded = self._scan_hf_cache()
-        chatterbox_repos = set(
+        hf_cache_repos = set(
             m.repo_id for m in AVAILABLE_MODELS.values()
-            if m.is_chatterbox and m.repo_id
+            if (m.is_chatterbox or m.uses_hf_cache) and m.repo_id
         )
         for repo_id, size_gb in downloaded.items():
-            if repo_id in chatterbox_repos:
+            if repo_id in hf_cache_repos:
                 total += size_gb
 
-        # Otros modelos
+        # Otros modelos (local)
         for model_id in settings_service.settings.models_installed:
             model = AVAILABLE_MODELS.get(model_id)
-            if model and not model.is_chatterbox:
+            if model and not model.is_chatterbox and not model.uses_hf_cache:
                 total += model.size_mb / 1024
 
         return round(total, 2)
@@ -607,12 +1092,18 @@ class ModelManager:
         for model_id, model in AVAILABLE_MODELS.items():
             is_downloaded = False
             downloaded_size = 0
+            download_progress = 0
 
-            if model.is_chatterbox and model.repo_id:
-                is_downloaded = model.repo_id in downloaded_repos
-                downloaded_size = downloaded_repos.get(model.repo_id, 0)
+            if (model.is_chatterbox or model.uses_hf_cache) and model.repo_id:
+                is_downloaded, downloaded_size, completeness = self._get_hf_cache_status(model, downloaded_repos)
+                if is_downloaded:
+                    download_progress = 100
+                elif completeness > 0:
+                    download_progress = min(99, int(completeness * 100))
             else:
                 is_downloaded = settings_service.is_model_installed(model_id)
+                if is_downloaded:
+                    download_progress = 100
 
             result.append({
                 "id": model_id,
@@ -621,6 +1112,7 @@ class ModelManager:
                 "size_gb": model.size_mb / 1024,
                 "downloaded": is_downloaded,
                 "downloaded_size_gb": round(downloaded_size, 2) if downloaded_size else 0,
+                "download_progress": download_progress,
                 "repo_id": model.repo_id or "",
                 "category": model.category.value
             })

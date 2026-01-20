@@ -1,0 +1,1051 @@
+# Errores a Resolver (input del usuario)
+
+Además, en todos los módulos debería existir no solamente la selección   
+  de modelos locales, sino también la selección de modelos API. Lo hemos   
+  intentado varias veces, te lo he pedido varias veces y no lo logras      
+  hacer. No sé por qué. Yo tengo que tener la capacidad de seleccionar un  
+  modelo API también. Ese modelo API es con el que generaré hacer las      
+  cosas. Por supuesto, todos los modelos API no funcionan para todos los   
+  módulos. Eso debe ser algo que tú hicieras y que coloques el que
+  funciona en cada módulo, como para la elección del usuario. Además de    
+  los modelos API, debemos tener la capacidad de saber si están
+  configuradas las APIs o no y que hagas una validación. Poder validar     
+  que está funcionando el token, pero una validación rápida.Si no está     
+  configurado, hay que ir al modelo. Hay que saber qué tipo de error está  
+  dando, no cualquier error genérico.Tiene que haber guías para cada       
+  modelo de API, según el error, y enlaces que le den directamente a       
+  donde tienes que ir. Y el modelo Orpheus 3B del grande, cuando intento   
+  descargar, no funciona. O sea, pasa la pantalla de cargando, vuelve a    
+  la pantalla de modelos rápidamente y demuestra que está todavía con la   
+  opción de descargar de nuevo. No funciona la descarga y no te dice por   
+  qué. Te dice un error exacto. Y mira además todos estos errores que      
+  tengo en el backend, que no sé por qué son y cómo resolverlos.  Además, instalé el modelo Faster TTT, F5 TTT 
+  (perdón, Kokoro TTS). Todo eso lo instalé. Fui de nuevo al módulo Text   
+  to speech y el único que aparece instalado es Chatterbox. Los demás no   
+  reconoce que ya están instalados. No muestran sus diversas opciones de   
+  tamaño de modelo, si es que lo tienen. No muestran nada. En el caso de   
+  Kokoro, no muestra nada: las diferentes voces que vienen preinstaladas   
+  no muestra nada, absolutamente nada. Esto no está funcionando. Y en los  
+  otros módulos, como Realtime Reader, no hay nada:
+  - No hay selección de API por modelo.
+  - No hay selección de modelos locales.  Nada, absolutamente nada. No     
+  has cambiado nada de eso cuando te lo he pedido varias veces. En el módulo "speech to text" tampoco hay ninguna selección de modelos locales, selección de modelos API, nada, nada, nada de eso. De eso que debería ser estándar para todos los módulos. Pero lo único que debe cambiar son los modelos que se pueden seleccionar, porque no todos los módulos corresponden a las habilidades de todos los módulos. Pero eso no está; eso está solamente en el primer módulo y, quizás, en el de transcripción, no lo recuerdo. Pero en el "speech to text" y en el que te mencioné anteriormente, nada de eso tiene la selección para seleccionar con qué motor vamos a generar lo que se genera o vamos a hacer la acción que promete ese módulo. Además, cuando tú lees un modelo o un módulo, acuerdate que todo esto funciona con Hotkey también y debería funcionar a nivel de Windows sin necesidad de abrir la aplicación en muchos casos. Por ejemplo, esto debe funcionar para transcribir de voz a texto y poder copiar lo que transcribe automáticamente dentro de un campo de texto, dentro del lugar donde estés colocando el cursor. Por eso, tiene que haber permanencia, tiene que haber memoria, tiene que haber persistencia de las opciones de configuración que uno elige. Si en un módulo tienes seleccionado un proveedor de modelo, ya sea API o ya sea local, ese es el que debe ser utilizado cuando utilizas los Hotkeys para hacer acciones en Windows o como leer un texto que seleccionaste en el navegador o en una aplicación en voz alta, pausarlo, etc. Todas esas cosas que no sé si ya están implementadas acá, pero me parece que no. O como generar una voz, no, perdón, leer con una voz específica, o como transcribir de tu voz a texto en un documento Word que tengas abierto. Todo tiene que ser con el modelo que hayas elegido. O como traducir un texto, y que te aparezca, entonces en el navegador o en la aplicación, te aparezca un pop-up o una modal pequeña, dinámica, que vaya cambiando según selecciones al texto, al idioma al que quieras traducirlo. No sé si todo eso está, porque realmente no lo veo por ninguna parte, pero lo que sí debe suceder es que los modelos persistan. La elección de los modelos persista. Fíjate que en el módulo de transcripción tampoco veo la selección de los modelos, ya sea API o modelo normal. No los veo tampoco. Tampoco en la librería de voces, que además las voces a partir de ahora tienen que tener un tag para saber con qué modelos se generaron, bajo qué parámetros, bajo qué configuración, y poder filtrar por el tipo de modelo que generó la voz. Y hay que saber si una voz generada por un modelo puede ser utilizada por otro o no. Esas interacciones tienen que ser tomadas en cuenta.  Y es que veo que, en "providers", para "text to speak", para "speak to text", para "IEDIT" en "settings", tenemos selección de modelos locales. Pero no deberíamos tenerlos porque ya lo estamos seleccionando a nivel de módulo. Y creo que uno de los problemas que tenemos a la hora de descargar los modelos es que tenemos dos formas, dos lugares donde descargarlo. En "Settings" tenemos "Local Models" y también tenemos una página específica para modelos. Yo creo que esa página específica de modelos debería ir directamente a este "Settings". Y que todo lo que te he dicho que debe hacer la página específica de modelos sea el hecho en la UI que está aquí en "Settings".  En apariencia, me da opción de tema light y dark, pero sin embargo no funciona: no lo tienen. Y en lenguaje, igual me da opción de inglés y español. Sin embargo, no funciona: no lo tienen. 
+
+En cuanto a los errores del backing, estos son los que estoy viendo en la consola y no sé cómo resolverlos. '1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/settings/__next.settings.__PAGE__.txt?_rsc=ygo53 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/models/__next.models.__PAGE__.txt?_rsc=d46qr 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/history/__next.history.__PAGE__.txt?_rsc=1bfer 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/voices/__next.voices.__PAGE__.txt?_rsc=2cn1f 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/transcribe/__next.transcribe.__PAGE__.txt?_rsc=1xevm 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/audiobook/__next.audiobook.__PAGE__.txt?_rsc=1wpjb 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/translate/__next.translate.__PAGE__.txt?_rsc=1mes6 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/ai-edit/__next.ai-edit.__PAGE__.txt?_rsc=lqx6z 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/dictate/__next.dictate.__PAGE__.txt?_rsc=t8zs8 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/reader/__next.reader.__PAGE__.txt?_rsc=1akad 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+38The resource <URL> was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally.
+c84ae8be303efd08.js:1 [API Response] GET /api/system/capabilities - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/tts/providers - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/presets - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/models - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/languages - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/voices - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/system/capabilities - 200
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/reader/__next.reader.__PAGE__.txt?_rsc=1dlnw 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/dictate/__next.dictate.__PAGE__.txt?_rsc=wadap 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/settings/__next.settings.__PAGE__.txt?_rsc=hrb83 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/models/__next.models.__PAGE__.txt?_rsc=nmhmx 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/history/__next.history.__PAGE__.txt?_rsc=jf1sc 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/voices/__next.voices.__PAGE__.txt?_rsc=nizox 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/transcribe/__next.transcribe.__PAGE__.txt?_rsc=ymcuj 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/audiobook/__next.audiobook.__PAGE__.txt?_rsc=be37u 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/translate/__next.translate.__PAGE__.txt?_rsc=qos0t 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/ai-edit/__next.ai-edit.__PAGE__.txt?_rsc=ocaa6 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/transcribe/__next.transcribe.__PAGE__.txt?_rsc=ymcuj 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/audiobook/__next.audiobook.__PAGE__.txt?_rsc=be37u 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/translate/__next.translate.__PAGE__.txt?_rsc=qos0t 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/ai-edit/__next.ai-edit.__PAGE__.txt?_rsc=ocaa6 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/dictate/__next.dictate.__PAGE__.txt?_rsc=1mtbl 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+c84ae8be303efd08.js:1 [API Response] GET /api/providers/ai_edit - 200
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/settings/__next.settings.__PAGE__.txt?_rsc=nn99t 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/voices/__next.voices.__PAGE__.txt?_rsc=texqn 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/models/__next.models.__PAGE__.txt?_rsc=tifon 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/history/__next.history.__PAGE__.txt?_rsc=pazu2 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/reader/__next.reader.__PAGE__.txt?_rsc=1vt2z 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/audiobook/__next.audiobook.__PAGE__.txt?_rsc=ha19k 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/translate/__next.translate.__PAGE__.txt?_rsc=wkq2j 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+c84ae8be303efd08.js:1 [API Response] GET /api/providers/translation - 200
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/settings/__next.settings.__PAGE__.txt?_rsc=e62g0 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/models/__next.models.__PAGE__.txt?_rsc=9iw3j 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/history/__next.history.__PAGE__.txt?_rsc=19grk 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/voices/__next.voices.__PAGE__.txt?_rsc=19rat 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/transcribe/__next.transcribe.__PAGE__.txt?_rsc=1fb45 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/ai-edit/__next.ai-edit.__PAGE__.txt?_rsc=8i6x9 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/dictate/__next.dictate.__PAGE__.txt?_rsc=19jri 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/reader/__next.reader.__PAGE__.txt?_rsc=igqva 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+c84ae8be303efd08.js:1 [API Response] GET /api/system/capabilities - 200
+VM160 41e25fec8d602832.js:10 [Effect] Polling effect triggered, currentJob: undefined status: undefined
+c84ae8be303efd08.js:1 [API Response] GET /api/transcribe/diarization-status - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/transcribe/engine-status - 200
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/transcribe/__next.transcribe.__PAGE__.txt?_rsc=1nb7e 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/voices/__next.voices.__PAGE__.txt?_rsc=i7k4p 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+c84ae8be303efd08.js:1 [API Response] GET /api/transcribe/diarization-status - 200
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/history/__next.history.__PAGE__.txt?_rsc=8jwkx 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+c84ae8be303efd08.js:1 [API Response] GET /api/voices - 200
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/settings/__next.settings.__PAGE__.txt?_rsc=14ah7 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/audiobook/__next.audiobook.__PAGE__.txt?_rsc=3i8bv 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/models/__next.models.__PAGE__.txt?_rsc=ixzt3 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/translate/__next.translate.__PAGE__.txt?_rsc=1s8l8 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/dictate/__next.dictate.__PAGE__.txt?_rsc=z2sul 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/ai-edit/__next.ai-edit.__PAGE__.txt?_rsc=rkq9b 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/reader/__next.reader.__PAGE__.txt?_rsc=1ge3g 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/models/__next.models.__PAGE__.txt?_rsc=ixzt3 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+c84ae8be303efd08.js:1 [API Response] GET /api/models/status - 200
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/settings/__next.settings.__PAGE__.txt?_rsc=ygo53 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/history/__next.history.__PAGE__.txt?_rsc=1bfer 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/voices/__next.voices.__PAGE__.txt?_rsc=2cn1f 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/transcribe/__next.transcribe.__PAGE__.txt?_rsc=1xevm 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/audiobook/__next.audiobook.__PAGE__.txt?_rsc=1wpjb 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/translate/__next.translate.__PAGE__.txt?_rsc=1mes6 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/ai-edit/__next.ai-edit.__PAGE__.txt?_rsc=lqx6z 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/dictate/__next.dictate.__PAGE__.txt?_rsc=t8zs8 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/reader/__next.reader.__PAGE__.txt?_rsc=1akad 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+c84ae8be303efd08.js:1 [API Response] GET /api/settings - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/providers - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/api-keys - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/providers/catalog - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/hotkeys - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/models/all - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/health - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/system/capabilities - 200
+2c84ae8be303efd08.js:1 [API Response] PUT /api/settings/performance.fast_mode - 200
+c84ae8be303efd08.js:1 [API Response] DELETE /api/models/chatterbox-original - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/providers - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/api-keys - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/providers/catalog - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/hotkeys - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/models/all - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/health - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/system/capabilities - 200
+c84ae8be303efd08.js:1 [API Response] DELETE /api/models/chatterbox-turbo - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/providers - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/api-keys - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/providers/catalog - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/hotkeys - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/models/all - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/health - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/system/capabilities - 200
+c84ae8be303efd08.js:1 [API Response] POST /api/models/chatterbox-original/download - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/providers - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/models/all - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/api-keys - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/providers/catalog - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/settings/hotkeys - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/health - 200
+c84ae8be303efd08.js:1 [API Response] GET /api/system/capabilities - 200
+c84ae8be303efd08.js:1 [API Response] PUT /api/settings/ui.theme - 200
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/history/__next.history.__PAGE__.txt?_rsc=1m0ip 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/transcribe/__next.transcribe.__PAGE__.txt?_rsc=1qhvc 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/audiobook/__next.audiobook.__PAGE__.txt?_rsc=68631 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/dictate/__next.dictate.__PAGE__.txt?_rsc=8idpl 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/reader/__next.reader.__PAGE__.txt?_rsc=13z5p 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+c84ae8be303efd08.js:1 [API Response] PUT /api/settings/ui.minimize_to_tray - 200
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/models/__next.models.__PAGE__.txt?_rsc=1irtn 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+1f0ec75da032508a.js:1 
+        
+        
+       GET http://localhost:8000/settings/__next.settings.__PAGE__.txt?_rsc=3965r 404 (Not Found)
+m @ 1f0ec75da032508a.js:1
+ee @ 1f0ec75da032508a.js:1
+Y @ 1f0ec75da032508a.js:1
+F @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+e @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+(anonymous) @ 1f0ec75da032508a.js:1
+A @ 1f0ec75da032508a.js:1
+5c84ae8be303efd08.js:1 [API Response] PUT /api/settings/ui.minimize_to_tray - 200'
+
+Por favor, antes de ponerte a trabajar este prompt tal y como está aquí, copialo en "plans", donde diga "errores a resolver", y luego haz tu propia planificación, tu propia lista de errores, para irlos resolviendo uno por uno, porque esto te lo he dicho varias veces y no se ha resuelto mucho de esto. En historia y el historial debe haber historial para cada módulo. Cada módulo hace cosas y debe haber historial para cada uno de ellos, no solamente para TTS, Generation y Transkitchen como está ahora. Y otra cosa que me perturba es que, en todos los local models, aparece que Wispr, speakwhisper o lo que sea no está instalado. Sin embargo, en algunos modos me aparece como una opción elegible.
+
+
+En "setting" también me va dando 80 notificaciones que no hacen nada. Y minimis to try, o sea, keep the app running in the try when closed.
+
+<image>
+
+---
+
+## Codex lista de trabajo (por resolver)
+
+Estado: pendiente. Ire tachando uno por uno.
+
+1) Arreglar rutas duplicadas de settings (/api/settings/{path}) y errores en Settings (api-keys, hotkeys).
+2) Unificar seleccion de proveedores (API/local) por modulo y persistencia de seleccion (incluye hotkeys).
+3) Quitar duplicidad Settings vs Models: un solo lugar para modelos, con errores claros de descarga.
+4) Mostrar progreso real y error en descargas (Orpheus 3B y otros).
+5) Historial por modulo (TTS, STT, Reader, AI Edit, Translate, Transcribe).
+6) Aplicar Theme/Language de Settings (sin dejar toggles muertos).
+7) "Minimize to tray" y notificaciones: aplicar settings a Electron.
+8) Reducir 404 de __next.*.txt (prefetch) en Electron.
+9) Mensajes no tecnicos en UI (evitar "pip install ...").
+10) Modelos locales: estados consistentes en todos los modulos (no mostrar instalable como listo).

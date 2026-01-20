@@ -4,24 +4,26 @@ import { useEffect, useState } from 'react';
 import {
   Settings,
   Key,
-  Cpu,
   Keyboard,
   Palette,
   HardDrive,
   Bell,
   Shield,
   Loader2,
+  Zap,
+  Gauge,
+  Settings2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
-  type ProvidersSettings,
   type HotkeysSettings,
   type ModelInfo,
+  type SystemCapabilities,
+  type ProviderCatalogEntry,
   getAllSettings,
-  getProviders,
-  setProvider,
   getApiKeys,
+  getProviderCatalog,
   setApiKey,
   testApiKey,
   getHotkeys,
@@ -31,11 +33,15 @@ import {
   downloadModel,
   deleteModel,
   updateSetting,
+  getSystemCapabilities,
 } from '@/lib/api';
 import { SelectMenu } from '@/components/SelectMenu';
+import { HotkeyRecorder } from '@/components/HotkeyRecorder';
+import { applyLanguage, applyTheme } from '@/lib/uiSettings';
+import { applyActionSoundConfig } from '@/lib/actionSounds';
 
 const settingsSections = [
-  { id: 'providers', label: 'Providers', icon: Cpu, description: 'Choose providers per feature' },
+  { id: 'performance', label: 'Performance', icon: Zap, description: 'GPU, device, and speed settings' },
   { id: 'api-keys', label: 'API Keys', icon: Key, description: 'Manage API keys for cloud services' },
   { id: 'models', label: 'Models', icon: HardDrive, description: 'Install or remove local models' },
   { id: 'hotkeys', label: 'Hotkeys', icon: Keyboard, description: 'Customize global shortcuts' },
@@ -44,44 +50,25 @@ const settingsSections = [
   { id: 'privacy', label: 'Privacy', icon: Shield, description: 'History and analytics' },
 ];
 
-const providerOptions = {
-  tts: [
-    { value: 'chatterbox', label: 'Chatterbox (Local)' },
-    { value: 'kokoro', label: 'Kokoro (Local)' },
-    { value: 'elevenlabs', label: 'ElevenLabs' },
-    { value: 'openai', label: 'OpenAI TTS' },
-  ],
-  stt: [
-    { value: 'faster-whisper-tiny', label: 'Faster-Whisper Tiny' },
-    { value: 'faster-whisper-base', label: 'Faster-Whisper Base' },
-    { value: 'faster-whisper-small', label: 'Faster-Whisper Small' },
-    { value: 'faster-whisper-medium', label: 'Faster-Whisper Medium' },
-    { value: 'faster-whisper-large-v3', label: 'Faster-Whisper Large V3' },
-    { value: 'faster-distil-whisper-large-v3', label: 'Distil-Whisper Large V3' },
-    { value: 'openai', label: 'OpenAI Whisper' },
-    { value: 'deepgram', label: 'Deepgram' },
-  ],
-  ai_edit: [
-    { value: 'ollama', label: 'Ollama (Local)' },
-    { value: 'openai', label: 'OpenAI' },
-    { value: 'claude', label: 'Claude' },
-    { value: 'gemini', label: 'Gemini' },
-  ],
-  translation: [
-    { value: 'argos', label: 'Argos (Local)' },
-    { value: 'deepl', label: 'DeepL' },
-    { value: 'google', label: 'Google Translate' },
-  ],
-};
-
 const apiKeyProviders = [
   { id: 'openai', label: 'OpenAI' },
   { id: 'elevenlabs', label: 'ElevenLabs' },
   { id: 'claude', label: 'Claude' },
   { id: 'gemini', label: 'Gemini' },
+  { id: 'deepseek', label: 'DeepSeek' },
+  { id: 'zhipu', label: 'Zhipu (GLM)' },
+  { id: 'moonshot', label: 'Moonshot (Kimi)' },
+  { id: 'minimax', label: 'MiniMax' },
+  { id: 'groq', label: 'Groq' },
   { id: 'deepl', label: 'DeepL' },
   { id: 'deepgram', label: 'Deepgram' },
   { id: 'google', label: 'Google Translate' },
+  { id: 'fishaudio', label: 'Fish Audio' },
+  { id: 'cartesia', label: 'Cartesia' },
+  { id: 'playht', label: 'PlayHT' },
+  { id: 'siliconflow', label: 'SiliconFlow' },
+  { id: 'zyphra', label: 'Zyphra (Zonos)' },
+  { id: 'narilabs', label: 'Nari Labs (Dia)' },
   { id: 'huggingface', label: 'HuggingFace', description: 'Required for pyannote speaker diarization' },
 ];
 
@@ -96,29 +83,17 @@ const hotkeyLabels: Record<string, string> = {
   speed_down: 'Speed Down',
 };
 
-const providerDefaults: ProvidersSettings = {
-  tts: { selected: 'chatterbox' },
-  stt: { selected: 'faster-whisper-base' },
-  ai_edit: { selected: 'openai' },
-  translation: { selected: 'argos' },
+// Default hotkeys - these match the backend defaults in settings_service.py
+const defaultHotkeys: HotkeysSettings = {
+  dictate: 'Alt+X',
+  read_clipboard: 'Ctrl+Shift+R',
+  pause: 'Ctrl+Shift+P',
+  stop: 'Ctrl+Shift+S',
+  ai_edit: 'Ctrl+Shift+E',
+  translate: 'Ctrl+Shift+T',
+  speed_up: 'Ctrl+Shift+Up',
+  speed_down: 'Ctrl+Shift+Down',
 };
-
-function normalizeProviders(input: any): ProvidersSettings {
-  if (!input || typeof input !== 'object') {
-    return {
-      tts: { ...providerDefaults.tts },
-      stt: { ...providerDefaults.stt },
-      ai_edit: { ...providerDefaults.ai_edit },
-      translation: { ...providerDefaults.translation },
-    };
-  }
-  return {
-    tts: { ...providerDefaults.tts, ...(input.tts || {}) },
-    stt: { ...providerDefaults.stt, ...(input.stt || {}) },
-    ai_edit: { ...providerDefaults.ai_edit, ...(input.ai_edit || {}) },
-    translation: { ...providerDefaults.translation, ...(input.translation || {}) },
-  };
-}
 
 function formatLoadError(err: any) {
   if (!err) return 'failed';
@@ -128,21 +103,22 @@ function formatLoadError(err: any) {
 }
 
 export default function SettingsPage() {
-  const [activeSection, setActiveSection] = useState('providers');
+  const [activeSection, setActiveSection] = useState('performance');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [settings, setSettings] = useState<any>(null);
-  const [providers, setProvidersState] = useState<ProvidersSettings | null>(null);
   const [apiKeys, setApiKeysState] = useState<Record<string, string | null>>({});
-  const [hotkeys, setHotkeysState] = useState<HotkeysSettings>({});
-  const [hotkeyDrafts, setHotkeyDrafts] = useState<HotkeysSettings>({});
+  const [hotkeys, setHotkeysState] = useState<HotkeysSettings>(defaultHotkeys);
+  const [hotkeyDrafts, setHotkeyDrafts] = useState<HotkeysSettings>(defaultHotkeys);
   const [apiKeyDrafts, setApiKeyDrafts] = useState<Record<string, string>>({});
   const [apiKeyStatus, setApiKeyStatus] = useState<Record<string, string>>({});
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelBusy, setModelBusy] = useState<Record<string, string>>({});
   const [confirmModel, setConfirmModel] = useState<ModelInfo | null>(null);
   const [appMeta, setAppMeta] = useState<{ version?: string; build_time?: string } | null>(null);
+  const [capabilities, setCapabilities] = useState<SystemCapabilities | null>(null);
+  const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogEntry[]>([]);
 
   const loadSettings = async () => {
     setLoading(true);
@@ -150,41 +126,57 @@ export default function SettingsPage() {
     try {
       const results = await Promise.allSettled([
         getAllSettings(),
-        getProviders(),
         getApiKeys(),
+        getProviderCatalog(),
         getHotkeys(),
         getAllModels(),
         getHealth(),
+        getSystemCapabilities(),
       ]);
 
       const errors: string[] = [];
 
       if (results[0].status === 'fulfilled') {
         setSettings(results[0].value);
+        if (results[0].value?.ui) {
+          applyTheme(results[0].value.ui.theme);
+          applyLanguage(results[0].value.ui.language);
+          if (window.electronAPI?.updateTraySettings) {
+            window.electronAPI.updateTraySettings({
+              minimizeToTray: results[0].value.ui.minimize_to_tray,
+              showNotifications: results[0].value.ui.show_notifications,
+            });
+          }
+        }
       } else {
         errors.push(`settings ${formatLoadError(results[0].reason)}`);
       }
 
       if (results[1].status === 'fulfilled') {
-        setProvidersState(normalizeProviders(results[1].value));
+        setApiKeysState(results[1].value.api_keys || {});
       } else {
-        errors.push(`providers ${formatLoadError(results[1].reason)}`);
+        errors.push(`api keys ${formatLoadError(results[1].reason)}`);
       }
 
       if (results[2].status === 'fulfilled') {
-        setApiKeysState(results[2].value.api_keys || {});
+        setProviderCatalog(results[2].value.providers || []);
       } else {
-        errors.push(`api keys ${formatLoadError(results[2].reason)}`);
+        setProviderCatalog([]);
+        errors.push(`provider catalog ${formatLoadError(results[2].reason)}`);
       }
 
       if (results[3].status === 'fulfilled') {
-        setHotkeysState(results[3].value);
-        setHotkeyDrafts(results[3].value);
+        const loadedHotkeys = { ...defaultHotkeys, ...results[3].value };
+        setHotkeysState(loadedHotkeys);
+        setHotkeyDrafts(loadedHotkeys);
         if (window.electronAPI?.updateHotkeys) {
-          window.electronAPI.updateHotkeys(results[3].value);
+          window.electronAPI.updateHotkeys(loadedHotkeys);
         }
       } else {
         errors.push(`hotkeys ${formatLoadError(results[3].reason)}`);
+        if (window.electronAPI?.updateHotkeys) {
+          window.electronAPI.updateHotkeys(defaultHotkeys);
+        }
       }
 
       if (results[4].status === 'fulfilled') {
@@ -198,6 +190,12 @@ export default function SettingsPage() {
       } else {
         setAppMeta(null);
         errors.push(`health ${formatLoadError(results[5].reason)}`);
+      }
+
+      if (results[6].status === 'fulfilled') {
+        setCapabilities(results[6].value);
+      } else {
+        errors.push(`capabilities ${formatLoadError(results[6].reason)}`);
       }
 
       if (errors.length) {
@@ -215,19 +213,6 @@ export default function SettingsPage() {
   useEffect(() => {
     loadSettings();
   }, []);
-
-  const handleProviderChange = async (functionName: keyof ProvidersSettings, provider: string) => {
-    if (!providers) return;
-    try {
-      await setProvider(functionName, provider);
-      setProvidersState({
-        ...providers,
-        [functionName]: { ...providers[functionName], selected: provider },
-      });
-    } catch (err: any) {
-      setError(err.message || 'Failed to update provider');
-    }
-  };
 
   const handleApiKeySave = async (provider: string) => {
     const value = apiKeyDrafts[provider];
@@ -286,241 +271,291 @@ export default function SettingsPage() {
         current[keys[keys.length - 1]] = value;
         return updated;
       });
+      if (path === 'ui.theme') {
+        applyTheme(value);
+      }
+      if (path === 'ui.language') {
+        applyLanguage(value);
+      }
+      if (path.startsWith('ui.')) {
+        const nextUi = {
+          ...(settings?.ui || {}),
+          [path.split('.')[1]]: value,
+        };
+        if (window.electronAPI?.updateTraySettings) {
+          window.electronAPI.updateTraySettings({
+            minimizeToTray: nextUi.minimize_to_tray,
+            showNotifications: nextUi.show_notifications,
+          });
+        }
+        if (path.startsWith('ui.action_sounds.')) {
+          const key = path.split('.')[2];
+          applyActionSoundConfig({ [key]: value });
+        }
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to update setting');
     }
   };
 
   const handleModelDownload = async (modelId: string) => {
+    // Legacy function, now handled in Models page. 
+    // Kept here if ConfirmDialog needs it or other refs, but eventually safe to remove.
+    // For now we just implement minimal logic to satisfy types if needed.
     setModelBusy((prev) => ({ ...prev, [modelId]: 'Downloading...' }));
     try {
       await downloadModel(modelId);
       await loadSettings();
-    } catch (err: any) {
-      setError(err.message || 'Model download failed');
     } finally {
       setModelBusy((prev) => ({ ...prev, [modelId]: '' }));
     }
   };
 
-  const handleModelDelete = async (modelId: string) => {
-    setModelBusy((prev) => ({ ...prev, [modelId]: 'Deleting...' }));
-    try {
-      await deleteModel(modelId);
-      await loadSettings();
-    } catch (err: any) {
-      setError(err.message || 'Model delete failed');
-    } finally {
-      setModelBusy((prev) => ({ ...prev, [modelId]: '' }));
-    }
-  };
+  const apiProviders = providerCatalog.length
+    ? [
+      ...providerCatalog
+        .filter((provider) => provider.type === 'api' && provider.implemented !== false)
+        .map((provider) => ({
+          id: provider.id,
+          label: provider.name,
+          description: provider.description,
+          docsUrl: provider.docs_url,
+          pricingUrl: provider.pricing_url,
+          pricingUnit: provider.pricing_unit,
+          pricingNote: provider.pricing_note,
+          consoleUrl: provider.console_url,
+          keyLabel: provider.key_label,
+          keyInstructions: provider.key_instructions,
+        })),
+      {
+        id: 'huggingface',
+        label: 'HuggingFace',
+        description: 'Required for pyannote speaker diarization',
+        docsUrl: 'https://huggingface.co/docs',
+        consoleUrl: 'https://huggingface.co/settings/tokens',
+        pricingUnit: 'Free (token-gated models may have terms)',
+      },
+    ]
+    : apiKeyProviders.map((provider) => ({
+      id: provider.id,
+      label: provider.label,
+      description: provider.description,
+    }));
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[300px]">
-        <Loader2 className="w-8 h-8 animate-spin text-foreground-muted" />
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-10 h-10 animate-spin text-accent-primary" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-8 animate-slide-up">
-      <ConfirmDialog
-        open={!!confirmModel}
-        title={`Install ${confirmModel?.name || 'model'}?`}
-        description={
-          confirmModel
-            ? `This will download about ${confirmModel.size_mb} MB to your disk.`
-            : undefined
-        }
-        confirmLabel="Download"
-        onCancel={() => setConfirmModel(null)}
-        onConfirm={async () => {
-          if (!confirmModel) return;
-          const modelId = confirmModel.id;
-          setConfirmModel(null);
-          await handleModelDownload(modelId);
-        }}
-        busy={!!(confirmModel && modelBusy[confirmModel.id])}
-      />
-      <div className="flex items-start justify-between gap-6">
-        <div className="space-y-2">
-          <h1 className="text-4xl font-bold text-gradient">Settings</h1>
-          <p className="text-foreground-muted">
-            Configure providers, API keys, models, and hotkeys.
-          </p>
-        </div>
-        <div className="text-xs text-foreground-muted text-right">
-          <div>Version {appMeta?.version || 'dev'}</div>
-          {appMeta?.build_time && <div>Build {appMeta.build_time}</div>}
-        </div>
+    <div className="flex h-[calc(100vh-6rem)] overflow-hidden gap-8">
+      {/* Sidebar */}
+      <div className="w-64 flex-shrink-0 space-y-1">
+        {settingsSections.map((section) => {
+          const Icon = section.icon;
+          return (
+            <button
+              key={section.id}
+              onClick={() => setActiveSection(section.id)}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
+                activeSection === section.id
+                  ? 'bg-accent-primary/10 text-accent-primary font-medium'
+                  : 'text-foreground-secondary hover:text-foreground hover:bg-surface-2'
+              )}
+            >
+              <Icon className="w-5 h-5" />
+              <span>{section.label}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {error && (
-        <div className="glass-card p-4 border-red-500/30 bg-red-500/10 text-red-300">
-          {error}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-1">
-          <div className="glass-card p-2 space-y-1">
-            {settingsSections.map((section) => {
-              const Icon = section.icon;
-              return (
-                <button
-                  key={section.id}
-                  onClick={() => setActiveSection(section.id)}
-                  className={cn(
-                    'w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all',
-                    activeSection === section.id
-                      ? 'bg-gradient-to-r from-emerald-500/20 to-amber-400/20 text-foreground'
-                      : 'text-foreground-muted hover:bg-white/5 hover:text-foreground'
-                  )}
-                >
-                  <Icon className={cn(
-                    'w-5 h-5',
-                    activeSection === section.id ? 'text-emerald-300' : ''
-                  )} />
-                  <span className="font-medium">{section.label}</span>
-                </button>
-              );
-            })}
+      {/* Content Area */}
+      <div className="flex-1 min-w-0 max-w-4xl space-y-8 animate-fade-in overflow-y-auto pr-4 custom-scrollbar">
+        <div className="flex items-center justify-between sticky top-0 bg-background/80 backdrop-blur-md py-4 z-30">
+          <div>
+            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-accent-primary to-accent-secondary">
+              Settings
+            </h1>
           </div>
+          {appMeta && (
+            <div className="text-right text-xs text-foreground-muted">
+              <p>v{appMeta.version}</p>
+            </div>
+          )}
         </div>
 
-        <div className="lg:col-span-3">
-          <div className="glass-card p-8">
-            {activeSection === 'providers' && providers && (
-              <ProvidersSection
-                providers={normalizeProviders(providers)}
-                onChange={handleProviderChange}
-              />
-            )}
-            {activeSection === 'api-keys' && (
-              <APIKeysSettings
-                apiKeys={apiKeys}
-                drafts={apiKeyDrafts}
-                status={apiKeyStatus}
-                onDraftChange={setApiKeyDrafts}
-                onSave={handleApiKeySave}
-                onTest={handleApiKeyTest}
-              />
-            )}
-            {activeSection === 'models' && (
-              <ModelsSettings
-                models={models}
-                busy={modelBusy}
-                onDownload={(modelId) => {
-                  const model = models.find((item) => item.id === modelId) || null;
-                  setConfirmModel(model);
-                }}
-                onDelete={handleModelDelete}
-              />
-            )}
-            {activeSection === 'hotkeys' && (
-              <HotkeysSettingsView
-                hotkeys={hotkeys}
-                drafts={hotkeyDrafts}
-                onDraftChange={setHotkeyDrafts}
-                onSave={handleHotkeySave}
-              />
-            )}
-            {activeSection === 'appearance' && settings?.ui && (
-              <AppearanceSettings
-                theme={settings.ui.theme}
-                language={settings.ui.language}
-                onChange={handleSettingChange}
-              />
-            )}
-            {activeSection === 'notifications' && settings?.ui && (
-              <NotificationsSettings
-                showNotifications={settings.ui.show_notifications}
-                minimizeToTray={settings.ui.minimize_to_tray}
-                onChange={handleSettingChange}
-              />
-            )}
-            {activeSection === 'privacy' && settings?.ui && (
-              <PrivacySettings
-                saveHistory={settings.ui.save_history}
-                analytics={settings.ui.analytics}
-                onChange={handleSettingChange}
-              />
-            )}
-          </div>
+        <div className="pb-20">
+          {activeSection === 'performance' && settings?.performance && (
+            <PerformanceSettings
+              device={settings.performance.device}
+              fastMode={settings.performance.fast_mode}
+              preloadModels={settings.performance.preload_models}
+              cudaAvailable={capabilities?.cuda_available ?? false}
+              onChange={handleSettingChange}
+            />
+          )}
+
+          {activeSection === 'api-keys' && (
+            <APIKeysSettings
+              providers={apiProviders}
+              apiKeys={apiKeys}
+              drafts={apiKeyDrafts}
+              status={apiKeyStatus}
+              onDraftChange={setApiKeyDrafts}
+              onSave={handleApiKeySave}
+              onTest={handleApiKeyTest}
+            />
+          )}
+
+          {activeSection === 'models' && (
+            <ModelsSettings />
+          )}
+
+          {activeSection === 'hotkeys' && (
+            <HotkeysSettingsView
+              hotkeys={hotkeys}
+              drafts={hotkeyDrafts}
+              onDraftChange={setHotkeyDrafts}
+              onSave={handleHotkeySave}
+            />
+          )}
+
+          {activeSection === 'appearance' && settings?.ui && (
+            <AppearanceSettings
+              theme={settings.ui.theme}
+              language={settings.ui.language}
+              onChange={handleSettingChange}
+            />
+          )}
+
+          {activeSection === 'notifications' && settings?.ui && (
+            <NotificationsSettings
+              showNotifications={settings.ui.show_notifications}
+              minimizeToTray={settings.ui.minimize_to_tray}
+              actionSounds={settings.ui.action_sounds}
+              onChange={handleSettingChange}
+            />
+          )}
+
+          {activeSection === 'privacy' && settings?.ui && (
+            <PrivacySettings
+              saveHistory={settings.ui.save_history}
+              analytics={settings.ui.analytics}
+              onChange={handleSettingChange}
+            />
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function ProvidersSection({
-  providers,
+/* =========================================================
+   SUB-COMPONENTS
+   ========================================================= */
+
+function PerformanceSettings({
+  device,
+  fastMode,
+  preloadModels,
   onChange,
+  cudaAvailable,
 }: {
-  providers: ProvidersSettings;
-  onChange: (fn: keyof ProvidersSettings, provider: string) => void;
+  device: string;
+  fastMode: boolean;
+  preloadModels: boolean;
+  onChange: (key: string, value: any) => void;
+  cudaAvailable: boolean;
 }) {
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-foreground mb-2">Providers</h2>
-        <p className="text-foreground-muted text-sm">Pick the engine for each feature</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Performance</h2>
+          <p className="text-foreground-muted text-sm">Manage compute resources and optimization</p>
+        </div>
       </div>
 
-      <ProviderSelector
-        label="Text to Speech"
-        options={providerOptions.tts}
-        value={providers.tts.selected}
-        onChange={(value) => onChange('tts', value)}
-      />
-      <ProviderSelector
-        label="Speech to Text"
-        options={providerOptions.stt}
-        value={providers.stt.selected}
-        onChange={(value) => onChange('stt', value)}
-      />
-      <ProviderSelector
-        label="AI Edit"
-        options={providerOptions.ai_edit}
-        value={providers.ai_edit.selected}
-        onChange={(value) => onChange('ai_edit', value)}
-      />
-      <ProviderSelector
-        label="Translation"
-        options={providerOptions.translation}
-        value={providers.translation.selected}
-        onChange={(value) => onChange('translation', value)}
-      />
-    </div>
-  );
-}
+      <div className="grid gap-4">
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-foreground">Inference Device</span>
+              {device === 'cuda' && <span className="badge badge-success text-xs">CUDA Active</span>}
+            </div>
+            <p className="text-xs text-foreground-muted mt-1">
+              Select hardware for AI processing
+            </p>
+          </div>
+          <SelectMenu
+            value={device}
+            options={[
+              { value: 'auto', label: 'Auto (Best Available)' },
+              { value: 'cuda', label: 'GPU (NVIDIA CUDA)', disabled: !cudaAvailable },
+              { value: 'cpu', label: 'CPU (Slower)' },
+            ]}
+            onChange={(val) => onChange('performance.device', val)}
+            buttonClassName="w-48"
+          />
+        </div>
 
-function ProviderSelector({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: { value: string; label: string }[];
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="glass p-4 rounded-xl flex items-center justify-between">
-      <span className="font-medium text-foreground">{label}</span>
-      <SelectMenu
-        value={value}
-        options={options}
-        onChange={onChange}
-        buttonClassName="w-56 text-sm"
-      />
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <span className="font-medium text-foreground">Fast Mode (Turbo)</span>
+            <p className="text-xs text-foreground-muted mt-1">
+              Optimizes inference for speed (fp16/int8). Slight quality loss.
+            </p>
+          </div>
+          <button
+            onClick={() => onChange('performance.fast_mode', !fastMode)}
+            className={cn(
+              'w-12 h-7 rounded-full transition-colors relative',
+              fastMode ? 'bg-accent-primary' : 'bg-surface-3'
+            )}
+          >
+            <div
+              className={cn(
+                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
+                fastMode ? 'translate-x-6' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
+
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <span className="font-medium text-foreground">Preload Models</span>
+            <p className="text-xs text-foreground-muted mt-1">
+              Load TTS models at startup for instant response. Uses more RAM.
+            </p>
+          </div>
+          <button
+            onClick={() => onChange('performance.preload_models', !preloadModels)}
+            className={cn(
+              'w-12 h-7 rounded-full transition-colors relative',
+              preloadModels ? 'bg-accent-primary' : 'bg-surface-3'
+            )}
+          >
+            <div
+              className={cn(
+                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
+                preloadModels ? 'translate-x-6' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 function APIKeysSettings({
+  providers,
   apiKeys,
   drafts,
   status,
@@ -528,6 +563,7 @@ function APIKeysSettings({
   onSave,
   onTest,
 }: {
+  providers: Array<{ id: string; label: string; description?: string; docsUrl?: string; pricingUrl?: string; consoleUrl?: string; keyLabel?: string; keyInstructions?: string; pricingUnit?: string; pricingNote?: string; }>;
   apiKeys: Record<string, string | null>;
   drafts: Record<string, string>;
   status: Record<string, string>;
@@ -535,104 +571,133 @@ function APIKeysSettings({
   onSave: (provider: string) => void;
   onTest: (provider: string) => void;
 }) {
+  const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
+
+  const toggleVisibility = (provider: string) => {
+    setVisibleKeys((prev) => ({ ...prev, [provider]: !prev[provider] }));
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-foreground mb-2">API Keys</h2>
-        <p className="text-foreground-muted text-sm">Store and validate cloud API keys</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">API Keys</h2>
+          <p className="text-foreground-muted text-sm">Configure access to cloud AI providers</p>
+        </div>
       </div>
 
-      <div className="space-y-4">
-        {apiKeyProviders.map((provider) => (
-          <div key={provider.id} className="glass p-4 rounded-xl space-y-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-foreground">{provider.label}</label>
-                {provider.description && (
-                  <p className="text-xs text-foreground-muted">{provider.description}</p>
+      <div className="grid gap-4">
+        {providers.map((provider) => {
+          const isConfigured = !!apiKeys[provider.id];
+          const currentStatus = status[provider.id];
+          const draftValue = drafts[provider.id] || '';
+          const isVisible = visibleKeys[provider.id];
+
+          return (
+            <div key={provider.id} className="glass-card p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-foreground">{provider.label}</span>
+                    {isConfigured && <span className="badge badge-success text-[10px]">Active</span>}
+                  </div>
+                  {currentStatus && (
+                    <span className={cn(
+                      "text-xs font-mono block mt-0.5",
+                      currentStatus === 'Valid' ? "text-emerald-400" :
+                        currentStatus === 'Saved' ? "text-emerald-400" : "text-amber-400"
+                    )}>
+                      {currentStatus}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {provider.description && (
+                <p className="text-xs text-foreground-muted">{provider.description}</p>
+              )}
+
+              <div className="flex flex-wrap gap-2 text-xs text-foreground-muted">
+                {provider.docsUrl && (
+                  <button
+                    onClick={() => {
+                      if (window.electronAPI?.openExternal) {
+                        window.electronAPI.openExternal(provider.docsUrl!);
+                      } else {
+                        window.open(provider.docsUrl, '_blank');
+                      }
+                    }}
+                    className="underline hover:text-accent-primary"
+                  >
+                    Docs
+                  </button>
+                )}
+                {provider.pricingUrl && (
+                  <button
+                    onClick={() => {
+                      if (window.electronAPI?.openExternal) {
+                        window.electronAPI.openExternal(provider.pricingUrl!);
+                      } else {
+                        window.open(provider.pricingUrl, '_blank');
+                      }
+                    }}
+                    className="underline hover:text-accent-primary"
+                  >
+                    Pricing
+                  </button>
+                )}
+                {provider.consoleUrl && (
+                  <button
+                    onClick={() => {
+                      if (window.electronAPI?.openExternal) {
+                        window.electronAPI.openExternal(provider.consoleUrl!);
+                      } else {
+                        window.open(provider.consoleUrl, '_blank');
+                      }
+                    }}
+                    className="underline hover:text-accent-primary"
+                  >
+                    Get Key
+                  </button>
                 )}
               </div>
-              <span className="text-xs text-foreground-muted">
-                {apiKeys[provider.id] ? apiKeys[provider.id] : 'Not configured'}
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                placeholder="Enter API key"
-                className="input flex-1"
-                value={drafts[provider.id] || ''}
-                onChange={(e) => onDraftChange({ ...drafts, [provider.id]: e.target.value })}
-              />
-              <button className="btn btn-secondary" onClick={() => onTest(provider.id)}>
-                Test
-              </button>
-              <button className="btn btn-primary" onClick={() => onSave(provider.id)}>
-                Save
-              </button>
-            </div>
-            {status[provider.id] && (
-              <p className="text-xs text-foreground-muted">{status[provider.id]}</p>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
-function ModelsSettings({
-  models,
-  busy,
-  onDownload,
-  onDelete,
-}: {
-  models: ModelInfo[];
-  busy: Record<string, string>;
-  onDownload: (modelId: string) => void;
-  onDelete: (modelId: string) => void;
-}) {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-foreground mb-2">Local Models</h2>
-        <p className="text-foreground-muted text-sm">Download or remove models for offline use</p>
-      </div>
-
-      <div className="space-y-4 max-h-[520px] overflow-y-auto pr-2">
-        {models.map((model) => (
-          <div key={model.id} className="glass p-4 rounded-xl flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <p className="font-medium text-foreground">{model.name}</p>
-                <span className="badge text-xs">{model.category.toUpperCase()}</span>
-                {model.installed && <span className="badge badge-success">Installed</span>}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type={isVisible ? "text" : "password"}
+                    value={draftValue}
+                    onChange={(e) => onDraftChange({ ...drafts, [provider.id]: e.target.value })}
+                    placeholder={isConfigured ? "••••••••••••••••" : "Enter API Key"}
+                    className="input font-mono text-sm pr-10"
+                  />
+                  <button
+                    onClick={() => toggleVisibility(provider.id)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-foreground-muted hover:text-foreground"
+                    type="button"
+                  >
+                    {isVisible ? <Settings className="w-4 h-4" /> : <Key className="w-4 h-4" />}
+                  </button>
+                </div>
+                <button
+                  onClick={() => onSave(provider.id)}
+                  disabled={!draftValue}
+                  className="btn btn-primary px-4"
+                >
+                  Save
+                </button>
+                {isConfigured && (
+                  <button
+                    onClick={() => onTest(provider.id)}
+                    className="btn btn-secondary px-4"
+                  >
+                    Test
+                  </button>
+                )}
               </div>
-              <p className="text-xs text-foreground-muted mt-1">{model.description}</p>
-              <p className="text-xs text-foreground-muted mt-1">Size: {model.size_mb} MB</p>
             </div>
-
-            <div className="flex items-center gap-2">
-              {model.installed ? (
-                <button
-                  className="btn btn-danger text-sm"
-                  onClick={() => onDelete(model.id)}
-                  disabled={!!busy[model.id]}
-                >
-                  {busy[model.id] || 'Remove'}
-                </button>
-              ) : (
-                <button
-                  className="btn btn-primary text-sm"
-                  onClick={() => onDownload(model.id)}
-                  disabled={!!busy[model.id]}
-                >
-                  {busy[model.id] || 'Download'}
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -649,29 +714,34 @@ function HotkeysSettingsView({
   onDraftChange: (drafts: HotkeysSettings) => void;
   onSave: (action: string) => void;
 }) {
-  const actions = Object.keys(hotkeys);
-
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-foreground mb-2">Hotkeys</h2>
-        <p className="text-foreground-muted text-sm">Set global shortcuts</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Hotkeys</h2>
+          <p className="text-foreground-muted text-sm">Global system shortcuts</p>
+        </div>
       </div>
 
-      <div className="space-y-4">
-        {actions.map((action) => (
-          <div key={action} className="glass p-4 rounded-xl flex items-center justify-between gap-4">
-            <span className="font-medium text-foreground">{hotkeyLabels[action] || action}</span>
-            <div className="flex items-center gap-2">
-              <input
-                className="input w-40 font-mono text-sm"
-                value={drafts[action] || ''}
-                onChange={(e) => onDraftChange({ ...drafts, [action]: e.target.value })}
+      <div className="grid gap-4">
+        {Object.entries(hotkeyLabels).map(([action, label]) => (
+          <div key={action} className="glass-card p-4 flex items-center justify-between gap-4">
+            <span className="font-medium text-foreground min-w-[140px]">{label}</span>
+            <div className="flex-1 max-w-sm">
+              <HotkeyRecorder
+                value={drafts[action as keyof HotkeysSettings] || ''}
+                onChange={(val) => {
+                  onDraftChange({ ...drafts, [action]: val });
+                }}
               />
-              <button className="btn btn-secondary" onClick={() => onSave(action)}>
-                Save
-              </button>
             </div>
+            <button
+              onClick={() => onSave(action)}
+              disabled={drafts[action as keyof HotkeysSettings] === hotkeys[action as keyof HotkeysSettings]}
+              className="btn btn-secondary text-xs h-9"
+            >
+              Save
+            </button>
           </div>
         ))}
       </div>
@@ -686,39 +756,41 @@ function AppearanceSettings({
 }: {
   theme: string;
   language: string;
-  onChange: (path: string, value: any) => void;
+  onChange: (key: string, value: string) => void;
 }) {
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-foreground mb-2">Appearance</h2>
-        <p className="text-foreground-muted text-sm">Theme and language settings</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Appearance</h2>
+          <p className="text-foreground-muted text-sm">Customize UI theme and language</p>
+        </div>
       </div>
 
       <div className="space-y-4">
-        <div className="glass p-4 rounded-xl flex items-center justify-between">
+        <div className="glass-card p-4 flex items-center justify-between relative z-20">
           <span className="font-medium text-foreground">Theme</span>
           <SelectMenu
             value={theme}
             options={[
-              { value: 'dark', label: 'Dark' },
-              { value: 'light', label: 'Light' },
-              { value: 'system', label: 'System' },
+              { value: 'dark', label: 'Dark (Midnight)' },
+              { value: 'light', label: 'Light (Clean)' },
+              { value: 'system', label: 'System Default' },
             ]}
-            onChange={(value) => onChange('ui.theme', value)}
-            buttonClassName="w-32 text-sm"
+            onChange={(val) => onChange('ui.theme', val)}
+            buttonClassName="w-40"
           />
         </div>
-        <div className="glass p-4 rounded-xl flex items-center justify-between">
+        <div className="glass-card p-4 flex items-center justify-between relative z-10">
           <span className="font-medium text-foreground">Language</span>
           <SelectMenu
             value={language}
             options={[
               { value: 'en', label: 'English' },
-              { value: 'es', label: 'Espanol' },
+              { value: 'es', label: 'Español' },
             ]}
-            onChange={(value) => onChange('ui.language', value)}
-            buttonClassName="w-32 text-sm"
+            onChange={(val) => onChange('ui.language', val)}
+            buttonClassName="w-40"
           />
         </div>
       </div>
@@ -729,32 +801,111 @@ function AppearanceSettings({
 function NotificationsSettings({
   showNotifications,
   minimizeToTray,
+  actionSounds,
   onChange,
 }: {
   showNotifications: boolean;
   minimizeToTray: boolean;
-  onChange: (path: string, value: any) => void;
+  actionSounds?: { start?: boolean; complete?: boolean };
+  onChange: (key: string, value: boolean) => void;
 }) {
+  const startSoundEnabled = actionSounds?.start ?? true;
+  const completeSoundEnabled = actionSounds?.complete ?? true;
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-foreground mb-2">Notifications</h2>
-        <p className="text-foreground-muted text-sm">Configure alerts and tray behavior</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Notifications & Tray</h2>
+          <p className="text-foreground-muted text-sm">Control desktop integration</p>
+        </div>
       </div>
 
       <div className="space-y-4">
-        <ToggleSetting
-          label="Show notifications"
-          description="Display system notifications for events"
-          checked={showNotifications}
-          onToggle={(val) => onChange('ui.show_notifications', val)}
-        />
-        <ToggleSetting
-          label="Minimize to tray"
-          description="Keep the app running in the tray when closed"
-          checked={minimizeToTray}
-          onToggle={(val) => onChange('ui.minimize_to_tray', val)}
-        />
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <span className="font-medium text-foreground">Show Notifications</span>
+            <p className="text-xs text-foreground-muted mt-0.5">System/OS notifications on completion</p>
+          </div>
+          <button
+            onClick={() => onChange('ui.show_notifications', !showNotifications)}
+            className={cn(
+              'w-12 h-7 rounded-full transition-colors relative',
+              showNotifications ? 'bg-accent-primary' : 'bg-surface-3'
+            )}
+          >
+            <div
+              className={cn(
+                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
+                showNotifications ? 'translate-x-6' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
+
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <span className="font-medium text-foreground">Minimize to Tray</span>
+            <p className="text-xs text-foreground-muted mt-0.5">Keep app running in background</p>
+          </div>
+          <button
+            onClick={() => onChange('ui.minimize_to_tray', !minimizeToTray)}
+            className={cn(
+              'w-12 h-7 rounded-full transition-colors relative',
+              minimizeToTray ? 'bg-accent-primary' : 'bg-surface-3'
+            )}
+          >
+            <div
+              className={cn(
+                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
+                minimizeToTray ? 'translate-x-6' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <span className="font-medium text-foreground">Action sound on start</span>
+            <p className="text-xs text-foreground-muted mt-0.5">
+              Play a short tone when recording or generation begins.
+            </p>
+          </div>
+          <button
+            onClick={() => onChange('ui.action_sounds.start', !startSoundEnabled)}
+            className={cn(
+              'w-12 h-7 rounded-full transition-colors relative',
+              startSoundEnabled ? 'bg-accent-primary' : 'bg-surface-3'
+            )}
+          >
+            <div
+              className={cn(
+                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
+                startSoundEnabled ? 'translate-x-6' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <span className="font-medium text-foreground">Action sound on completion</span>
+            <p className="text-xs text-foreground-muted mt-0.5">
+              Play a short tone when the current action finishes.
+            </p>
+          </div>
+          <button
+            onClick={() => onChange('ui.action_sounds.complete', !completeSoundEnabled)}
+            className={cn(
+              'w-12 h-7 rounded-full transition-colors relative',
+              completeSoundEnabled ? 'bg-accent-primary' : 'bg-surface-3'
+            )}
+          >
+            <div
+              className={cn(
+                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
+                completeSoundEnabled ? 'translate-x-6' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -767,64 +918,95 @@ function PrivacySettings({
 }: {
   saveHistory: boolean;
   analytics: boolean;
-  onChange: (path: string, value: any) => void;
+  onChange: (key: string, value: boolean) => void;
 }) {
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-foreground mb-2">Privacy</h2>
-        <p className="text-foreground-muted text-sm">Control what gets saved locally</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Privacy</h2>
+          <p className="text-foreground-muted text-sm">Data retention and reporting</p>
+        </div>
       </div>
 
       <div className="space-y-4">
-        <ToggleSetting
-          label="Save history"
-          description="Store generation history in the local database"
-          checked={saveHistory}
-          onToggle={(val) => onChange('ui.save_history', val)}
-        />
-        <ToggleSetting
-          label="Analytics"
-          description="Share anonymous usage analytics"
-          checked={analytics}
-          onToggle={(val) => onChange('ui.analytics', val)}
-        />
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <span className="font-medium text-foreground">Save Generation History</span>
+            <p className="text-xs text-foreground-muted mt-0.5">Keep logs of your generated audio</p>
+          </div>
+          <button
+            onClick={() => onChange('ui.save_history', !saveHistory)}
+            className={cn(
+              'w-12 h-7 rounded-full transition-colors relative',
+              saveHistory ? 'bg-accent-primary' : 'bg-surface-3'
+            )}
+          >
+            <div
+              className={cn(
+                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
+                saveHistory ? 'translate-x-6' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
+
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <span className="font-medium text-foreground">Share Analytics</span>
+            <p className="text-xs text-foreground-muted mt-0.5">Help improve Chatterbox (Anonymous)</p>
+          </div>
+          <button
+            onClick={() => onChange('ui.analytics', !analytics)}
+            className={cn(
+              'w-12 h-7 rounded-full transition-colors relative',
+              analytics ? 'bg-accent-primary' : 'bg-surface-3'
+            )}
+          >
+            <div
+              className={cn(
+                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
+                analytics ? 'translate-x-6' : 'translate-x-1'
+              )}
+            />
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-function ToggleSetting({
-  label,
-  description,
-  checked,
-  onToggle,
-}: {
-  label: string;
-  description: string;
-  checked: boolean;
-  onToggle: (value: boolean) => void;
-}) {
+function ModelsSettings() {
+  const router = typeof window !== 'undefined' ? require('next/navigation').useRouter() : null;
+
   return (
-    <div className="glass p-4 rounded-xl flex items-center justify-between">
-      <div>
-        <p className="font-medium text-foreground">{label}</p>
-        <p className="text-xs text-foreground-muted">{description}</p>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Local Models</h2>
+          <p className="text-foreground-muted text-sm">Download or remove models for offline use</p>
+        </div>
       </div>
-      <button
-        onClick={() => onToggle(!checked)}
-        className={cn(
-          'w-12 h-7 rounded-full transition-colors relative',
-          checked ? 'bg-emerald-500' : 'bg-white/10'
-        )}
-      >
-        <div
-          className={cn(
-            'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
-            checked ? 'translate-x-6' : 'translate-x-1'
-          )}
-        />
-      </button>
+
+      <div className="card p-8 flex flex-col items-center justify-center text-center space-y-6 border-dashed border-2 border-glass-border bg-transparent">
+        <div className="w-16 h-16 rounded-full bg-accent-primary/10 flex items-center justify-center mb-2">
+          <HardDrive className="w-8 h-8 text-accent-primary" />
+        </div>
+        <div className="max-w-md space-y-2">
+          <h3 className="text-lg font-semibold text-foreground">Advanced Model Management</h3>
+          <p className="text-foreground-secondary">
+            We have moved model management to a dedicated page with detailed progress tracking,
+            Speech-to-Text models, and API provider diagnostics.
+          </p>
+        </div>
+        <a
+          href="/models?tab=local"
+          className="btn btn-primary px-8 py-3 flex items-center gap-2 shadow-lg shadow-accent-primary/20 hover:scale-105 transition-transform"
+        >
+          <Settings2 className="w-4 h-4" />
+          Manage Models
+        </a>
+      </div>
     </div>
   );
 }

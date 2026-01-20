@@ -1,19 +1,45 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileText, Download, Loader2, Check } from 'lucide-react';
 import { ProgressBar } from '@/components/ProgressBar';
 import { SelectMenu } from '@/components/SelectMenu';
+import { DeviceToggle } from '@/components/DeviceToggle';
+import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
+import { PresetVoiceSelector } from '@/components/PresetVoiceSelector';
+import { AdvancedSettings, getDefaultParamValues } from '@/components/AdvancedSettings';
+import { TTSProviderInfo, getTTSProvider } from '@/lib/api';
 import {
   parseDocument,
   generateBook,
   getJobStatus,
+  pauseBookJob,
+  resumeBookJob,
+  cancelBookJob,
   getAudioUrl,
   Chapter,
   JobStatus,
+  ServiceProviderInfo,
+  getProviderSelection,
+  setProvider,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  en: 'English',
+  es: 'Spanish',
+  fr: 'French',
+  de: 'German',
+  it: 'Italian',
+  pt: 'Portuguese',
+  zh: 'Chinese',
+  ja: 'Japanese',
+  ko: 'Korean',
+  'en-us': 'English (US)',
+  'en-gb': 'English (UK)',
+  hi: 'Hindi',
+};
 
 export default function AudiobookPage() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -24,11 +50,65 @@ export default function AudiobookPage() {
   const [language, setLanguage] = useState('en');
   const [outputFormat, setOutputFormat] = useState('mp3');
 
+  // Device settings
+  const [device, setDevice] = useState<'auto' | 'cuda' | 'cpu'>('auto');
+  const [fastMode, setFastMode] = useState(false);
+
+  // Provider settings
+  const [provider, setProviderState] = useState('chatterbox');
+  const [providerInfo, setProviderInfo] = useState<ServiceProviderInfo | null>(null);
+  const [ttsProviderInfo, setTtsProviderInfo] = useState<TTSProviderInfo | null>(null);
+  const [presetVoiceId, setPresetVoiceId] = useState<string | null>(null);
+  const [providerConfig, setProviderConfig] = useState<Record<string, any>>({});
+  const [advancedSettings, setAdvancedSettings] = useState<Record<string, number | string | boolean>>({
+    temperature: 0.8,
+    exaggeration: 0.5,
+    cfg_weight: 0.5,
+    speed: 1.0,
+  });
+  const didLoadRef = useRef(false);
+
   const [isLoading, setIsLoading] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
+
+  const languageOptions = useMemo(() => {
+    const fallback = ['en', 'es', 'fr', 'de', 'it', 'pt', 'zh', 'ja', 'ko'];
+    const source = ttsProviderInfo?.supported_languages?.length
+      ? ttsProviderInfo.supported_languages
+      : fallback;
+    return source.map((code) => ({
+      value: code,
+      label: LANGUAGE_LABELS[code] || code.toUpperCase(),
+    }));
+  }, [ttsProviderInfo?.supported_languages]);
+
+  useEffect(() => {
+    if (provider === 'chatterbox' && model !== 'multilingual' && language !== 'en') {
+      setLanguage('en');
+    }
+  }, [provider, model, language]);
+
+  useEffect(() => {
+    const values = languageOptions.map((option) => option.value);
+    if (values.length && !values.includes(language)) {
+      setLanguage(values[0]);
+    }
+  }, [languageOptions, language]);
+
+  // Update advanced settings when provider changes
+  useEffect(() => {
+    if (ttsProviderInfo?.extra_params) {
+      const defaults = getDefaultParamValues(ttsProviderInfo.extra_params);
+      setAdvancedSettings(prev => ({
+        ...prev,
+        ...defaults,
+        speed: prev.speed ?? 1.0,  // Always preserve speed
+      }));
+    }
+  }, [ttsProviderInfo?.id]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -48,6 +128,65 @@ export default function AudiobookPage() {
       setIsParsing(false);
     }
   }, []);
+
+  // Load provider selection from settings
+  useEffect(() => {
+    async function loadProviderSelection() {
+      try {
+        const selection = await getProviderSelection('tts');
+        setProviderState(selection.selected || 'chatterbox');
+        setProviderConfig(selection.config || {});
+        if (selection.config?.model) {
+          setModel(selection.config.model);
+        }
+        if (selection.config?.preset_voice_id) {
+          setPresetVoiceId(selection.config.preset_voice_id);
+        }
+      } catch {
+        // Keep defaults if settings are missing.
+      } finally {
+        didLoadRef.current = true;
+      }
+    }
+    loadProviderSelection();
+  }, []);
+
+  // Persist provider selection and load TTS provider info
+  useEffect(() => {
+    if (!didLoadRef.current) return;
+    if (!provider) return;
+    const nextConfig = {
+      ...providerConfig,
+      model,
+      preset_voice_id: presetVoiceId || undefined,
+    };
+    setProviderConfig(nextConfig);
+    setProvider('tts', provider, nextConfig).catch(() => {});
+
+    // Load TTS provider info for model options and voice selection
+    async function loadTtsProviderInfo() {
+      try {
+        const info = await getTTSProvider(provider);
+        setTtsProviderInfo(info);
+        // Set default model if current selection is invalid
+        if (info.models?.length) {
+          const modelIds = info.models.map((m: any) => (typeof m === 'string' ? m : m.id));
+          if (!model || !modelIds.includes(model)) {
+            setModel(info.default_model || modelIds[0]);
+          }
+        }
+        if (presetVoiceId && info.preset_voices?.length) {
+          const voiceIds = info.preset_voices.map((v: any) => v.id);
+          if (!voiceIds.includes(presetVoiceId)) {
+            setPresetVoiceId(null);
+          }
+        }
+      } catch {
+        setTtsProviderInfo(null);
+      }
+    }
+    loadTtsProviderInfo();
+  }, [provider, model, presetVoiceId]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -83,13 +222,21 @@ export default function AudiobookPage() {
 
       const result = await generateBook({
         chapters: selectedChapterData,
+        provider,
         model,
         language,
         output_format: outputFormat,
-        temperature: 0.8,
-        exaggeration: 0.5,
-        cfg_weight: 0.5,
-        speed: 1.0,
+        // Required fields with defaults
+        temperature: advancedSettings.temperature as number ?? 0.8,
+        exaggeration: advancedSettings.exaggeration as number ?? 0.5,
+        speed: advancedSettings.speed as number ?? 1.0,
+        // Override cfg_weight in fast mode
+        cfg_weight: fastMode ? 0 : (advancedSettings.cfg_weight as number ?? 0.5),
+        device: device !== 'auto' ? device : undefined,
+        fast_mode: fastMode,
+        preset_voice_id: presetVoiceId || undefined,
+        // Pass any extra provider-specific params
+        extra_params: advancedSettings,
       });
 
       setJobId(result.job_id);
@@ -99,7 +246,7 @@ export default function AudiobookPage() {
           const status = await getJobStatus(result.job_id);
           setJobStatus(status);
 
-          if (status.status === 'completed' || status.status === 'error') {
+          if (status.status === 'completed' || status.status === 'error' || status.status === 'cancelled') {
             clearInterval(pollInterval);
             setIsLoading(false);
           }
@@ -117,8 +264,17 @@ export default function AudiobookPage() {
   return (
     <div className="space-y-8 animate-slide-up">
       <div>
-        <h1 className="text-3xl font-bold text-gradient">Audiobook Creator</h1>
-        <p className="mt-2 text-foreground-muted">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <h1 className="text-3xl font-bold text-gradient">Audiobook Creator</h1>
+          <DeviceToggle
+            value={device}
+            onChange={setDevice}
+            showFastMode
+            fastMode={fastMode}
+            onFastModeChange={setFastMode}
+          />
+        </div>
+        <p className="mt-2 text-slate-400">
           Turn documents into narrated audio with chapter detection.
         </p>
       </div>
@@ -140,16 +296,16 @@ export default function AudiobookPage() {
           <input {...getInputProps()} />
           {isParsing ? (
             <div className="flex flex-col items-center gap-4">
-              <Loader2 className="w-12 h-12 text-foreground-muted animate-spin" />
-              <p className="text-foreground-muted">Parsing document...</p>
+              <Loader2 className="w-12 h-12 text-slate-400 animate-spin" />
+              <p className="text-slate-400">Parsing document...</p>
             </div>
           ) : (
             <>
-              <Upload className="w-12 h-12 mx-auto text-foreground-muted" />
-              <p className="mt-4 text-lg text-foreground-muted">
+              <Upload className="w-12 h-12 mx-auto text-slate-400" />
+              <p className="mt-4 text-lg text-slate-400">
                 {isDragActive ? 'Drop the file here' : 'Drag and drop a document'}
               </p>
-              <p className="mt-2 text-sm text-foreground-muted">
+              <p className="mt-2 text-sm text-slate-400">
                 Supports TXT, MD, and PDF files
               </p>
             </>
@@ -161,7 +317,7 @@ export default function AudiobookPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-foreground">Chapters</h2>
+              <h2 className="text-xl font-semibold text-slate-100">Chapters</h2>
               <div className="flex gap-3 text-sm">
                 <button
                   onClick={() => setSelectedChapters(new Set(chapters.map((c) => c.number)))}
@@ -171,7 +327,7 @@ export default function AudiobookPage() {
                 </button>
                 <button
                   onClick={() => setSelectedChapters(new Set())}
-                  className="text-foreground-muted hover:text-foreground"
+                  className="text-slate-400 hover:text-slate-100"
                 >
                   Deselect all
                 </button>
@@ -204,11 +360,11 @@ export default function AudiobookPage() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-foreground">{chapter.title}</div>
-                      <div className="text-sm text-foreground-muted mt-1 line-clamp-2">
+                      <div className="font-medium text-slate-100">{chapter.title}</div>
+                      <div className="text-sm text-slate-400 mt-1 line-clamp-2">
                         {chapter.preview || chapter.content.slice(0, 150)}...
                       </div>
-                      <div className="text-xs text-foreground-muted mt-2">
+                      <div className="text-xs text-slate-400 mt-2">
                         {chapter.content.split(/\s+/).length} words
                       </div>
                     </div>
@@ -221,8 +377,8 @@ export default function AudiobookPage() {
           <div className="space-y-6">
             {stats && (
               <div className="glass-card p-4">
-                <h3 className="font-medium text-foreground">Document Stats</h3>
-                <div className="mt-2 space-y-1 text-sm text-foreground-muted">
+                <h3 className="font-medium text-slate-100">Document Stats</h3>
+                <div className="mt-2 space-y-1 text-sm text-slate-400">
                   <p>{stats.num_chapters} chapters</p>
                   <p>{stats.total_words.toLocaleString()} words</p>
                   <p>~{Math.round(stats.estimated_duration_minutes)} min audio</p>
@@ -231,34 +387,44 @@ export default function AudiobookPage() {
             )}
 
             <div className="glass-card p-4 space-y-4">
-              <SelectMenu
-                label="Model"
-                value={model}
-                options={[
-                  { value: 'multilingual', label: 'Multilingual' },
-                  { value: 'original', label: 'Original' },
-                  { value: 'turbo', label: 'Turbo (Fast)' },
-                ]}
-                onChange={setModel}
+              <UnifiedProviderSelector
+                service="tts"
+                selected={provider}
+                onSelect={setProviderState}
+                selectedModel={model}
+                onModelChange={setModel}
+                onProviderInfoChange={(info) => {
+                  setProviderInfo(info as ServiceProviderInfo | null);
+                  setTtsProviderInfo(info as TTSProviderInfo | null);
+                }}
+                variant="dropdown"
+                showModelSelector
+                label="TTS Engine"
               />
 
-              <SelectMenu
-                label="Language"
-                value={language}
-                options={[
-                  { value: 'en', label: 'English' },
-                  { value: 'es', label: 'Spanish' },
-                  { value: 'fr', label: 'French' },
-                  { value: 'de', label: 'German' },
-                  { value: 'it', label: 'Italian' },
-                  { value: 'pt', label: 'Portuguese' },
-                  { value: 'zh', label: 'Chinese' },
-                  { value: 'ja', label: 'Japanese' },
-                  { value: 'ko', label: 'Korean' },
-                ]}
-                onChange={setLanguage}
-                disabled={model !== 'multilingual'}
-              />
+              {/* Show PresetVoiceSelector for providers with preset voices */}
+              {(ttsProviderInfo?.voice_cloning === 'none' ||
+                (ttsProviderInfo?.preset_voices?.length ?? 0) > 0 ||
+                ['openai-tts', 'elevenlabs', 'fishaudio', 'cartesia', 'playht', 'siliconflow', 'minimax', 'zyphra', 'narilabs', 'kokoro', 'dia'].includes(provider)
+              ) && (
+                <PresetVoiceSelector
+                  providerId={provider}
+                  selected={presetVoiceId}
+                  onSelect={setPresetVoiceId}
+                  language={language}
+                />
+              )}
+
+              {/* Language selector - hidden for single-language providers */}
+              {languageOptions.length > 1 && !/spanish|espanol|es[-_]|[-_]es/i.test(model) && (
+                <SelectMenu
+                  label="Language"
+                  value={language}
+                  options={languageOptions}
+                  onChange={setLanguage}
+                  disabled={provider === 'chatterbox' && model !== 'multilingual'}
+                />
+              )}
 
               <SelectMenu
                 label="Output Format"
@@ -269,6 +435,14 @@ export default function AudiobookPage() {
                   { value: 'flac', label: 'FLAC' },
                 ]}
                 onChange={setOutputFormat}
+              />
+
+              {/* Advanced settings - dynamic based on provider */}
+              <AdvancedSettings
+                settings={advancedSettings}
+                onChange={(key, value) => setAdvancedSettings(prev => ({ ...prev, [key]: value }))}
+                extraParams={ttsProviderInfo?.extra_params}
+                dynamicOnly={provider !== 'chatterbox'}
               />
 
               <button
@@ -304,11 +478,56 @@ export default function AudiobookPage() {
         </div>
       )}
 
-      {jobStatus && jobStatus.status === 'processing' && (
-        <ProgressBar
-          progress={jobStatus.progress}
-          status={`Processing chapter ${jobStatus.current_chapter} of ${jobStatus.total_chapters}`}
-        />
+      {jobStatus && (jobStatus.status === 'processing' || jobStatus.status === 'paused') && (
+        <div className="space-y-4">
+          <ProgressBar
+            progress={jobStatus.progress}
+            status={
+              jobStatus.status === 'paused'
+                ? `Paused at chapter ${jobStatus.current_chapter} of ${jobStatus.total_chapters}`
+                : `Processing chapter ${jobStatus.current_chapter} of ${jobStatus.total_chapters}`
+            }
+          />
+          <div className="flex flex-wrap gap-3">
+            {jobStatus.status === 'processing' ? (
+              <button
+                onClick={async () => {
+                  if (!jobId) return;
+                  await pauseBookJob(jobId);
+                  const status = await getJobStatus(jobId);
+                  setJobStatus(status);
+                }}
+                className="btn btn-secondary"
+              >
+                Pause
+              </button>
+            ) : (
+              <button
+                onClick={async () => {
+                  if (!jobId) return;
+                  await resumeBookJob(jobId);
+                  const status = await getJobStatus(jobId);
+                  setJobStatus(status);
+                }}
+                className="btn btn-primary"
+              >
+                Resume
+              </button>
+            )}
+            <button
+              onClick={async () => {
+                if (!jobId) return;
+                await cancelBookJob(jobId);
+                const status = await getJobStatus(jobId);
+                setJobStatus(status);
+                setIsLoading(false);
+              }}
+              className="btn btn-danger"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
 
       {jobStatus && jobStatus.status === 'completed' && (
@@ -318,8 +537,8 @@ export default function AudiobookPage() {
             {jobStatus.outputs.map((output) => (
               <div key={output.chapter} className="glass-card p-4 flex items-center justify-between">
                 <div>
-                  <div className="font-medium text-foreground">{output.title}</div>
-                  <div className="text-sm text-foreground-muted">{output.filename}</div>
+                  <div className="font-medium text-slate-100">{output.title}</div>
+                  <div className="text-sm text-slate-400">{output.filename}</div>
                 </div>
                 <a
                   href={getAudioUrl(output.url)}
@@ -338,6 +557,12 @@ export default function AudiobookPage() {
       {jobStatus && jobStatus.status === 'error' && (
         <div className="glass-card p-4 border-red-500/30 bg-red-500/10 text-red-300">
           Error: {jobStatus.error}
+        </div>
+      )}
+
+      {jobStatus && jobStatus.status === 'cancelled' && (
+        <div className="glass-card p-4 border-amber-500/30 bg-amber-500/10 text-amber-200">
+          Audiobook generation cancelled.
         </div>
       )}
     </div>

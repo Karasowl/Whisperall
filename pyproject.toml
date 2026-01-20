@@ -37,6 +37,9 @@ ui = [
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
     "python-multipart>=0.0.6",
+    "yt-dlp>=2024.10.22",
+    "f5-tts>=0.1.0",
+    "kokoro>=0.1.0",
 ]
 whisperx = [
     "whisperx==3.7.4",

@@ -43,7 +43,7 @@ def parse_pdf(file_path: str) -> list[Chapter]:
     try:
         from PyPDF2 import PdfReader
     except ImportError:
-        raise ImportError("PyPDF2 is required for PDF parsing. Install with: pip install PyPDF2")
+        raise ImportError("PDF parsing is not available. Please reinstall the application or contact support.")
 
     reader = PdfReader(file_path)
     full_text = ""

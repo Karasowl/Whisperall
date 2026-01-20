@@ -53,6 +53,7 @@ interface TranscriptEditorProps {
   isRediarizing?: boolean;
   title?: string;
   createdAt?: string;
+  elapsedSeconds?: number;
 }
 
 export default function TranscriptEditor({
@@ -70,6 +71,7 @@ export default function TranscriptEditor({
   isRediarizing,
   title,
   createdAt,
+  elapsedSeconds,
 }: TranscriptEditorProps) {
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [showSpeakers, setShowSpeakers] = useState(speakersDetected > 0);
@@ -189,18 +191,20 @@ export default function TranscriptEditor({
     <div className="glass-card">
       {/* Header with title and date */}
       <div className="p-6 border-b border-white/10">
-        <h2 className="text-2xl font-semibold text-foreground leading-tight select-text cursor-text">
+        <h2 className="text-2xl font-semibold text-slate-100 leading-tight select-text cursor-text">
           {displayTitle}
         </h2>
-        {createdAt && (
-          <p className="text-sm text-foreground-muted mt-1 select-text cursor-text">
-            {new Date(createdAt).toLocaleDateString("es-ES", {
+        {(createdAt || (elapsedSeconds && elapsedSeconds > 0)) && (
+          <p className="text-sm text-slate-400 mt-1 select-text cursor-text">
+            {createdAt && new Date(createdAt).toLocaleDateString("es-ES", {
               day: "numeric",
               month: "short",
               year: "numeric",
               hour: "2-digit",
               minute: "2-digit",
             })}
+            {createdAt && elapsedSeconds && elapsedSeconds > 0 && " • "}
+            {elapsedSeconds && elapsedSeconds > 0 && `Processing time: ${formatTimestamp(elapsedSeconds)}`}
           </p>
         )}
 
@@ -214,8 +218,8 @@ export default function TranscriptEditor({
               onChange={(e) => setShowTimestamps(e.target.checked)}
               className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500"
             />
-            <Clock className="w-4 h-4 text-foreground-muted" />
-            <span className="text-foreground-muted">Timestamps</span>
+            <Clock className="w-4 h-4 text-slate-400" />
+            <span className="text-slate-400">Timestamps</span>
           </label>
 
           {/* Toggle speakers */}
@@ -227,8 +231,8 @@ export default function TranscriptEditor({
                 onChange={(e) => setShowSpeakers(e.target.checked)}
                 className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500"
               />
-              <Users className="w-4 h-4 text-foreground-muted" />
-              <span className="text-foreground-muted">
+              <Users className="w-4 h-4 text-slate-400" />
+              <span className="text-slate-400">
                 {speakersDetected === 1 ? "1 speaker" : `${speakersDetected} speakers`}
               </span>
               {diarizationMethod && diarizationMethod !== 'none' && (
@@ -246,7 +250,7 @@ export default function TranscriptEditor({
 
           {/* Search */}
           <div className="relative flex-1 min-w-[150px] max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-foreground-muted" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
@@ -331,7 +335,7 @@ export default function TranscriptEditor({
                 )}
 
                 {/* Segments as flowing text */}
-                <span className="text-foreground leading-relaxed">
+                <span className="text-slate-100 leading-relaxed">
                   {group.segments.map((seg, segIndex) => {
                     const isActive = seg.id === activeSegmentId;
                     const isHovered = seg.id === hoveredSegmentId;
@@ -343,7 +347,7 @@ export default function TranscriptEditor({
                         {/* Timestamp (if showing) */}
                         {showTimestamps && (
                           <span
-                            className="text-xs text-foreground-muted font-mono mr-1 cursor-pointer hover:text-emerald-400"
+                            className="text-xs text-slate-400 font-mono mr-1 cursor-pointer hover:text-emerald-400"
                             onClick={() => handleSeek(seg.start_time)}
                           >
                             [{formatTimestamp(seg.start_time)}]

@@ -18,6 +18,7 @@ import {
   Eye,
   Pause,
   Play,
+  Link2,
 } from "lucide-react";
 import {
   uploadForTranscription,
@@ -25,6 +26,7 @@ import {
   getTranscriptionHistory,
   updateTranscriptSegments,
   exportTranscript,
+  importTranscriptionFromLink,
   getDiarizationStatus,
   getEngineStatus,
   cancelTranscriptionJob,
@@ -37,11 +39,17 @@ import {
   EngineStatus,
   TranscriptionEngine,
   DiarizationMode,
+  ServiceProviderInfo,
+  getProviderSelection,
+  getAllModels,
+  setProvider,
 } from "@/lib/api";
 import TranscriptEditor from "@/components/TranscriptEditor";
 import ExportModal from "@/components/ExportModal";
+import ImportLinkModal from "@/components/ImportLinkModal";
 import PyannoteSetupWizard from "@/components/PyannoteSetupWizard";
 import { SelectMenu } from "@/components/SelectMenu";
+import { UnifiedProviderSelector } from "@/components/UnifiedProviderSelector";
 import { cn } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -68,6 +76,7 @@ const WHISPER_MODEL_OPTIONS = [
   { value: "small", label: "Small", description: "Better accuracy" },
   { value: "medium", label: "Medium", description: "High accuracy" },
   { value: "large-v3", label: "Large V3", description: "Best accuracy" },
+  { value: "distil-large-v3", label: "Distil Large V3", description: "Near-large accuracy, faster" },
 ];
 
 const DIARIZATION_MODE_OPTIONS: { value: DiarizationMode; label: string; description: string }[] = [
@@ -177,6 +186,21 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function formatLinkLabel(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+    const last = pathParts[pathParts.length - 1];
+    if (last) {
+      return `${host}/${last}`;
+    }
+    return host || "Imported link";
+  } catch {
+    return "Imported link";
+  }
+}
+
 function isAbsolutePath(filePath: string): boolean {
   if (filePath.startsWith("/") || filePath.startsWith("\\")) {
     return true;
@@ -210,6 +234,12 @@ function TranscribePageContent() {
   const [audioCacheStatus, setAudioCacheStatus] = useState<AudioCacheStatus | null>(null);
   const [isClearingCache, setIsClearingCache] = useState(false);
 
+  // Provider settings
+  const [sttProvider, setSttProvider] = useState("faster-whisper");
+  const [sttProviderInfo, setSttProviderInfo] = useState<ServiceProviderInfo | null>(null);
+  const didLoadProviderRef = useRef(false);
+  const [sttModelInstalled, setSttModelInstalled] = useState<Record<string, boolean>>({});
+
   // Job state
   const [currentJob, setCurrentJob] = useState<TranscriptionJob | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -229,6 +259,9 @@ function TranscribePageContent() {
 
   // Export modal
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
 
   // Diarization status
   const [diarizationStatus, setDiarizationStatus] = useState<DiarizationStatus | null>(null);
@@ -256,6 +289,47 @@ function TranscribePageContent() {
       return option;
     });
   }, [canUsePyannote, currentJob, engine]);
+
+  const getWhisperModelId = (modelValue: string) => {
+    if (modelValue === "distil-large-v3") {
+      return "faster-distil-whisper-large-v3";
+    }
+    return `faster-whisper-${modelValue}`;
+  };
+
+  const whisperModelOptions = useMemo(() => {
+    const hasStatus = Object.keys(sttModelInstalled).length > 0;
+    const shouldCheckInstall =
+      engine === "fast" &&
+      sttProvider === "faster-whisper" &&
+      sttProviderInfo?.type === "local";
+
+    return WHISPER_MODEL_OPTIONS.map((option) => {
+      if (engine === "accurate" && option.value === "distil-large-v3") {
+        return {
+          ...option,
+          disabled: true,
+          description: "Fast engine only",
+        };
+      }
+
+      if (!shouldCheckInstall || !hasStatus) {
+        return option;
+      }
+
+      const modelId = getWhisperModelId(option.value);
+      const installed = sttModelInstalled[modelId];
+      if (installed) {
+        return option;
+      }
+
+      return {
+        ...option,
+        disabled: true,
+        description: `${option.description} - Install in Models`,
+      };
+    });
+  }, [engine, sttModelInstalled, sttProvider, sttProviderInfo]);
 
   const jobEngine = currentJob?.engine || engine;
   const engineLabel =
@@ -383,7 +457,7 @@ function TranscribePageContent() {
         : hotspot >= 85
         ? "text-amber-400"
         : "text-emerald-400"
-      : "text-foreground-muted";
+      : "text-slate-400";
 
   // Load job from URL parameter (e.g., from history page)
   useEffect(() => {
@@ -516,7 +590,62 @@ function TranscribePageContent() {
   }, [loadAudioCacheStatus]);
 
   useEffect(() => {
-    if (!currentJob || !["pending", "transcribing", "diarizing", "cleaning"].includes(currentJob.status)) {
+    let active = true;
+    getAllModels("stt")
+      .then(({ models }) => {
+        if (!active) return;
+        const installedMap: Record<string, boolean> = {};
+        models.forEach((model) => {
+          installedMap[model.id] = model.installed;
+        });
+        setSttModelInstalled(installedMap);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Load STT provider selection from settings
+  useEffect(() => {
+    async function loadProviderSelection() {
+      try {
+        const selection = await getProviderSelection("stt");
+        setSttProvider(selection.selected || "faster-whisper");
+      } catch {
+        // Keep defaults if settings are missing.
+      } finally {
+        didLoadProviderRef.current = true;
+      }
+    }
+    loadProviderSelection();
+  }, []);
+
+  // Persist STT provider selection
+  useEffect(() => {
+    if (!didLoadProviderRef.current) return;
+    if (!sttProvider) return;
+    setProvider("stt", sttProvider).catch(() => {});
+  }, [sttProvider]);
+
+  useEffect(() => {
+    if (sttProvider !== "faster-whisper") return;
+    if (!Object.keys(sttModelInstalled).length) return;
+
+    const currentId = getWhisperModelId(whisperModel);
+    if (sttModelInstalled[currentId]) {
+      return;
+    }
+
+    const fallback = WHISPER_MODEL_OPTIONS.find((option) => sttModelInstalled[getWhisperModelId(option.value)]);
+    if (fallback && fallback.value !== whisperModel) {
+      setWhisperModel(fallback.value);
+    }
+  }, [sttModelInstalled, sttProvider, whisperModel]);
+
+  useEffect(() => {
+    if (!currentJob || !["downloading", "pending", "transcribing", "diarizing", "cleaning"].includes(currentJob.status)) {
       return;
     }
 
@@ -589,14 +718,14 @@ function TranscribePageContent() {
       "video/*": [".mp4", ".mkv", ".webm", ".avi", ".mov"],
     },
     maxFiles: 1,
-    disabled: isUploading || (currentJob?.status === "transcribing" || currentJob?.status === "diarizing"),
+    disabled: isUploading || isImporting || (currentJob?.status === "transcribing" || currentJob?.status === "diarizing"),
     useFsAccessApi: false,  // Required for Electron - fixes 0 bytes issue with large files
   });
 
   // Poll for job status using IPC in Electron (all network calls broken in renderer after large uploads)
   useEffect(() => {
     console.log("[Effect] Polling effect triggered, currentJob:", currentJob?.job_id, "status:", currentJob?.status);
-    if (currentJob && (currentJob.status === "pending" || currentJob.status === "transcribing" || currentJob.status === "diarizing")) {
+    if (currentJob && (currentJob.status === "downloading" || currentJob.status === "pending" || currentJob.status === "transcribing" || currentJob.status === "diarizing")) {
       console.log("[Effect] Starting polling interval for job:", currentJob.job_id);
       pollingRef.current = setInterval(async () => {
         try {
@@ -807,6 +936,58 @@ function TranscribePageContent() {
     }
   };
 
+  const handleImportLink = async (url: string) => {
+    if (!url || isImporting) return;
+
+    setIsImporting(true);
+    setImportError(null);
+    setUploadError(null);
+    setSelectedFile(null);
+    setUploadProgress(0);
+    setUploadedBytes(0);
+
+    try {
+      const { job_id } = await importTranscriptionFromLink(
+        url,
+        language,
+        enableDiarization,
+        minSpeakers,
+        maxSpeakers,
+        whisperModel,
+        enableAICleanup,
+        diarizationMode,
+        engine
+      );
+
+      progressHistoryRef.current = [];
+      setEtaSeconds(null);
+      setCurrentJob({
+        job_id,
+        status: "downloading",
+        progress: 0,
+        current_step: "Downloading media...",
+        total_duration: 0,
+        processed_duration: 0,
+        segments: [],
+        speakers_detected: 0,
+        created_at: new Date().toISOString(),
+        filename: formatLinkLabel(url),
+        file_size_bytes: 0,
+        enable_diarization: enableDiarization,
+        diarization_mode: diarizationMode,
+        engine,
+        source_url: url,
+      });
+      setShowImportModal(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to import link";
+      setImportError(message);
+      setUploadError(message);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleSegmentsUpdate = async (segments: TranscriptSegment[]) => {
     if (!currentJob) return;
     try {
@@ -839,6 +1020,9 @@ function TranscribePageContent() {
     setSelectedFile(null);
     setCurrentJob(null);
     setUploadError(null);
+    setImportError(null);
+    setIsImporting(false);
+    setShowImportModal(false);
     setEtaSeconds(null);
     progressHistoryRef.current = [];
     if (audioUrl) {
@@ -972,15 +1156,15 @@ function TranscribePageContent() {
     }
   };
 
-  const isProcessing = currentJob?.status === "pending" || currentJob?.status === "transcribing" || currentJob?.status === "diarizing" || currentJob?.status === "cleaning";
+  const isProcessing = currentJob?.status === "downloading" || currentJob?.status === "pending" || currentJob?.status === "transcribing" || currentJob?.status === "diarizing" || currentJob?.status === "cleaning";
 
   return (
     <div className="space-y-8 animate-slide-up">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-gradient">Transcription</h1>
-        <p className="mt-2 text-foreground-muted">
-          Upload audio or video files for transcription with speaker identification
+        <p className="mt-2 text-slate-400">
+          Upload audio or video files, or import a public link for transcription with speaker identification
         </p>
       </div>
 
@@ -1009,32 +1193,50 @@ function TranscribePageContent() {
                     <CheckCircle2 className="w-8 h-8 text-emerald-400" />
                   </div>
                   <div>
-                    <p className="text-lg font-medium text-foreground">{selectedFile.name}</p>
-                    <p className="text-sm text-foreground-muted">{formatFileSize(selectedFile.size)}</p>
+                    <p className="text-lg font-medium text-slate-100">{selectedFile.name}</p>
+                    <p className="text-sm text-slate-400">{formatFileSize(selectedFile.size)}</p>
                   </div>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       handleReset();
                     }}
-                    className="text-sm text-foreground-muted hover:text-foreground transition-colors"
+                    className="text-sm text-slate-400 hover:text-slate-100 transition-colors"
                   >
                     Choose different file
                   </button>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <Upload className="w-12 h-12 mx-auto text-foreground-muted" />
+                  <Upload className="w-12 h-12 mx-auto text-slate-400" />
                   <div>
-                    <p className="text-lg text-foreground-muted">
+                    <p className="text-lg text-slate-400">
                       {isDragActive ? "Drop file here" : "Drop audio/video file or click to browse"}
                     </p>
-                    <p className="text-sm text-foreground-muted mt-2">
+                    <p className="text-sm text-slate-400 mt-2">
                       MP3, WAV, M4A, MP4, MKV up to 4GB (5 hours max)
                     </p>
                   </div>
                 </div>
               )}
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setImportError(null);
+                  setShowImportModal(true);
+                }}
+                disabled={isUploading || isImporting}
+                className="btn btn-secondary text-sm"
+              >
+                <Link2 className="w-4 h-4" />
+                Import from link
+              </button>
+              <span className="text-xs text-slate-400">
+                YouTube, Dropbox, Google Drive, Vimeo, X, and direct URLs
+              </span>
             </div>
 
             {uploadError && (
@@ -1059,10 +1261,21 @@ function TranscribePageContent() {
 
           {/* Settings Panel */}
           <div className="glass-card p-4 space-y-4">
-            <h3 className="font-medium text-foreground flex items-center gap-2">
+            <h3 className="font-medium text-slate-100 flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-emerald-400" />
               Settings
             </h3>
+
+            {/* STT Provider */}
+            <UnifiedProviderSelector
+              service="stt"
+              selected={sttProvider}
+              onSelect={setSttProvider}
+              onProviderInfoChange={(info) => setSttProviderInfo(info as ServiceProviderInfo | null)}
+              variant="dropdown"
+              allowedTypes={['local']}
+              label="STT Engine"
+            />
 
             {/* Language */}
             <SelectMenu
@@ -1077,12 +1290,12 @@ function TranscribePageContent() {
               label="Model"
               value={whisperModel}
               onChange={setWhisperModel}
-              options={WHISPER_MODEL_OPTIONS}
+              options={whisperModelOptions}
             />
 
             {/* Engine Selector */}
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-foreground-muted">
+              <label className="block text-sm font-medium text-slate-400">
                 Engine
               </label>
               <div className="flex gap-2">
@@ -1092,7 +1305,7 @@ function TranscribePageContent() {
                     "flex-1 px-3 py-2 rounded-lg text-sm transition-colors text-left",
                     engine === "fast"
                       ? "bg-emerald-500/20 border border-emerald-500/50 text-emerald-400"
-                      : "bg-white/5 border border-white/10 text-foreground-muted hover:border-white/20"
+                      : "bg-white/5 border border-white/10 text-slate-400 hover:border-white/20"
                   )}
                 >
                   <div className="font-medium">Fast</div>
@@ -1105,7 +1318,7 @@ function TranscribePageContent() {
                     "flex-1 px-3 py-2 rounded-lg text-sm transition-colors text-left",
                     engine === "accurate"
                       ? "bg-purple-500/20 border border-purple-500/50 text-purple-400"
-                      : "bg-white/5 border border-white/10 text-foreground-muted hover:border-white/20",
+                      : "bg-white/5 border border-white/10 text-slate-400 hover:border-white/20",
                     !engineStatus?.engines.accurate.available && "opacity-50 cursor-not-allowed"
                   )}
                 >
@@ -1119,8 +1332,8 @@ function TranscribePageContent() {
                 </p>
               )}
               {!engineStatus?.engines.accurate.available && (
-                <p className="text-xs text-foreground-muted/60">
-                  WhisperX not installed. Install with: pip install whisperx
+                <p className="text-xs text-slate-400/60">
+                  WhisperX not available. Visit the Models page for installation options.
                 </p>
               )}
             </div>
@@ -1134,7 +1347,7 @@ function TranscribePageContent() {
                   onChange={(e) => setEnableDiarization(e.target.checked)}
                   className="w-5 h-5 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
                 />
-                <span className="text-foreground-muted flex items-center gap-2">
+                <span className="text-slate-400 flex items-center gap-2">
                   <Users className="w-4 h-4" />
                   Speaker identification
                 </span>
@@ -1200,7 +1413,7 @@ function TranscribePageContent() {
                       buttonClassName="py-2 text-sm"
                     />
                   </div>
-                  <p className="text-xs text-foreground-muted">
+                  <p className="text-xs text-slate-400">
                     {safetySettings.device === "gpu"
                       ? "GPU diarization is enabled. Use at your own risk."
                       : "GPU diarization is off by default for stability. Enable at your own risk."}
@@ -1208,7 +1421,7 @@ function TranscribePageContent() {
 
                   <div className="flex items-center gap-4">
                     <div className="flex-1">
-                      <label className="block text-xs text-foreground-muted mb-1">Min speakers</label>
+                      <label className="block text-xs text-slate-400 mb-1">Min speakers</label>
                       <input
                         type="number"
                         min={1}
@@ -1219,7 +1432,7 @@ function TranscribePageContent() {
                       />
                     </div>
                     <div className="flex-1">
-                      <label className="block text-xs text-foreground-muted mb-1">Max speakers</label>
+                      <label className="block text-xs text-slate-400 mb-1">Max speakers</label>
                       <input
                         type="number"
                         min={minSpeakers}
@@ -1243,13 +1456,13 @@ function TranscribePageContent() {
                   onChange={(e) => setEnableAICleanup(e.target.checked)}
                   className="w-5 h-5 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
                 />
-                <span className="text-foreground-muted flex items-center gap-2">
+                <span className="text-slate-400 flex items-center gap-2">
                   <Wand2 className="w-4 h-4" />
                   Clean up with AI
                 </span>
               </label>
               {enableAICleanup && (
-                <p className="text-xs text-foreground-muted pl-8">
+                <p className="text-xs text-slate-400 pl-8">
                   Improves punctuation, grammar, and paragraph structure while preserving meaning
                 </p>
               )}
@@ -1283,7 +1496,7 @@ function TranscribePageContent() {
                     style={{ width: `${uploadProgress}%` }}
                   />
                 </div>
-                <div className="flex justify-between text-xs text-foreground-muted">
+                <div className="flex justify-between text-xs text-slate-400">
                   <span>
                     {formatFileSize(uploadedBytes)} / {selectedFile ? formatFileSize(selectedFile.size) : '?'}
                   </span>
@@ -1316,7 +1529,8 @@ function TranscribePageContent() {
               </div>
 
               <div>
-                <h2 className="text-lg font-semibold text-foreground mb-1">
+                <h2 className="text-lg font-semibold text-slate-100 mb-1">
+                  {currentJob?.status === "downloading" && "Downloading..."}
                   {currentJob?.status === "pending" && "Preparing..."}
                   {currentJob?.status === "transcribing" && "Transcribing..."}
                   {currentJob?.status === "diarizing" && "Identifying speakers..."}
@@ -1324,7 +1538,7 @@ function TranscribePageContent() {
                   {currentJob?.status === "cancelled" && "Cancelled"}
                   {currentJob?.status === "paused" && "Paused"}
                 </h2>
-                <p className="text-sm text-foreground-muted">{currentJob?.current_step || "Processing audio..."}</p>
+                <p className="text-sm text-slate-400">{currentJob?.current_step || "Processing audio..."}</p>
               </div>
 
               {/* Progress bar */}
@@ -1342,9 +1556,12 @@ function TranscribePageContent() {
                 />
               </div>
 
-              <div className="flex justify-between text-xs text-foreground-muted">
+              <div className="flex justify-between text-xs text-slate-400">
                 <span>{typeof currentJob?.progress === 'number' ? currentJob.progress.toFixed(1) : currentJob?.progress}%</span>
                 <span className="flex items-center gap-2">
+                  {typeof currentJob?.elapsed_seconds === "number" && currentJob.elapsed_seconds > 0 && (
+                    <span>Elapsed {formatDuration(currentJob.elapsed_seconds)}</span>
+                  )}
                   {etaSeconds !== null && etaSeconds > 0 && currentJob?.status !== "cancelled" && (
                     <span className="text-emerald-400">{formatEta(etaSeconds)}</span>
                   )}
@@ -1354,7 +1571,7 @@ function TranscribePageContent() {
                 </span>
               </div>
 
-              <div className="flex flex-wrap justify-center gap-2 text-[10px] text-foreground-muted">
+              <div className="flex flex-wrap justify-center gap-2 text-[10px] text-slate-400">
                 <span className="px-2 py-0.5 rounded-full bg-white/10">
                   Engine: {engineLabel}
                 </span>
@@ -1377,7 +1594,7 @@ function TranscribePageContent() {
                 )}
               </div>
 
-              <div className="flex flex-wrap justify-center gap-2 text-[10px] text-foreground-muted">
+              <div className="flex flex-wrap justify-center gap-2 text-[10px] text-slate-400">
                 <span className="px-2 py-0.5 rounded-full bg-white/10 flex items-center gap-1">
                   <Thermometer className="w-3 h-3 text-emerald-400" />
                   <span>{hotspotLabel}:</span>
@@ -1401,21 +1618,21 @@ function TranscribePageContent() {
               <div className="flex justify-center gap-1.5 pt-1">
                 <div className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 ${
                   currentJob?.progress >= 2 && currentJob?.progress < 10 ? "bg-emerald-500/30 text-emerald-300" :
-                  currentJob?.progress >= 10 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-foreground-muted"
+                  currentJob?.progress >= 10 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
                 }`}>
                   {currentJob?.progress >= 2 && currentJob?.progress < 10 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
                   Extract
                 </div>
                 <div className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 ${
                   currentJob?.progress >= 10 && currentJob?.progress < 80 ? "bg-emerald-500/30 text-emerald-300" :
-                  currentJob?.progress >= 80 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-foreground-muted"
+                  currentJob?.progress >= 80 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
                 }`}>
                   {currentJob?.progress >= 10 && currentJob?.progress < 80 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
                   Transcribe
                 </div>
                 <div className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 ${
                   currentJob?.progress >= 80 && currentJob?.progress < 95 ? "bg-emerald-500/30 text-emerald-300" :
-                  currentJob?.progress >= 95 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-foreground-muted"
+                  currentJob?.progress >= 95 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
                 }`}>
                   {currentJob?.progress >= 80 && currentJob?.progress < 95 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
                   Speakers
@@ -1423,8 +1640,8 @@ function TranscribePageContent() {
               </div>
 
               {/* File info */}
-              <div className="pt-3 border-t border-white/10 text-xs text-foreground-muted">
-                <span className="text-foreground">{currentJob?.filename}</span>
+              <div className="pt-3 border-t border-white/10 text-xs text-slate-400">
+                <span className="text-slate-100">{currentJob?.filename}</span>
                 {currentJob?.file_size_bytes && <span> ({formatFileSize(currentJob.file_size_bytes)})</span>}
               </div>
 
@@ -1485,10 +1702,10 @@ function TranscribePageContent() {
           <div className="glass-card p-4 flex flex-col max-h-[600px]">
             <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/10">
               <Eye className="w-4 h-4 text-emerald-400" />
-              <span className="text-sm font-medium text-foreground">Live Preview</span>
+              <span className="text-sm font-medium text-slate-100">Live Preview</span>
               <div className="ml-auto flex items-center gap-2">
                 {previewTotal > 0 && (
-                  <span className="text-xs text-foreground-muted">
+                  <span className="text-xs text-slate-400">
                     {previewIsTruncated
                       ? `Showing last ${previewSegments.length} of ${previewTotal}`
                       : `${previewTotal} segments`}
@@ -1497,7 +1714,7 @@ function TranscribePageContent() {
                 {previewTotal > PREVIEW_SEGMENT_LIMIT && (
                   <button
                     onClick={() => setShowFullPreview(!showFullPreview)}
-                    className="text-xs text-foreground-muted hover:text-foreground transition-colors"
+                    className="text-xs text-slate-400 hover:text-slate-100 transition-colors"
                   >
                     {showFullPreview ? "Show less" : "Show all"}
                   </button>
@@ -1507,7 +1724,7 @@ function TranscribePageContent() {
 
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
               {(!currentJob?.segments || currentJob.segments.length === 0) ? (
-                <div className="flex flex-col items-center justify-center h-full text-foreground-muted">
+                <div className="flex flex-col items-center justify-center h-full text-slate-400">
                   <div className="flex gap-1 mb-2">
                     <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-pulse" />
                     <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-pulse delay-75" />
@@ -1519,12 +1736,12 @@ function TranscribePageContent() {
               ) : (
                 <div className="space-y-3">
                   {/* Transcribed text as flowing paragraphs - easy to select and copy */}
-                  <div className="text-sm text-foreground leading-relaxed select-text">
+                  <div className="text-sm text-slate-100 leading-relaxed select-text">
                     {previewText}
                   </div>
 
                   {currentJob?.status === "diarizing" && (
-                    <p className="text-xs text-foreground-muted">
+                    <p className="text-xs text-slate-400">
                       Speaker labels appear as diarization assigns them. The preview refreshes during this step.
                     </p>
                   )}
@@ -1622,7 +1839,7 @@ function TranscribePageContent() {
             />
             <div className="flex items-center gap-3">
               <div className="min-w-[120px]">
-                <label className="block text-xs text-foreground-muted mb-1">Min speakers</label>
+                <label className="block text-xs text-slate-400 mb-1">Min speakers</label>
                 <input
                   type="number"
                   min={1}
@@ -1633,7 +1850,7 @@ function TranscribePageContent() {
                 />
               </div>
               <div className="min-w-[120px]">
-                <label className="block text-xs text-foreground-muted mb-1">Max speakers</label>
+                <label className="block text-xs text-slate-400 mb-1">Max speakers</label>
                 <input
                   type="number"
                   min={minSpeakers}
@@ -1652,7 +1869,7 @@ function TranscribePageContent() {
                 Setup AI detection
               </button>
             )}
-            <span className="text-xs text-foreground-muted">
+            <span className="text-xs text-slate-400">
               Applies to the re-diarize action.
             </span>
           </div>
@@ -1660,27 +1877,27 @@ function TranscribePageContent() {
           <div className="glass-card p-4 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
               <Thermometer className="w-4 h-4 text-emerald-400" />
-              <span className="text-sm text-foreground-muted">{hotspotLabel}</span>
+              <span className="text-sm text-slate-400">{hotspotLabel}</span>
               <span className={cn("text-sm font-semibold", hotspotTone)}>
                 {typeof hotspot === "number" ? `${hotspot.toFixed(1)}°C` : "N/A"}
               </span>
               {primaryGpu?.temperature?.core_c != null && (
-                <span className="text-xs text-foreground-muted">
+                <span className="text-xs text-slate-400">
                   Core {primaryGpu.temperature.core_c.toFixed(0)}°C
                 </span>
               )}
               {primaryGpu?.temperature?.memory_c != null && (
-                <span className="text-xs text-foreground-muted">
+                <span className="text-xs text-slate-400">
                   Mem {primaryGpu.temperature.memory_c.toFixed(0)}°C
                 </span>
               )}
               {telemetry?.gpu?.available === false && (
-                <span className="text-xs text-foreground-muted">
+                <span className="text-xs text-slate-400">
                   {telemetry.gpu.reason || "Telemetry unavailable"}
                 </span>
               )}
               {telemetryError && telemetry?.gpu?.available !== false && (
-                <span className="text-xs text-foreground-muted">{telemetryError}</span>
+                <span className="text-xs text-slate-400">{telemetryError}</span>
               )}
             </div>
 
@@ -1713,18 +1930,18 @@ function TranscribePageContent() {
                   buttonClassName="py-2 text-sm"
                 />
               </div>
-              <div className="flex items-center gap-2 text-xs text-foreground-muted">
+              <div className="flex items-center gap-2 text-xs text-slate-400">
                 <Shield className="w-4 h-4 text-emerald-400" />
                 <span>Thermal guard</span>
               </div>
             </div>
-            <div className="text-xs text-foreground-muted ml-auto">
+            <div className="text-xs text-slate-400 ml-auto">
               {safetySettings.device === "gpu"
                 ? "GPU diarization is enabled. Use at your own risk."
                 : "GPU diarization is off by default for stability. Enable at your own risk."}
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 text-xs text-foreground-muted w-full">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 w-full">
               <span>
                 Audio cache:{" "}
                 {audioCacheStatus
@@ -1769,6 +1986,7 @@ function TranscribePageContent() {
             isRediarizing={isRediarizing}
             title={currentJob.filename?.replace(/\.[^/.]+$/, "")}
             createdAt={currentJob.created_at}
+            elapsedSeconds={currentJob.elapsed_seconds}
           />
 
           {/* Export Modal */}
@@ -1778,8 +1996,22 @@ function TranscribePageContent() {
               onClose={() => setShowExportModal(false)}
             />
           )}
+
         </div>
       ) : null}
+
+      {/* Import Link Modal */}
+      {showImportModal && (
+        <ImportLinkModal
+          onImport={handleImportLink}
+          onClose={() => {
+            setShowImportModal(false);
+            setImportError(null);
+          }}
+          isImporting={isImporting}
+          error={importError}
+        />
+      )}
 
       {/* Pyannote Setup Wizard */}
       {diarizationStatus && (
@@ -1806,5 +2038,3 @@ export default function TranscribePage() {
     </Suspense>
   );
 }
-
-

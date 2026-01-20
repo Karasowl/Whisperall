@@ -109,13 +109,13 @@ export function PresetSelector({
             'glass glass-hover focus-ring'
           )}
         >
-          <span className="flex items-center gap-2 text-foreground">
-            <Bookmark className="w-4 h-4 text-foreground-muted" />
+          <span className="flex items-center gap-2 text-slate-100">
+            <Bookmark className="w-4 h-4 text-slate-400" />
             {loading ? 'Loading presets...' : 'Select preset'}
           </span>
           <ChevronDown
             className={cn(
-              'w-4 h-4 text-foreground-muted transition-transform',
+              'w-4 h-4 text-slate-400 transition-transform',
               isOpen && 'rotate-180'
             )}
           />
@@ -130,14 +130,14 @@ export function PresetSelector({
 
             <div className="absolute z-20 w-full mt-2 glass-card max-h-80 overflow-y-auto">
               {loading && (
-                <div className="px-4 py-3 text-sm text-foreground-muted">Loading presets...</div>
+                <div className="px-4 py-3 text-sm text-slate-400">Loading presets...</div>
               )}
 
               {!loading && (
                 <>
                   {defaultPresets.length > 0 && (
                     <>
-                      <div className="px-4 py-2 text-xs font-medium text-foreground-muted bg-white/5 border-b border-glass-border">
+                      <div className="px-4 py-2 text-xs font-medium text-slate-400 bg-white/5 border-b border-glass-border">
                         Default presets
                       </div>
                       {defaultPresets.map((preset) => (
@@ -149,13 +149,13 @@ export function PresetSelector({
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <Star className="w-3 h-3 text-amber-400 fill-amber-400 flex-shrink-0" />
-                              <span className="font-medium text-sm text-foreground">{preset.name}</span>
+                              <span className="font-medium text-sm text-slate-100">{preset.name}</span>
                             </div>
-                            <p className="text-xs text-foreground-muted truncate mt-0.5">
+                            <p className="text-xs text-slate-400 truncate mt-0.5">
                               {preset.description}
                             </p>
                           </div>
-                          <div className="text-xs text-foreground-muted ml-2 flex-shrink-0">
+                          <div className="text-xs text-slate-400 ml-2 flex-shrink-0">
                             T:{preset.temperature} E:{preset.exaggeration}
                           </div>
                         </div>
@@ -165,7 +165,7 @@ export function PresetSelector({
 
                   {userPresets.length > 0 && (
                     <>
-                      <div className="px-4 py-2 text-xs font-medium text-foreground-muted bg-white/5 border-b border-t border-glass-border">
+                      <div className="px-4 py-2 text-xs font-medium text-slate-400 bg-white/5 border-b border-t border-glass-border">
                         Your presets
                       </div>
                       {userPresets.map((preset) => (
@@ -175,20 +175,20 @@ export function PresetSelector({
                           onClick={() => handleApplyPreset(preset)}
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm text-foreground">{preset.name}</div>
+                            <div className="font-medium text-sm text-slate-100">{preset.name}</div>
                             {preset.description && (
-                              <p className="text-xs text-foreground-muted truncate">
+                              <p className="text-xs text-slate-400 truncate">
                                 {preset.description}
                               </p>
                             )}
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-foreground-muted">
+                            <span className="text-xs text-slate-400">
                               T:{preset.temperature} E:{preset.exaggeration}
                             </span>
                             <button
                               onClick={(e) => handleDeletePreset(preset.id, e)}
-                              className="p-1 text-foreground-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                              className="p-1 text-slate-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -199,7 +199,7 @@ export function PresetSelector({
                   )}
 
                   {isEmpty && (
-                    <div className="px-4 py-3 text-sm text-foreground-muted">
+                    <div className="px-4 py-3 text-sm text-slate-400">
                       No presets yet. Save your current settings to get started.
                     </div>
                   )}
@@ -261,7 +261,7 @@ export function PresetSelector({
         )}
       </div>
 
-      <p className="text-xs text-foreground-muted">
+      <p className="text-xs text-slate-400">
         Apply a preset or save your current settings for quick recall.
       </p>
     </div>

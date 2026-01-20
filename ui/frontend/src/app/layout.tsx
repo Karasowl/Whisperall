@@ -1,18 +1,20 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, Space_Grotesk } from "next/font/google";
+import { Inter, Outfit } from "next/font/google"; // Modern, geometric sans
 import "./globals.css";
-import { Navigation } from "@/components/Navigation";
+import { Sidebar } from "@/components/Sidebar";
+import { STTPasteManager } from "@/components/STTPasteManager";
+import { UISettingsInitializer } from "@/components/UISettingsInitializer";
 
-const plex = IBM_Plex_Sans({
+const inter = Inter({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
   variable: "--font-sans",
+  display: "swap",
 });
 
-const space = Space_Grotesk({
+const outfit = Outfit({
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
   variable: "--font-display",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -27,17 +29,29 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${plex.variable} ${space.variable} bg-gradient-animated min-h-screen relative`}>
-        {/* Ambient glow orbs for visual depth */}
-        <div className="ambient-orb ambient-orb-1" />
-        <div className="ambient-orb ambient-orb-2" />
+      <body className={`${inter.variable} ${outfit.variable} bg-[var(--background)] text-[var(--foreground)] h-screen overflow-hidden antialiased selection:bg-accent-primary/30 selection:text-white`}>
+        <UISettingsInitializer />
+        <STTPasteManager />
 
-        {/* Main content */}
-        <div className="relative z-10">
-          <Navigation />
-          <main className="max-w-6xl mx-auto px-4 py-8 animate-fade-in">
-            {children}
-          </main>
+        {/* Dynamic Background Mesh */}
+        <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-accent-primary/10 blur-[90px] animate-blob" />
+          <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-accent-secondary/10 blur-[90px] animate-blob animation-delay-2000" />
+          <div className="absolute top-[20%] left-[20%] w-[60%] h-[60%] rounded-full bg-surface-1/50 blur-[60px]" />
+        </div>
+
+        <div className="flex h-full relative z-10 overflow-x-hidden">
+          <Sidebar />
+
+          <div className="flex-1 flex flex-col min-w-0 transition-all duration-300 lg:ml-[var(--sidebar-width,16rem)]">
+            {/* Window Drag Handle / Titlebar Spacer */}
+            {/* This area is draggable. Window controls usually sit top-right. relative to this. */}
+            <div className="h-8 w-full shrink-0 electron-drag-region sticky top-0 z-40" />
+
+            <main className="flex-1 overflow-y-auto overflow-x-hidden p-6 lg:p-10 animate-fade-in custom-scrollbar">
+              {children}
+            </main>
+          </div>
         </div>
       </body>
     </html>

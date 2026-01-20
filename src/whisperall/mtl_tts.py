@@ -163,7 +163,7 @@ class ChatterboxMultilingualTTS:
 
         ve = VoiceEncoder()
         ve.load_state_dict(
-            torch.load(ckpt_dir / "ve.pt", weights_only=True)
+            torch.load(ckpt_dir / "ve.pt", map_location=device, weights_only=True)
         )
         ve.to(device).eval()
 
@@ -173,10 +173,11 @@ class ChatterboxMultilingualTTS:
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         t3.to(device).eval()
+        t3.try_compile()  # Attempt torch.compile for faster inference
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", weights_only=True)
+            torch.load(ckpt_dir / "s3gen.pt", map_location=device, weights_only=True)
         )
         s3gen.to(device).eval()
 
@@ -267,7 +268,11 @@ class ChatterboxMultilingualTTS:
         # Norm and tokenize text
         text = punc_norm(text)
         text_tokens = self.tokenizer.text_to_tokens(text, language_id=language_id.lower() if language_id else None).to(self.device)
-        text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
+
+        # Only duplicate for CFG if cfg_weight > 0 (saves 50% compute time when disabled)
+        use_cfg = cfg_weight > 0
+        if use_cfg:
+            text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # Need two seqs for CFG
 
         sot = self.t3.hp.start_text_token
         eot = self.t3.hp.stop_text_token
@@ -285,8 +290,8 @@ class ChatterboxMultilingualTTS:
                 min_p=min_p,
                 top_p=top_p,
             )
-            # Extract only the conditional batch.
-            speech_tokens = speech_tokens[0]
+            # Extract only the conditional batch (or the only batch if no CFG).
+            speech_tokens = speech_tokens[0] if use_cfg else speech_tokens.squeeze(0)
 
             # TODO: output becomes 1D
             speech_tokens = drop_invalid_tokens(speech_tokens)

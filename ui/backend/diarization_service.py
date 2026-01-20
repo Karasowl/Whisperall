@@ -561,7 +561,10 @@ class DiarizationService:
                 self._pyannote_available = False
                 return False
 
-            self._check_torchcodec_available()
+            if not self._check_torchcodec_available():
+                self._pyannote_error = self._torchcodec_error or "Pyannote audio decoder (torchcodec) not available"
+                self._pyannote_available = False
+                return False
 
             self._pyannote_available = True
             return True
@@ -857,6 +860,12 @@ class DiarizationService:
         audio_path_for_pipeline = Path(audio_input)
         concat_dir: Optional[tempfile.TemporaryDirectory] = None
         concat_mapping: List[Dict[str, float]] = []
+        duration_estimate = self._get_wav_duration(audio_path_for_pipeline)
+        if duration_estimate is None:
+            duration_estimate = max(
+                (seg.get("end_time", 0) for seg in segments),
+                default=0.0,
+            )
 
         config = self._get_chunk_config()
         duration = self._get_wav_duration(audio_path) or 0.0
@@ -891,7 +900,31 @@ class DiarizationService:
                     if progress_callback:
                         progress_callback(83, "Using full audio for diarization...")
 
+        def _handle_missing_torchcodec() -> Optional[DiarizationResult]:
+            if duration_estimate >= 1800:
+                message = (
+                    self._torchcodec_error
+                    or "Pyannote audio decoder (torchcodec) is not available."
+                )
+                if force_pyannote:
+                    raise RuntimeError(
+                        f"{message} Large audio cannot be loaded into memory without torchcodec."
+                    )
+                if progress_callback:
+                    progress_callback(83, "Torchcodec missing; using basic diarization for large audio...")
+                return self._diarize_with_clustering(
+                    audio_path,
+                    segments,
+                    min_speakers,
+                    max_speakers,
+                    progress_callback,
+                )
+            return None
+
         if not self._check_torchcodec_available():
+            fallback = _handle_missing_torchcodec()
+            if fallback is not None:
+                return fallback
             audio_input = self._load_audio_waveform(audio_path_for_pipeline, progress_callback)
 
         try:
@@ -905,6 +938,9 @@ class DiarizationService:
             error_text = str(exc)
             if "AudioDecoder" in error_text or "torchcodec" in error_text.lower():
                 try:
+                    fallback = _handle_missing_torchcodec()
+                    if fallback is not None:
+                        return fallback
                     audio_input = self._load_audio_waveform(audio_path_for_pipeline, progress_callback)
                     diarization = self._pyannote_pipeline(
                         audio_input,
@@ -1244,8 +1280,8 @@ class DiarizationService:
             from sklearn.metrics.pairwise import cosine_similarity
         except ImportError as exc:
             raise RuntimeError(
-                "scikit-learn is required for speaker diarization. "
-                "Run: pip install scikit-learn"
+                "Speaker detection components are not available. "
+                "Please reinstall the application or contact support."
             ) from exc
 
         n_samples = len(embeddings)

@@ -169,14 +169,14 @@ export default function VoicesPage() {
       case 'high':
         return 'bg-amber-500/20 text-amber-200 border-amber-500/30';
       default:
-        return 'bg-white/10 text-foreground-muted border-white/10';
+        return 'bg-white/10 text-slate-400 border-white/10';
     }
   };
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[300px]">
-        <Loader2 className="w-8 h-8 animate-spin text-foreground-muted" />
+        <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
       </div>
     );
   }
@@ -186,13 +186,13 @@ export default function VoicesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gradient">Voice Library</h1>
-          <p className="mt-1 text-foreground-muted">
+          <p className="mt-1 text-slate-400">
             Store voice samples for cloning and reuse
           </p>
         </div>
         <div className="flex items-center gap-3">
           {voices.length > 0 && (
-            <div className="text-sm text-foreground-muted">
+            <div className="text-sm text-slate-400">
               {voices.length} voices | {totalSizeMb} MB
             </div>
           )}
@@ -233,8 +233,8 @@ export default function VoicesPage() {
       {showForm && (
         <div className="glass-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-foreground">Add New Voice</h2>
-            <button onClick={() => setShowForm(false)} className="text-foreground-muted hover:text-foreground">
+            <h2 className="text-lg font-semibold text-slate-100">Add New Voice</h2>
+            <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-100">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -306,11 +306,11 @@ export default function VoicesPage() {
                     </div>
                   ) : (
                     <>
-                      <Upload className="w-8 h-8 mx-auto text-foreground-muted" />
-                      <p className="mt-2 text-sm text-foreground-muted">
+                      <Upload className="w-8 h-8 mx-auto text-slate-400" />
+                      <p className="mt-2 text-sm text-slate-400">
                         Drag and drop an audio file, or click to select
                       </p>
-                      <p className="mt-1 text-xs text-foreground-muted">
+                      <p className="mt-1 text-xs text-slate-400">
                         WAV, MP3, FLAC, OGG supported
                       </p>
                     </>
@@ -327,7 +327,7 @@ export default function VoicesPage() {
                       </div>
                       <div className="flex-1">
                         <p className="font-medium text-emerald-200">Recording ready</p>
-                        <p className="text-sm text-foreground-muted">Duration: {recordedDuration}s</p>
+                        <p className="text-sm text-slate-400">Duration: {recordedDuration}s</p>
                       </div>
                       <button
                         type="button"
@@ -386,9 +386,9 @@ export default function VoicesPage() {
 
       {voices.length === 0 && !showTrimmer ? (
         <div className="glass-card p-12 text-center">
-          <Mic className="w-12 h-12 mx-auto text-foreground-muted mb-4" />
-          <p className="text-foreground-muted font-medium">No voices saved yet</p>
-          <p className="text-sm text-foreground-muted mt-2">
+          <Mic className="w-12 h-12 mx-auto text-slate-400 mb-4" />
+          <p className="text-slate-400 font-medium">No voices saved yet</p>
+          <p className="text-sm text-slate-400 mt-2">
             Add a voice sample to start cloning
           </p>
           <div className="flex gap-3 justify-center mt-4">
@@ -408,9 +408,9 @@ export default function VoicesPage() {
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-foreground truncate">{voice.name}</h3>
+                    <h3 className="font-semibold text-slate-100 truncate">{voice.name}</h3>
                     {voice.size_mb !== undefined && (
-                      <span className="text-xs text-foreground-muted">{voice.size_mb} MB</span>
+                      <span className="text-xs text-slate-400">{voice.size_mb} MB</span>
                     )}
                   </div>
                   {voice.tags.length > 0 && (
@@ -432,7 +432,7 @@ export default function VoicesPage() {
 
               {voice.analysis && (
                 <div className="mb-3 p-3 glass rounded-lg">
-                  <p className="text-sm text-foreground-muted mb-2">
+                  <p className="text-sm text-slate-400 mb-2">
                     {voice.analysis.description}
                   </p>
                   <div className="flex gap-1 text-xs flex-wrap">
@@ -455,7 +455,7 @@ export default function VoicesPage() {
                   'w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-medium transition-colors',
                   playingVoice === voice.id
                     ? 'bg-emerald-500 text-white'
-                    : 'bg-white/5 text-foreground hover:bg-white/10'
+                    : 'bg-white/5 text-slate-100 hover:bg-white/10'
                 )}
               >
                 {playingVoice === voice.id ? (
@@ -476,8 +476,8 @@ export default function VoicesPage() {
       ) : null}
 
       <div className="glass-card p-4">
-        <h3 className="font-medium text-foreground mb-1">Voice cloning tips</h3>
-        <p className="text-sm text-foreground-muted">
+        <h3 className="font-medium text-slate-100 mb-1">Voice cloning tips</h3>
+        <p className="text-sm text-slate-400">
           Upload or record 5 to 15 seconds of clear speech. Select the saved voice
           in the Text to Speech page to generate audio.
         </p>

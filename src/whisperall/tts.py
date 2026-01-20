@@ -147,6 +147,7 @@ class ChatterboxTTS:
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
         t3.to(device).eval()
+        t3.try_compile()  # Attempt torch.compile for faster inference
 
         s3gen = S3Gen()
         s3gen.load_state_dict(

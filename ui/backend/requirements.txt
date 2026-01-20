@@ -10,3 +10,32 @@ faster-whisper>=1.0.0
 argostranslate>=1.9.0
 pynput>=1.7.6
 pyperclip>=1.8.2
+yt-dlp>=2024.10.22
+
+# Audio processing
+soundfile>=0.12.0
+librosa>=0.10.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# ML/AI frameworks (install torch separately for your CUDA version)
+# torch>=2.0.0
+# torchaudio>=2.0.0  # Required by: Dia, Zonos, VoxCPM, VibeVoice
+huggingface_hub>=0.20.0
+httpx>=0.24.0  # Required by API TTS providers
+
+# Optional local TTS providers (install as needed)
+# kokoro>=0.1.0
+# f5-tts>=0.1.0
+# fish-speech>=1.0.0
+
+# API TTS providers
+openai>=1.0.0
+elevenlabs>=1.0.0
+cartesia>=1.0.0
+pyht>=0.0.28
+
+# Optional music/sfx providers (install as needed)
+# diffrhythm>=0.1.0
+# demucs>=4.0.0
+# mmaudio>=0.1.0

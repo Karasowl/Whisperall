@@ -30,15 +30,15 @@ export function ConfirmDialog({
       <div className="modal-backdrop" onClick={onCancel} />
       <div className="modal space-y-4">
         <div>
-          <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+          <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
           {description && (
-            <div className="mt-2 text-sm text-foreground-muted">
+            <div className="mt-2 text-sm text-slate-400">
               {description}
             </div>
           )}
           {busy && (
             <div className="mt-4 space-y-2">
-              <div className="text-xs text-foreground-muted">Working...</div>
+              <div className="text-xs text-slate-400">Working...</div>
               <div className="progress-bar">
                 <div className="progress-bar-fill animate-pulse" style={{ width: '100%' }} />
               </div>

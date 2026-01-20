@@ -21,7 +21,7 @@ export function ProgressBar({ progress, status, details }: ProgressBarProps) {
           ) : (
             <Loader2 className="w-5 h-5 text-amber-300 animate-spin" />
           )}
-          <span className="font-medium text-foreground">{status}</span>
+          <span className="font-medium text-slate-100">{status}</span>
         </div>
         <span className={cn(
           "text-sm font-mono px-2 py-0.5 rounded",
@@ -44,7 +44,7 @@ export function ProgressBar({ progress, status, details }: ProgressBarProps) {
       </div>
 
       {details && (
-        <p className="text-xs text-foreground-muted">{details}</p>
+        <p className="text-xs text-slate-400">{details}</p>
       )}
     </div>
   );

@@ -72,28 +72,28 @@ export function AudioPlayer({ src, filename }: AudioPlayerProps) {
   const progressPercent = duration ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="glass rounded-xl p-5">
+    <div className="surface rounded-xl p-5 border border-glass-border">
       <audio ref={audioRef} src={src} preload="metadata" />
 
       <div className="flex items-center gap-4">
         {/* Play button */}
         <button
           onClick={togglePlay}
-          className="w-14 h-14 flex items-center justify-center bg-gradient-to-br from-emerald-400 to-amber-400 rounded-full hover:shadow-lg hover:shadow-emerald-400/30 transition-all hover:scale-105"
+          className="w-14 h-14 flex items-center justify-center btn-primary rounded-full hover:shadow-lg transition-all hover:scale-105"
         >
           {isPlaying ? (
-            <Pause className="w-6 h-6 text-white" />
+            <Pause className="w-6 h-6 text-black fill-current" />
           ) : (
-            <Play className="w-6 h-6 text-white ml-1" />
+            <Play className="w-6 h-6 text-black fill-current ml-1" />
           )}
         </button>
 
         {/* Progress */}
         <div className="flex-1 space-y-2">
           {/* Custom progress bar */}
-          <div className="relative h-2 bg-white/10 rounded-full overflow-hidden group cursor-pointer">
+          <div className="relative h-2 bg-surface-3 rounded-full overflow-hidden group cursor-pointer hover:h-3 transition-all">
             <div
-              className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-400 to-amber-400 rounded-full transition-all"
+              className="absolute inset-y-0 left-0 bg-gradient-to-r from-accent-primary to-accent-secondary rounded-full transition-all"
               style={{ width: `${progressPercent}%` }}
             />
             <input
@@ -128,9 +128,9 @@ export function AudioPlayer({ src, filename }: AudioPlayerProps) {
               <Volume2 className="w-5 h-5 text-foreground-muted" />
             )}
           </button>
-          <div className="w-20 relative h-1.5 bg-white/10 rounded-full overflow-hidden">
+          <div className="w-20 relative h-1.5 bg-surface-3 rounded-full overflow-hidden">
             <div
-              className="absolute inset-y-0 left-0 bg-emerald-400/70 rounded-full"
+              className="absolute inset-y-0 left-0 bg-accent-primary rounded-full"
               style={{ width: `${volume * 100}%` }}
             />
             <input
@@ -148,17 +148,17 @@ export function AudioPlayer({ src, filename }: AudioPlayerProps) {
         {/* Download */}
         <button
           onClick={handleDownload}
-          className="btn btn-secondary px-4"
+          className="btn btn-secondary px-4 h-14 w-14 lg:w-auto lg:px-6"
           title="Download"
         >
           <Download className="w-5 h-5" />
-          <span className="hidden sm:inline">Download</span>
+          <span className="hidden lg:inline">Download</span>
         </button>
       </div>
 
       <div className="mt-3 flex items-center gap-2">
-        <span className="badge badge-primary text-xs">{filename.split('.').pop()?.toUpperCase()}</span>
-        <span className="text-sm text-foreground-muted truncate">{filename}</span>
+        <span className="badge badge-primary text-xs tracking-wider font-bold">{filename.split('.').pop()?.toUpperCase()}</span>
+        <span className="text-sm text-foreground-muted truncate font-mono opacity-80">{filename}</span>
       </div>
     </div>
   );

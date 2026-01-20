@@ -156,7 +156,7 @@ export function TurboTagsEditor({
           key={`tag-${matchIndex}`}
           className={cn(
             'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium border',
-            tagInfo?.color || 'bg-white/5 text-foreground-muted border-glass-border'
+            tagInfo?.color || 'bg-white/5 text-slate-400 border-glass-border'
           )}
         >
           {tagInfo?.icon}
@@ -185,11 +185,11 @@ export function TurboTagsEditor({
   return (
     <div className="space-y-4 p-4 glass rounded-xl">
       <div>
-        <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+        <h3 className="text-sm font-medium text-slate-100 flex items-center gap-2">
           <Drama className="w-4 h-4" />
           Turbo Tags (Turbo model)
         </h3>
-        <p className="text-xs text-foreground-muted mt-1">
+        <p className="text-xs text-slate-400 mt-1">
           Click a tag to insert it at the cursor position
         </p>
       </div>
@@ -214,7 +214,7 @@ export function TurboTagsEditor({
 
       {hasAnyTags && (
         <div className="mt-4">
-          <p className="text-xs font-medium text-foreground-muted mb-2">Preview:</p>
+          <p className="text-xs font-medium text-slate-400 mb-2">Preview:</p>
           <div className="p-3 bg-white/5 rounded-lg border border-glass-border text-sm whitespace-pre-wrap">
             {renderPreview()}
           </div>

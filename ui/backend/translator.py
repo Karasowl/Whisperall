@@ -81,6 +81,57 @@ class TranslationService:
         translations = result.get("data", {}).get("translations") or []
         return translations[0].get("translatedText", ""), {"provider": "google"}
 
+    def _translate_llm(self, provider_id: str, base_url: str, key: str, model: str, text: str, source_lang: str, target_lang: str) -> Tuple[str, dict]:
+        """Generic LLM-based translation using OpenAI-compatible API."""
+        lang_names = {
+            "en": "English", "es": "Spanish", "fr": "French", "de": "German",
+            "it": "Italian", "pt": "Portuguese", "zh": "Chinese", "ja": "Japanese",
+            "ko": "Korean", "ru": "Russian", "ar": "Arabic", "auto": "the original language"
+        }
+        source_name = lang_names.get(source_lang, source_lang)
+        target_name = lang_names.get(target_lang, target_lang)
+
+        prompt = f"Translate the following text from {source_name} to {target_name}. Return only the translated text, nothing else.\n\nText:\n{text}"
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a professional translator. Translate accurately and naturally. Return only the translation."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.1,
+        }
+        resp = requests.post(
+            f"{base_url.rstrip('/')}/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            json=payload,
+            timeout=120
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"{provider_id} translation error: HTTP {resp.status_code}")
+
+        data = resp.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return content.strip(), {"provider": provider_id, "model": model}
+
+    def _translate_deepseek(self, text: str, source_lang: str, target_lang: str) -> Tuple[str, dict]:
+        key = settings_service.get_api_key("deepseek")
+        if not key:
+            raise RuntimeError("DeepSeek API key is not configured")
+
+        model = settings_service.get("providers.translation.deepseek.model", "deepseek-chat")
+        base_url = settings_service.get("providers.translation.deepseek.base_url", "https://api.deepseek.com")
+        return self._translate_llm("deepseek", base_url, key, model, text, source_lang, target_lang)
+
+    def _translate_zhipu(self, text: str, source_lang: str, target_lang: str) -> Tuple[str, dict]:
+        key = settings_service.get_api_key("zhipu")
+        if not key:
+            raise RuntimeError("Zhipu (GLM-4.7) API key is not configured")
+
+        model = settings_service.get("providers.translation.zhipu.model", "glm-4-plus")
+        base_url = settings_service.get("providers.translation.zhipu.base_url", "https://open.bigmodel.cn/api/paas")
+        return self._translate_llm("zhipu", base_url, key, model, text, source_lang, target_lang)
+
     def translate(self, text: str, source_lang: str = "auto", target_lang: str = "en", provider: Optional[str] = None):
         provider = provider or settings_service.get_selected_provider("translation")
 
@@ -90,6 +141,10 @@ class TranslationService:
             return self._translate_deepl(text, source_lang, target_lang)
         if provider == "google":
             return self._translate_google(text, source_lang, target_lang)
+        if provider == "deepseek":
+            return self._translate_deepseek(text, source_lang, target_lang)
+        if provider == "zhipu":
+            return self._translate_zhipu(text, source_lang, target_lang)
 
         raise RuntimeError(f"Translation provider not supported: {provider}")
 

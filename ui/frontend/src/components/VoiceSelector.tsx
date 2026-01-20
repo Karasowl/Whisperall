@@ -82,7 +82,7 @@ export function VoiceSelector({
               }}
               className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
             >
-              <X className="w-4 h-4 text-foreground-muted" />
+              <X className="w-4 h-4 text-slate-400" />
             </button>
           </div>
         ) : (
@@ -111,8 +111,8 @@ export function VoiceSelector({
                 className={cn(
                   'flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200',
                   selectedVoiceId === voice.id && !uploadedFile
-                    ? 'bg-gradient-to-r from-emerald-500/20 to-amber-500/20 border border-emerald-400/40'
-                    : 'glass glass-hover'
+                    ? 'bg-accent-primary/10 border border-accent-primary/40' // Use accent for selection
+                    : 'card-interactive' // Use theme-aware card style
                 )}
                 onClick={() => {
                   onSelectVoice(voice.id);
@@ -127,8 +127,8 @@ export function VoiceSelector({
                   className={cn(
                     'p-2 rounded-lg transition-all',
                     playingVoice === voice.id
-                      ? 'bg-emerald-500 text-white'
-                      : 'bg-white/5 hover:bg-white/10 text-foreground-muted'
+                      ? 'btn-primary text-white'
+                      : 'bg-accent-primary/5 hover:bg-accent-primary/10 text-accent-primary'
                   )}
                 >
                   {playingVoice === voice.id ? (
@@ -146,7 +146,7 @@ export function VoiceSelector({
                   )}
                 </div>
                 {selectedVoiceId === voice.id && !uploadedFile && (
-                  <Check className="w-4 h-4 text-emerald-300 flex-shrink-0" />
+                  <Check className="w-4 h-4 text-accent-primary flex-shrink-0" />
                 )}
               </div>
             ))}

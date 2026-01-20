@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useDropdownPosition } from '@/lib/useDropdownPosition';
 
 export interface SelectOption {
   value: string;
@@ -33,7 +35,43 @@ export function SelectMenu({
   buttonClassName,
 }: SelectMenuProps) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const dropdownStyle = useDropdownPosition(open && !disabled, buttonRef);
   const selected = options.find((opt) => opt.value === value);
+  const portalRoot = typeof document !== 'undefined' ? document.body : null;
+  const dropdown = open && !disabled ? (
+    <>
+      <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+      <div
+        className="z-50 dropdown-content max-h-80 overflow-y-auto animate-fade-in custom-scrollbar"
+        style={dropdownStyle}
+      >
+        {options.map((option) => (
+          <button
+            type="button"
+            key={option.value}
+            disabled={option.disabled}
+            onClick={() => {
+              onChange(option.value);
+              setOpen(false);
+            }}
+            className={cn(
+              'w-full text-left px-4 py-3 transition-colors border-b border-white/5 last:border-0',
+              option.disabled
+                ? 'opacity-50 cursor-not-allowed'
+                : 'hover:bg-accent-primary/10 hover:text-accent-primary',
+              option.value === value && 'bg-accent-primary/20 text-accent-primary font-medium'
+            )}
+          >
+            <div className="text-sm">{option.label}</div>
+            {option.description && (
+              <div className="text-xs text-foreground-muted mt-1 opacity-80">{option.description}</div>
+            )}
+          </button>
+        ))}
+      </div>
+    </>
+  ) : null;
 
   return (
     <div className={cn('space-y-2', className)}>
@@ -42,6 +80,7 @@ export function SelectMenu({
       <div className="relative">
         <button
           type="button"
+          ref={buttonRef}
           disabled={disabled}
           onClick={() => !disabled && setOpen(!open)}
           className={cn(
@@ -60,37 +99,7 @@ export function SelectMenu({
             )}
           />
         </button>
-
-        {open && !disabled && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="absolute z-20 w-full mt-2 glass-card overflow-hidden max-h-72 overflow-y-auto animate-fade-in">
-              {options.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  disabled={option.disabled}
-                  onClick={() => {
-                    onChange(option.value);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    'w-full text-left px-4 py-3 transition-colors',
-                    option.disabled
-                      ? 'opacity-50 cursor-not-allowed'
-                      : 'hover:bg-white/5',
-                    option.value === value && 'bg-emerald-500/15 text-emerald-200'
-                  )}
-                >
-                  <div className="text-sm font-medium">{option.label}</div>
-                  {option.description && (
-                    <div className="text-xs text-foreground-muted mt-1">{option.description}</div>
-                  )}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+        {portalRoot ? createPortal(dropdown, portalRoot) : dropdown}
       </div>
     </div>
   );

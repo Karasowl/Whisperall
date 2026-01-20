@@ -49,13 +49,13 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-white/10">
-          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
             <Download className="w-5 h-5 text-emerald-400" />
             Export Transcript
           </h2>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-foreground-muted hover:text-foreground"
+            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-slate-100"
           >
             <X className="w-5 h-5" />
           </button>
@@ -65,7 +65,7 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
         <div className="p-4 space-y-6">
           {/* Format selection */}
           <div>
-            <label className="block text-sm font-medium text-foreground-muted mb-3">
+            <label className="block text-sm font-medium text-slate-400 mb-3">
               Export Format
             </label>
             <div className="space-y-2">
@@ -97,20 +97,20 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
                     >
                       <Icon
                         className={`w-5 h-5 ${
-                          selectedFormat === format.id ? "text-emerald-400" : "text-foreground-muted"
+                          selectedFormat === format.id ? "text-emerald-400" : "text-slate-400"
                         }`}
                       />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p
                         className={`font-medium ${
-                          selectedFormat === format.id ? "text-emerald-300" : "text-foreground"
+                          selectedFormat === format.id ? "text-emerald-300" : "text-slate-100"
                         }`}
                       >
                         {format.name}
-                        <span className="text-foreground-muted text-sm ml-2">{format.extension}</span>
+                        <span className="text-slate-400 text-sm ml-2">{format.extension}</span>
                       </p>
-                      <p className="text-sm text-foreground-muted">{format.description}</p>
+                      <p className="text-sm text-slate-400">{format.description}</p>
                     </div>
                     <div
                       className={`
@@ -132,7 +132,7 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
 
           {/* Options */}
           <div className="space-y-3">
-            <label className="block text-sm font-medium text-foreground-muted mb-2">
+            <label className="block text-sm font-medium text-slate-400 mb-2">
               Options
             </label>
 
@@ -144,8 +144,8 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
                 className="w-5 h-5 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
               />
               <div>
-                <span className="text-foreground">Include speaker labels</span>
-                <p className="text-xs text-foreground-muted">Add speaker identification to each segment</p>
+                <span className="text-slate-100">Include speaker labels</span>
+                <p className="text-xs text-slate-400">Add speaker identification to each segment</p>
               </div>
             </label>
 
@@ -158,8 +158,8 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
                   className="w-5 h-5 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
                 />
                 <div>
-                  <span className="text-foreground">Include timestamps</span>
-                  <p className="text-xs text-foreground-muted">Add time markers before each segment</p>
+                  <span className="text-slate-100">Include timestamps</span>
+                  <p className="text-xs text-slate-400">Add time markers before each segment</p>
                 </div>
               </label>
             )}
