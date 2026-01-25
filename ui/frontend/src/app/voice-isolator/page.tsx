@@ -7,6 +7,8 @@ import {
   Volume2,
   VolumeX,
   Sparkles,
+  Cloud,
+  HardDrive,
 } from 'lucide-react';
 import {
   uploadVoiceIsolatorAudio,
@@ -146,8 +148,7 @@ export default function VoiceIsolatorPage() {
       return;
     }
 
-    const provider = providers.find(p => p.id === selectedProvider);
-    if (!provider?.ready) {
+    if (!currentProvider?.ready) {
       setError('Selected provider is not ready. Please check the API key or install required dependencies.');
       return;
     }

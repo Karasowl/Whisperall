@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronUp,
   Globe,
+  Cloud,
 } from 'lucide-react';
 import {
   getDubbingLanguages,
@@ -190,8 +191,7 @@ export default function DubbingPage() {
       return;
     }
 
-    const provider = providers.find(p => p.id === selectedProvider);
-    if (!provider?.ready) {
+    if (!currentProvider?.ready) {
       setError('Selected provider is not ready. Please check the API key configuration.');
       return;
     }
