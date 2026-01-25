@@ -474,6 +474,45 @@ const pasteLastTranscript = async () => {
   // setTimeout(() => restoreClipboard(snapshot), 150);
 };
 
+// Send Ctrl+C to copy current selection
+const sendCopyKeystroke = () => {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      const proc = spawn(
+        'powershell',
+        ['-NoProfile', '-Command', "$wsh = New-Object -ComObject WScript.Shell; $wsh.SendKeys('^c')"],
+        { windowsHide: true }
+      );
+      proc.on('exit', () => resolve());
+      proc.on('error', () => resolve());
+      return;
+    }
+    if (process.platform === 'darwin') {
+      const proc = spawn(
+        'osascript',
+        ['-e', 'tell application "System Events" to keystroke "c" using command down'],
+        { stdio: 'ignore' }
+      );
+      proc.on('exit', () => resolve());
+      proc.on('error', () => resolve());
+      return;
+    }
+    resolve();
+  });
+};
+
+// Read the currently selected text from the system (outside Electron)
+const readSystemSelection = async () => {
+  const snapshot = snapshotClipboard();
+  clipboard.clear();
+  await sendCopyKeystroke();
+  // Wait for clipboard to update
+  await new Promise(r => setTimeout(r, 150));
+  const selection = clipboard.readText();
+  restoreClipboard(snapshot);
+  return selection || '';
+};
+
 // Check if backend is ready
 const waitForBackend = (retries = 180) => {
   return new Promise((resolve, reject) => {
@@ -1133,6 +1172,15 @@ ipcMain.handle('read-clipboard', () => {
     return clipboard.readText();
   } catch (err) {
     console.error('[Clipboard] Read failed:', err.message);
+    return '';
+  }
+});
+
+ipcMain.handle('read-selection', async () => {
+  try {
+    return await readSystemSelection();
+  } catch (err) {
+    console.error('[Selection] Read failed:', err.message);
     return '';
   }
 });

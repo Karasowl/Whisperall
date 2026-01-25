@@ -129,6 +129,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('show-notification', payload);
   },
   readClipboard: () => ipcRenderer.invoke('read-clipboard'),
+  readSelection: () => ipcRenderer.invoke('read-selection'),
   getFilePath: (file) => {
     try {
       return webUtils.getPathForFile(file);
