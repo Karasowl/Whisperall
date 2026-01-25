@@ -110,6 +110,27 @@ Estos son **features nuevos por implementar**, no "simulaciones".
 - ~~Upload 4GB en memoria~~ → Ya usa streaming en chunks de 1MB
 - ~~Validar persistencia último módulo~~ → Existe en `widget-overlay.json`
 
+### 3. Backend mucho más completo de lo que sugieren los planes
+
+| Módulo | Endpoints | Estado |
+|--------|-----------|--------|
+| TTS | 12+ | ✅ Completo |
+| STT | 7 | ✅ Completo |
+| Transcribe | 10+ | ✅ Completo |
+| Music | 6 | ✅ Completo |
+| SFX | 8 | ✅ Completo |
+| Voice Changer | 5 | ✅ Completo |
+| Voice Isolator | 4 | ✅ Completo |
+| Stems | 8 | ✅ Completo |
+| Loopback | 6 + WebSocket | ✅ Completo |
+| Diagnostics | 7 | ✅ Completo |
+| History | 10+ | ✅ Completo |
+| Settings | 15+ | ✅ Completo |
+| Dubbing | 6 | ✅ Completo |
+| Voice Training | 10+ | ✅ Completo |
+
+**Los archivos errores_a_resolver_2 a 7 están mayormente obsoletos.**
+
 ---
 
 ## Commits Realizados

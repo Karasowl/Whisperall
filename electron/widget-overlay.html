@@ -264,6 +264,18 @@
     /* Reader State */
     .view-reader {
       gap: 8px;
+      position: relative;
+    }
+
+    .reader-progress {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      background: var(--accent-reader);
+      border-radius: 1px;
+      transition: width 0.1s linear;
+      width: 0%;
     }
 
     .speed-badge {
@@ -395,6 +407,7 @@
 
         <!-- READER -->
         <div id="view-reader" class="view view-reader">
+          <div class="reader-progress" id="reader-progress"></div>
           <button class="icon-btn" id="btn-vol" title="Volume" style="margin-right: -4px;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
@@ -798,6 +811,15 @@
             setState(STATES.HOVER);
           };
 
+          // Progress bar update
+          currentAudio.ontimeupdate = () => {
+            if (currentAudio && currentAudio.duration) {
+              const progress = (currentAudio.currentTime / currentAudio.duration) * 100;
+              const bar = document.getElementById('reader-progress');
+              if (bar) bar.style.width = progress + '%';
+            }
+          };
+
           currentAudio.play().catch(err => {
             console.error('[Widget] Play failed:', err);
             setState(STATES.HOVER);
@@ -815,6 +837,9 @@
           currentAudio = null;
         }
         isPaused = false;
+        // Reset progress bar
+        const bar = document.getElementById('reader-progress');
+        if (bar) bar.style.width = '0%';
       }
 
       function togglePauseAudio() {
