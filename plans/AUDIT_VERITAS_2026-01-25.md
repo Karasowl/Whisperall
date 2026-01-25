@@ -175,3 +175,40 @@ Estos son **features nuevos por implementar**, no "simulaciones".
 - Rama de trabajo: `veritas/overnight-audit`
 - Los planes .md estaban desactualizados vs el código real
 - El proyecto es más maduro de lo que sugieren los errores_a_resolver
+
+### Cómo probar los cambios
+
+1. **Cambiar a la rama:**
+   ```bash
+   cd E:\dev-projects\chatterbox
+   git checkout veritas/overnight-audit
+   ```
+
+2. **Correr la app:**
+   ```bash
+   ChatterboxUI.bat
+   ```
+
+3. **Probar nuevas funciones:**
+   - **Control de velocidad:** Click en "1.0x" en el widget Reader
+   - **Barra de progreso:** Visible mientras reproduce audio
+   - **Tooltips:** Hover sobre cualquier botón del widget
+   - **Leer selección:** Selecciona texto en cualquier app y presiona `Ctrl+Shift+Alt+R`
+   - **Menú tray:** Click derecho en el icono → "Reader (Selection)"
+   - **Settings:** Página de Settings → Hotkeys → "Read Selection"
+
+### Si quieres mergear a main
+```bash
+git checkout main
+git merge veritas/overnight-audit
+```
+
+---
+
+## Estado de la Sesión
+
+- **Hora de inicio:** ~02:50 CST
+- **Hora de último commit:** ~03:18 CST
+- **Duración:** ~30 minutos de trabajo activo
+- **Contexto usado:** 73% de 200k tokens
+- **Créditos usados:** ~68% del día
