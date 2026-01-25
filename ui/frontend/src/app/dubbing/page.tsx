@@ -9,13 +9,9 @@ import {
   Play,
   ChevronDown,
   ChevronUp,
-  Cloud,
-  Check,
-  AlertTriangle,
   Globe,
 } from 'lucide-react';
 import {
-  getDubbingProviders,
   getDubbingLanguages,
   uploadDubbingFile,
   startDubbing,
@@ -27,8 +23,7 @@ import {
   DubbingLanguages,
   DubbingJob,
 } from '@/lib/api';
-import { cn } from '@/lib/utils';
-import Link from 'next/link';
+import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
 import {
   ModuleShell,
   Dropzone,
@@ -39,9 +34,8 @@ import { Toggle } from '@/components/Toggle';
 
 export default function DubbingPage() {
   // Provider state
-  const [providers, setProviders] = useState<DubbingProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('elevenlabs');
-  const [loadingProviders, setLoadingProviders] = useState(true);
+  const [currentProvider, setCurrentProvider] = useState<DubbingProvider | null>(null);
 
   // Languages
   const [languages, setLanguages] = useState<DubbingLanguages>({});
@@ -70,17 +64,11 @@ export default function DubbingPage() {
   // Refs
   const didLoadProviderRef = useRef(false);
 
-  // Load providers and saved selection on mount
+  // Load saved provider selection on mount
   useEffect(() => {
-    async function loadProvidersAndSelection() {
+    async function loadProviderSelection() {
       try {
-        const [providerList, selection] = await Promise.all([
-          getDubbingProviders(),
-          getProviderSelection('dubbing').catch(() => null),
-        ]);
-        setProviders(providerList);
-
-        // Use saved selection if available
+        const selection = await getProviderSelection('dubbing');
         if (selection?.selected) {
           setSelectedProvider(selection.selected);
           if (selection.config?.source_language) {
@@ -89,21 +77,14 @@ export default function DubbingPage() {
           if (selection.config?.target_language) {
             setTargetLanguage(selection.config.target_language);
           }
-        } else {
-          // Select first ready provider by default
-          const readyProvider = providerList.find(p => p.ready);
-          if (readyProvider) {
-            setSelectedProvider(readyProvider.id);
-          }
         }
       } catch (err) {
-        console.error('Failed to load dubbing providers:', err);
+        console.error('Failed to load dubbing provider selection:', err);
       } finally {
-        setLoadingProviders(false);
         didLoadProviderRef.current = true;
       }
     }
-    loadProvidersAndSelection();
+    loadProviderSelection();
   }, []);
 
   // Persist provider selection
@@ -262,7 +243,6 @@ export default function DubbingPage() {
   };
 
   const languageEntries = Object.entries(languages);
-  const currentProvider = providers.find(p => p.id === selectedProvider);
   const isReady = !!mediaPath && !!targetLanguage && !isUploading && !!currentProvider?.ready;
 
   return (
@@ -407,76 +387,15 @@ export default function DubbingPage() {
       main={
         <div className="space-y-6">
           {/* Provider Selection */}
-          <div className="glass-card p-6 space-y-4">
-            <label className="label flex items-center gap-2">
-              <Globe className="w-4 h-4" />
-              Select Provider
-            </label>
-
-            {loadingProviders ? (
-              <div className="flex items-center gap-2 text-foreground-muted">
-                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                Loading providers...
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3">
-                {providers.map((provider) => (
-                  <button
-                    key={provider.id}
-                    onClick={() => provider.ready && setSelectedProvider(provider.id)}
-                    disabled={!provider.ready}
-                    className={cn(
-                      'p-4 rounded-xl border-2 text-left transition-all',
-                      selectedProvider === provider.id
-                        ? 'border-accent-primary bg-accent-primary/10'
-                        : provider.ready
-                        ? 'border-border hover:border-border-hover'
-                        : 'border-border/50 opacity-60 cursor-not-allowed'
-                    )}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Cloud className="w-5 h-5 text-accent-primary" />
-                        <span className="font-medium">{provider.name}</span>
-                      </div>
-                      {provider.ready ? (
-                        <Check className="w-4 h-4 text-green-500" />
-                      ) : (
-                        <AlertTriangle className="w-4 h-4 text-warning" />
-                      )}
-                    </div>
-                    <p className="text-xs text-foreground-muted mb-2">{provider.description}</p>
-
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {provider.features.map((feature, i) => (
-                        <span key={i} className="badge badge-primary text-xs">
-                          {feature}
-                        </span>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center gap-4 text-xs text-foreground-muted">
-                      {provider.quota_minutes && (
-                        <span>{provider.quota_minutes} min/month</span>
-                      )}
-                      {provider.supported_languages && (
-                        <span>{provider.supported_languages}+ languages</span>
-                      )}
-                      {provider.watermark_in_starter && (
-                        <span className="text-warning">Watermark in Starter</span>
-                      )}
-                    </div>
-
-                    {!provider.ready && provider.requires_api_key && (
-                      <Link href="/settings" className="text-xs text-accent-primary hover:underline mt-2 block">
-                        Configure API key
-                      </Link>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <UnifiedProviderSelector
+            service="dubbing"
+            selected={selectedProvider}
+            onSelect={setSelectedProvider}
+            onProviderInfoChange={(info) => setCurrentProvider(info as DubbingProvider | null)}
+            variant="cards"
+            showModelSelector={false}
+            label="Dubbing Engine"
+          />
 
           {/* Media Upload */}
           {!mediaFile ? (
