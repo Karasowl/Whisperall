@@ -9,15 +9,11 @@ import {
   Volume2,
   ChevronDown,
   ChevronUp,
-  Cloud,
-  Key,
-  Check,
   Play,
   Pause,
   Search,
 } from 'lucide-react';
 import {
-  getVoiceChangerProviders,
   getVoiceChangerVoices,
   uploadVoiceChangerAudio,
   startVoiceChanger,
@@ -29,6 +25,7 @@ import {
   VoiceChangerVoice,
   VoiceChangerJob,
 } from '@/lib/api';
+import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
 import { cn } from '@/lib/utils';
 import {
   ModuleShell,
@@ -41,10 +38,9 @@ import { Toggle } from '@/components/Toggle';
 
 export default function VoiceChangerPage() {
   // Providers
-  const [providers, setProviders] = useState<VoiceChangerProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('elevenlabs');
   const [selectedModel, setSelectedModel] = useState<string>('eleven_english_sts_v2');
-  const [loadingProviders, setLoadingProviders] = useState(true);
+  const [currentProviderInfo, setCurrentProviderInfo] = useState<VoiceChangerProvider | null>(null);
 
   // Voices
   const [voices, setVoices] = useState<VoiceChangerVoice[]>([]);
@@ -75,43 +71,27 @@ export default function VoiceChangerPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const didLoadProviderRef = useRef(false);
 
-  // Load providers and saved selection
+  // Load saved provider selection
   useEffect(() => {
-    async function loadProvidersAndSelection() {
+    async function loadProviderSelection() {
       try {
-        const [data, selection] = await Promise.all([
-          getVoiceChangerProviders(),
-          getProviderSelection('voice_changer').catch(() => null),
-        ]);
-        setProviders(data);
-
-        // Use saved selection if available
+        const selection = await getProviderSelection('voice_changer');
         if (selection?.selected) {
           setSelectedProvider(selection.selected);
           if (selection.config?.model) {
             setSelectedModel(selection.config.model);
-          } else {
-            const provider = data.find((p) => p.id === selection.selected);
-            if (provider) {
-              setSelectedModel(provider.default_model);
-            }
           }
           if (selection.config?.voice_id) {
             setSelectedVoice(selection.config.voice_id);
           }
-        } else if (data.length > 0) {
-          const readyProvider = data.find((p) => p.ready) || data[0];
-          setSelectedProvider(readyProvider.id);
-          setSelectedModel(readyProvider.default_model);
         }
       } catch (err: any) {
-        console.error('Failed to load providers:', err);
+        console.error('Failed to load voice changer provider selection:', err);
       } finally {
-        setLoadingProviders(false);
         didLoadProviderRef.current = true;
       }
     }
-    loadProvidersAndSelection();
+    loadProviderSelection();
   }, []);
 
   // Persist provider selection
@@ -172,7 +152,6 @@ export default function VoiceChangerPage() {
     return () => clearInterval(interval);
   }, [currentJob?.id, currentJob?.status]);
 
-  const currentProviderInfo = providers.find((p) => p.id === selectedProvider);
   const filteredVoices = voices.filter((v) =>
     v.name.toLowerCase().includes(voiceSearch.toLowerCase())
   );
@@ -396,87 +375,17 @@ export default function VoiceChangerPage() {
       main={
         <div className="space-y-6">
           {/* Provider Selection */}
-          <div className="glass-card p-6 space-y-4">
-            <label className="label flex items-center gap-2">
-              <Wand2 className="w-4 h-4" />
-              Voice Changer Engine
-            </label>
-
-            {loadingProviders ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin" />
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {providers.map((provider) => (
-                  <button
-                    key={provider.id}
-                    onClick={() => {
-                      setSelectedProvider(provider.id);
-                      setSelectedModel(provider.default_model);
-                    }}
-                    disabled={!provider.ready}
-                    className={cn(
-                      'p-4 rounded-xl border-2 text-left transition-all',
-                      selectedProvider === provider.id
-                        ? 'border-accent-primary bg-accent-primary/10'
-                        : 'border-glass-border hover:border-glass-border-hover bg-surface-1',
-                      !provider.ready && 'opacity-50 cursor-not-allowed'
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-semibold flex items-center gap-2">
-                        {provider.type === 'api' && <Cloud className="w-4 h-4" />}
-                        {provider.name}
-                        {selectedProvider === provider.id && (
-                          <Check className="w-4 h-4 text-accent-primary" />
-                        )}
-                      </span>
-                      {provider.quota_minutes && (
-                        <span className="text-xs px-2 py-1 rounded-full bg-surface-2">
-                          {provider.quota_minutes} min/mo
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-foreground-muted">{provider.description}</p>
-                    {!provider.ready && provider.requires_api_key && (
-                      <p className="text-xs text-amber-400 mt-2 flex items-center gap-1">
-                        <Key className="w-3 h-3" />
-                        API key required - configure in Settings
-                      </p>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Model variant selector */}
-            {currentProviderInfo && currentProviderInfo.models.length > 1 && (
-              <div className="mt-4 pt-4 border-t border-glass-border">
-                <label className="label text-sm mb-2">Model</label>
-                <div className="flex gap-2 flex-wrap">
-                  {currentProviderInfo.models.map((model) => (
-                    <button
-                      key={model.id}
-                      onClick={() => setSelectedModel(model.id)}
-                      className={cn(
-                        'px-4 py-2 rounded-lg text-sm transition-all',
-                        selectedModel === model.id
-                          ? 'bg-accent-primary text-black font-medium'
-                          : 'bg-surface-2 hover:bg-surface-3'
-                      )}
-                      title={model.description}
-                    >
-                      {model.name}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-foreground-muted mt-2">
-                  {currentProviderInfo.models.find((m) => m.id === selectedModel)?.description}
-                </p>
-              </div>
-            )}
-          </div>
+          <UnifiedProviderSelector
+            service="voice_changer"
+            selected={selectedProvider}
+            onSelect={setSelectedProvider}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
+            onProviderInfoChange={(info) => setCurrentProviderInfo(info as VoiceChangerProvider | null)}
+            variant="cards"
+            showModelSelector
+            label="Voice Changer Engine"
+          />
 
           {/* Audio Upload */}
           <Dropzone
