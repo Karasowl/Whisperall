@@ -792,6 +792,40 @@
         }
       }
 
+      async function handleReadSelection() {
+        try {
+          // Read the currently selected text (triggers Ctrl+C internally)
+          const text = api?.readSelection ? await api.readSelection() : '';
+          if (!text || !text.trim()) {
+            console.log('[Widget] No selection found');
+            setState(STATES.HOVER);
+            return;
+          }
+
+          const response = await api.netFetch(`${BACKEND_URL}/api/reader/speak`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text.trim() })
+          });
+
+          if (!response.ok) {
+            console.error('[Widget] Reader API error:', response.status);
+            setState(STATES.HOVER);
+            return;
+          }
+
+          const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+          if (data?.output_url) {
+            playAudioFromUrl(`${BACKEND_URL}${data.output_url}`);
+          } else {
+            setState(STATES.HOVER);
+          }
+        } catch (err) {
+          console.error('[Widget] Read selection failed:', err);
+          setState(STATES.HOVER);
+        }
+      }
+
       function playAudioFromUrl(audioUrl) {
         stopAudio();
         try {
@@ -920,6 +954,9 @@
         if (action === 'read-clipboard') {
           setState(STATES.READER);
           handleReadClipboard();
+        } else if (action === 'read-selection') {
+          setState(STATES.READER);
+          handleReadSelection();
         } else if (action === 'dictate-toggle') {
           // Toggle logic: If recording, stop. If idle/complete/hover, start.
           if (currentState === STATES.RECORDING) {

@@ -775,6 +775,7 @@ const createTray = () => {
     { label: 'Text to Speech', click: () => sendHotkeyAction('open-tts') },
     { label: 'Dictate (STT)', click: () => sendHotkeyAction('dictate-toggle') },
     { label: 'Reader (Clipboard)', click: () => { showWidgetOverlay('reader'); sendWidgetHotkeyAction('read-clipboard'); } },
+    { label: 'Reader (Selection)', click: () => { showWidgetOverlay('reader'); sendWidgetHotkeyAction('read-selection'); } },
     { label: 'AI Edit', click: () => sendHotkeyAction('ai-edit') },
     { label: 'Translate', click: () => sendHotkeyAction('translate') },
     { type: 'separator' },
@@ -808,6 +809,7 @@ app.whenReady().then(() => {
 let currentHotkeys = {
   dictate: 'Alt+X',
   read_clipboard: 'Ctrl+Shift+R',
+  read_selection: 'Ctrl+Shift+Alt+R',  // New: read selected text
   stt_paste: 'Alt+Shift+S',
   pause: 'Ctrl+Shift+P',
   stop: 'Ctrl+Shift+S',
@@ -821,6 +823,7 @@ let currentHotkeys = {
 const hotkeyActions = {
   dictate: 'dictate-toggle',
   read_clipboard: 'read-clipboard',
+  read_selection: 'read-selection',  // New: read selected text
   stt_paste: 'stt-paste',
   ai_edit: 'ai-edit',
   translate: 'translate',
@@ -920,6 +923,14 @@ const registerHotkeys = () => {
           console.log('[Hotkey] Opening Widget Overlay for Reader');
           showWidgetOverlay('reader');
           sendWidgetHotkeyAction('read-clipboard');
+          return;
+        }
+
+        // Read selection: copy selected text first, then read it
+        if (mappedAction === 'read-selection' || action === 'read_selection') {
+          console.log('[Hotkey] Opening Widget Overlay for Reader (selection)');
+          showWidgetOverlay('reader');
+          sendWidgetHotkeyAction('read-selection');
           return;
         }
 
