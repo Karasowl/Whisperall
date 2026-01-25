@@ -117,13 +117,24 @@ Usuario puede pausar, cambiar velocidad, cambiar voz
 ## Prioridad de Implementacion
 
 ## Progreso Actual (23/01)
-- [x] **Diseno**: Implementado "Pill Mode" con transicion fluida a "Card Mode".
-- [x] **Funcionalidad**: Integrados Reader, TTS, STT, Transcribe y Library en el widget.
-- [x] **Persistencia**: El widget carga configuraciones desde `/api/settings`.
-- [x] **Interactive**: Hover/Click para expandir.
+- [x] **Diseño**: Implementado "Pill Mode" con transición fluida.
+- [x] **Reader**: Lee clipboard y reproduce con TTS. Funciona.
+- [x] **STT (Dictate)**: Graba voz y transcribe. Conectado al backend real via `GlobalSttManager.tsx`.
+- [x] **Persistencia básica**: El widget carga configuraciones desde `/api/settings`.
+- [x] **Interactivo**: Hover/Click para expandir, arrastrable.
 
-## Pendiente
-- [ ] Validar persistencia de "Ultimo Modulo" (se guarda en `widget-overlay.json`).
-- [ ] Conectar STT Real (actualmente es simulado/UI).
-- [ ] Integrar Backend real para Transcribe (actualmente simulado).
-- [ ] Pulir estilos visuales segun feedback.
+## Pendiente (Auditoría Veritas 25/01)
+**Módulos NO implementados en el widget:**
+- [ ] **TTS Input**: Cuadro de texto para escribir y generar voz (diferente a Reader que solo lee clipboard)
+- [ ] **Transcribe**: Subir/pegar link de video, mostrar progreso, copiar resultado
+- [ ] **Voice Library**: Grabar/gestionar voces desde el widget
+- [ ] **Navegación entre módulos**: Tabs o selector (actualmente solo hay Reader y Dictate en hover)
+
+**Mejoras pendientes:**
+- [ ] Control de velocidad real en Reader (el badge muestra 1.0x pero no hay funcionalidad de cambio)
+- [ ] Selector de voz en tiempo real
+- [ ] Barra de progreso visual en Reader
+- [ ] Botón para ir a la ventana principal del módulo activo
+
+**NOTA:** El checkbox anterior "Integrados Reader, TTS, STT, Transcribe y Library" era INCORRECTO.
+Solo están implementados Reader y STT (Dictate). El resto son features por desarrollar.

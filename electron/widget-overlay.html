@@ -784,6 +784,7 @@
         try {
           currentAudio = new Audio(audioUrl);
           currentAudio.volume = navVolume;
+          currentAudio.playbackRate = playbackSpeed;
           isPaused = false;
 
           currentAudio.onended = () => {
@@ -841,6 +842,25 @@
       bindClick('btn-pause-reader', togglePauseAudio);
 
       bindClick('btn-vol', toggleVolume);
+
+      // Speed control
+      const SPEED_OPTIONS = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0];
+      let speedIndex = 0;
+      let playbackSpeed = SPEED_OPTIONS[speedIndex];
+
+      function cycleSpeed() {
+        speedIndex = (speedIndex + 1) % SPEED_OPTIONS.length;
+        playbackSpeed = SPEED_OPTIONS[speedIndex];
+        if (currentAudio) currentAudio.playbackRate = playbackSpeed;
+        updateSpeedBadge();
+      }
+
+      function updateSpeedBadge() {
+        const badge = document.getElementById('btn-speed');
+        if (badge) badge.textContent = playbackSpeed + 'x';
+      }
+
+      bindClick('btn-speed', cycleSpeed);
 
       function toggleVolume() {
         // Cycle: 1.0 (High) -> 0.5 (Low) -> 0.0 (Mute) -> 1.0
