@@ -2,14 +2,27 @@
 
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import AIProvider, AIProviderInfo, build_prompt
 from ..base import ProviderType, ModelVariant
+from core.api_provider import BaseAPIProvider, APIProviderConfig
 
 
-class GeminiProvider(AIProvider):
+class GeminiProvider(BaseAPIProvider, AIProvider):
     """Google Gemini models for AI editing"""
+
+    CONFIG = APIProviderConfig(
+        provider_id="gemini",
+        provider_name="Gemini",
+        api_key_name="gemini",
+        base_url="https://generativelanguage.googleapis.com"
+    )
+
+    def __init__(self):
+        BaseAPIProvider.__init__(self)
+
+    def _get_auth_header(self, api_key: str) -> Dict[str, str]:
+        """Gemini uses key in query param, not header. Return empty dict."""
+        return {}
 
     @classmethod
     def get_info(cls) -> AIProviderInfo:
@@ -40,10 +53,6 @@ class GeminiProvider(AIProvider):
     ) -> Tuple[str, Dict[str, Any]]:
         from settings_service import settings_service
 
-        key = settings_service.get_api_key("gemini")
-        if not key:
-            raise RuntimeError("Gemini API key is not configured")
-
         model_name = model or settings_service.get("providers.ai_edit.gemini.model", "gemini-1.5-flash")
 
         payload = {
@@ -51,16 +60,14 @@ class GeminiProvider(AIProvider):
             "generationConfig": {"temperature": 0.2},
         }
 
-        resp = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}",
+        # Gemini uses API key as query parameter
+        response = self.client.post(
+            f"/v1beta/models/{model_name}:generateContent",
             json=payload,
-            timeout=120
+            params={"key": self._api_key}
         )
+        data = response.json()
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Gemini error: HTTP {resp.status_code}")
-
-        data = resp.json()
         content = ""
         candidates = data.get("candidates") or []
         if candidates:

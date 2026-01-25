@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, Sparkles, Zap, AlertCircle } from 'lucide-react';
+import { Loader2, Sparkles, Zap } from 'lucide-react';
+import { StatusAlert } from '@/components/module';
 import { ModelSelector } from '@/components/ModelSelector';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { VoiceSelector } from '@/components/VoiceSelector';
@@ -353,7 +354,7 @@ export default function TTSPage() {
       {/* Header */}
       <div className="space-y-2">
         <div className="flex items-center justify-between flex-wrap gap-4">
-          <h1 className="text-4xl font-bold text-gradient tracking-tight">Text to Speech</h1>
+          <h1 className="module-title">Text to Speech</h1>
           <DeviceToggle
             value={device}
             onChange={setDevice}
@@ -362,17 +363,19 @@ export default function TTSPage() {
             onFastModeChange={setFastMode}
           />
         </div>
-        <p className="text-foreground-secondary text-lg">
+        <p className="module-description">
           Convert text to natural-sounding speech with voice cloning
         </p>
       </div>
 
       {/* Error Alert */}
       {error && (
-        <div className="card p-4 flex items-center gap-3 border-error/30 bg-error/10">
-          <AlertCircle className="w-5 h-5 text-error flex-shrink-0" />
-          <p className="text-error-300">{error}</p>
-        </div>
+        <StatusAlert
+          variant="error"
+          message={error}
+          dismissible
+          onDismiss={() => setError(null)}
+        />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

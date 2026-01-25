@@ -12,6 +12,10 @@ import requests
 
 from settings_service import settings_service
 
+# Diagnostics
+from diagnostics import log_function, error_context
+from diagnostics.error_codes import ErrorCode
+
 
 class STTService:
     def __init__(self):
@@ -74,8 +78,10 @@ class STTService:
         model = self._load_local_model(model_name, device=device)
 
         lang = None if language == "auto" else language
+        # Use forward slashes to avoid Windows path escape issues
+        audio_str = str(audio_path).replace("\\", "/")
         segments, info = model.transcribe(
-            str(audio_path),
+            audio_str,
             language=lang,
             vad_filter=True,
             initial_prompt=prompt or None
@@ -158,19 +164,69 @@ class STTService:
         transcript = alternatives[0].get("transcript", "") if alternatives else ""
         return transcript.strip(), {"provider": "deepgram", "model": model}
 
+    def _transcribe_elevenlabs(self, audio_path: Path, language: str) -> Tuple[str, dict]:
+        """Transcribe using ElevenLabs Scribe API (10 hours included in Starter plan)"""
+        key = settings_service.get_api_key("elevenlabs")
+        if not key:
+            raise RuntimeError("ElevenLabs API key is not configured")
+
+        model = settings_service.get("providers.stt.elevenlabs.model", "scribe_v2")
+
+        # Prepare multipart form data
+        files = {"file": audio_path.open("rb")}
+        data = {"model_id": model}
+
+        # Add language if specified (ISO-639-1 code)
+        if language != "auto":
+            data["language_code"] = language
+
+        try:
+            resp = requests.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers={"xi-api-key": key},
+                files=files,
+                data=data,
+                timeout=180  # Longer timeout for potentially larger files
+            )
+        finally:
+            files["file"].close()
+
+        if resp.status_code != 200:
+            error_detail = ""
+            try:
+                error_detail = resp.json().get("detail", {}).get("message", resp.text)
+            except Exception:
+                error_detail = resp.text
+            raise RuntimeError(f"ElevenLabs STT error: HTTP {resp.status_code} - {error_detail}")
+
+        result = resp.json()
+        text = result.get("text", "").strip()
+        detected_language = result.get("language_code", language)
+
+        return text, {
+            "provider": "elevenlabs",
+            "model": model,
+            "language": detected_language,
+            "language_probability": result.get("language_probability"),
+        }
+
+    @log_function(module="stt", error_code=ErrorCode.STT_TRANSCRIPTION_FAILED)
     def transcribe(self, audio_path: Path, language: str = "auto", prompt: Optional[str] = None) -> Tuple[str, dict]:
         provider = settings_service.get_selected_provider("stt")
 
-        if provider.startswith("faster-whisper"):
-            return self._transcribe_local(audio_path, language, prompt)
-        if provider == "openai":
-            return self._transcribe_openai(audio_path, language)
-        if provider == "groq":
-            return self._transcribe_groq(audio_path, language, prompt)
-        if provider == "deepgram":
-            return self._transcribe_deepgram(audio_path, language)
+        with error_context(provider=provider, language=language):
+            if provider.startswith("faster-whisper"):
+                return self._transcribe_local(audio_path, language, prompt)
+            if provider == "openai":
+                return self._transcribe_openai(audio_path, language)
+            if provider == "groq":
+                return self._transcribe_groq(audio_path, language, prompt)
+            if provider == "deepgram":
+                return self._transcribe_deepgram(audio_path, language)
+            if provider == "elevenlabs":
+                return self._transcribe_elevenlabs(audio_path, language)
 
-        raise RuntimeError(f"STT provider not supported: {provider}")
+            raise RuntimeError(f"STT provider not supported: {provider}")
 
 
 _service: Optional[STTService] = None

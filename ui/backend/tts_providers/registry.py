@@ -145,6 +145,13 @@ def _register_providers():
     except Exception as e:
         print(f"[TTS Registry] Could not load NariLabsProvider: {e}")
 
+    # Register DeepInfra TTS provider (API-based)
+    try:
+        from .api.deepinfra import DeepInfraTTSProvider
+        _PROVIDERS["deepinfra-tts"] = DeepInfraTTSProvider
+    except Exception as e:
+        print(f"[TTS Registry] Could not load DeepInfraTTSProvider: {e}")
+
 
 # Comprehensive dependency map for all providers
 # Format: provider_id -> {
@@ -258,6 +265,12 @@ PROVIDER_DEPENDENCIES = {
         "type": "api",
         "packages": ["httpx"],
         "api_key": "narilabs",
+        "helpers": ["soundfile"],
+    },
+    "deepinfra-tts": {
+        "type": "api",
+        "packages": ["httpx"],
+        "api_key": "deepinfra",
         "helpers": ["soundfile"],
     },
 }

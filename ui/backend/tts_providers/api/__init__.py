@@ -9,6 +9,7 @@ from .siliconflow import SiliconFlowProvider
 from .minimax import MiniMaxTTSProvider
 from .zyphra import ZyphraProvider
 from .narilabs import NariLabsProvider
+from .deepinfra import DeepInfraTTSProvider
 
 __all__ = [
     "OpenAITTSProvider",
@@ -20,4 +21,5 @@ __all__ = [
     "MiniMaxTTSProvider",
     "ZyphraProvider",
     "NariLabsProvider",
+    "DeepInfraTTSProvider",
 ]

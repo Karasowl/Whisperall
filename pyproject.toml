@@ -23,7 +23,8 @@ dependencies = [
     "spacy-pkuseg",
     "gradio==5.44.1",
     "pyloudnorm",
-    "omegaconf"
+    "omegaconf",
+    "peft>=0.18.1"
 ]
 
 [project.urls]

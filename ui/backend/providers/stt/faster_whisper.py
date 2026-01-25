@@ -35,7 +35,7 @@ class FasterWhisperProvider(STTProvider):
             requires_model_download="faster-whisper-base",  # Default model
             supported_languages=["multilingual"],
             models=FASTER_WHISPER_MODELS,
-            default_model="base",
+            default_model="faster-whisper-base",
             supports_vad=True,
             supports_timestamps=True,
             supports_diarization=False,

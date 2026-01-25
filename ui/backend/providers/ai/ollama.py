@@ -2,14 +2,39 @@
 
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import AIProvider, AIProviderInfo, build_prompt
 from ..base import ProviderType, ModelVariant
+from core.http_client import APIClient, APIClientConfig
 
 
 class OllamaProvider(AIProvider):
-    """Local LLM using Ollama"""
+    """Local LLM using Ollama.
+
+    Note: Ollama is local but uses HTTP to communicate with the Ollama server.
+    It doesn't require an API key, so we use APIClient directly instead of BaseAPIProvider.
+    """
+
+    def __init__(self):
+        self._client: Optional[APIClient] = None
+
+    def _get_client(self) -> APIClient:
+        """Get or create HTTP client for Ollama."""
+        if self._client is None:
+            from settings_service import settings_service
+
+            base_url = settings_service.get(
+                "providers.ai_edit.ollama.base_url",
+                "http://localhost:11434"
+            )
+
+            config = APIClientConfig(
+                base_url=base_url,
+                provider_name="Ollama",
+                timeout=120,
+                max_retries=1  # Local server, no need for many retries
+            )
+            self._client = APIClient(config, {})  # No auth header needed
+        return self._client
 
     @classmethod
     def get_info(cls) -> AIProviderInfo:
@@ -39,7 +64,6 @@ class OllamaProvider(AIProvider):
     ) -> Tuple[str, Dict[str, Any]]:
         from settings_service import settings_service
 
-        base_url = settings_service.get("providers.ai_edit.ollama.base_url", "http://localhost:11434")
         model_name = model or settings_service.get("providers.ai_edit.ollama.model", "llama3.2")
 
         payload = {
@@ -48,11 +72,9 @@ class OllamaProvider(AIProvider):
             "stream": False,
         }
 
-        resp = requests.post(f"{base_url}/api/generate", json=payload, timeout=120)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Ollama error: HTTP {resp.status_code}")
+        response = self._get_client().post("/api/generate", json=payload)
+        data = response.json()
 
-        data = resp.json()
         return data.get("response", "").strip(), {
             "provider": "ollama",
             "model": model_name

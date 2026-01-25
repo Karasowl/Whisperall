@@ -2,14 +2,30 @@
 
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import AIProvider, AIProviderInfo, build_prompt
 from ..base import ProviderType, ModelVariant
+from core.api_provider import BaseAPIProvider, APIProviderConfig
 
 
-class ClaudeProvider(AIProvider):
+class ClaudeProvider(BaseAPIProvider, AIProvider):
     """Anthropic Claude models for AI editing"""
+
+    CONFIG = APIProviderConfig(
+        provider_id="claude",
+        provider_name="Claude",
+        api_key_name="claude",
+        base_url="https://api.anthropic.com"
+    )
+
+    def __init__(self):
+        BaseAPIProvider.__init__(self)
+
+    def _get_auth_header(self, api_key: str) -> Dict[str, str]:
+        """Anthropic uses x-api-key header instead of Bearer token."""
+        return {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01"
+        }
 
     @classmethod
     def get_info(cls) -> AIProviderInfo:
@@ -41,10 +57,6 @@ class ClaudeProvider(AIProvider):
     ) -> Tuple[str, Dict[str, Any]]:
         from settings_service import settings_service
 
-        key = settings_service.get_api_key("claude")
-        if not key:
-            raise RuntimeError("Claude API key is not configured")
-
         model_name = model or settings_service.get("providers.ai_edit.claude.model", "claude-3-haiku-20240307")
 
         payload = {
@@ -54,17 +66,9 @@ class ClaudeProvider(AIProvider):
             "messages": [{"role": "user", "content": build_prompt(text, command)}],
         }
 
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
-            json=payload,
-            timeout=120
-        )
+        response = self.client.post("/v1/messages", json=payload)
+        data = response.json()
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Claude error: HTTP {resp.status_code}")
-
-        data = resp.json()
         content = ""
         if data.get("content"):
             content = data["content"][0].get("text", "")

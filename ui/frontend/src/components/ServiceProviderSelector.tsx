@@ -65,6 +65,11 @@ export function ServiceProviderSelector({
     stt: 'Transcription Engine',
     ai_edit: 'AI Model',
     translation: 'Translation Engine',
+    music: 'Music Engine',
+    sfx: 'SFX Engine',
+    voice_changer: 'Voice Changer',
+    voice_isolator: 'Voice Isolator',
+    dubbing: 'Dubbing Engine',
   };
   const dropdown = isOpen ? (
     <>

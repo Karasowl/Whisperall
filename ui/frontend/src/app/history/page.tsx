@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   History,
@@ -16,9 +16,13 @@ import {
   Users,
   Mic,
   Filter,
-  ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  LayoutGrid,
+  BarChart3,
+  CheckSquare,
+  Square,
+  X,
 } from 'lucide-react';
 import {
   getHistory,
@@ -30,18 +34,33 @@ import {
   clearAllTranscriptions,
   HistoryEntry,
   TranscriptionJob,
+  NewHistoryEntry,
+  HistoryFilter,
+  getNewHistory,
+  getHistoryStats,
+  HistoryStats,
+  bulkDeleteHistoryEntries,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import HistoryFilters from '@/components/HistoryFilters';
+import HistoryEntryCard from '@/components/HistoryEntryCard';
 
-type TabType = 'tts' | 'transcriptions';
+type TabType = 'all' | 'tts' | 'transcriptions';
 type TranscriptionStatus = 'all' | 'completed' | 'paused' | 'interrupted' | 'error' | 'cancelled';
 type SortOrder = 'newest' | 'oldest';
 
 export default function HistoryPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<TabType>('tts');
+  const [activeTab, setActiveTab] = useState<TabType>('all');
 
-  // TTS History state
+  // New unified history state
+  const [newHistory, setNewHistory] = useState<NewHistoryEntry[]>([]);
+  const [newHistoryLoading, setNewHistoryLoading] = useState(true);
+  const [newHistoryTotal, setNewHistoryTotal] = useState(0);
+  const [filters, setFilters] = useState<HistoryFilter>({ limit: 50, offset: 0 });
+  const [stats, setStats] = useState<HistoryStats | null>(null);
+
+  // TTS History state (legacy)
   const [ttsHistory, setTtsHistory] = useState<HistoryEntry[]>([]);
   const [ttsLoading, setTtsLoading] = useState(true);
   const [ttsTotal, setTtsTotal] = useState(0);
@@ -55,9 +74,43 @@ export default function HistoryPage() {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
 
-  // Filter state
+  // Filter state for transcriptions
   const [statusFilter, setStatusFilter] = useState<TranscriptionStatus>('all');
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
+
+  // Selection state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  // Load new history
+  const loadNewHistory = useCallback(async () => {
+    setNewHistoryLoading(true);
+    try {
+      const data = await getNewHistory(filters);
+      setNewHistory(data.entries);
+      setNewHistoryTotal(data.total);
+    } catch (err) {
+      console.error('Error loading new history:', err);
+    } finally {
+      setNewHistoryLoading(false);
+    }
+  }, [filters]);
+
+  // Load stats
+  const loadStats = async () => {
+    try {
+      const data = await getHistoryStats();
+      setStats(data);
+    } catch (err) {
+      console.error('Error loading stats:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadNewHistory();
+    loadStats();
+  }, [loadNewHistory]);
 
   useEffect(() => {
     loadTtsHistory();
@@ -87,6 +140,122 @@ export default function HistoryPage() {
       console.error('Error loading transcription history:', err);
     } finally {
       setTranscriptionsLoading(false);
+    }
+  };
+
+  const handleFiltersChange = (newFilters: HistoryFilter) => {
+    setFilters(newFilters);
+  };
+
+  const handleEntryUpdate = (updatedEntry: NewHistoryEntry) => {
+    setNewHistory(prev => prev.map(e => e.id === updatedEntry.id ? updatedEntry : e));
+  };
+
+  const handleEntryDelete = (entryId: string) => {
+    setNewHistory(prev => prev.filter(e => e.id !== entryId));
+    setNewHistoryTotal(prev => prev - 1);
+    selectedIds.delete(entryId);
+    setSelectedIds(new Set(selectedIds));
+  };
+
+  // Selection handlers
+  const handleSelectionChange = (entryId: string, selected: boolean) => {
+    const newSelection = new Set(selectedIds);
+    if (selected) {
+      newSelection.add(entryId);
+    } else {
+      newSelection.delete(entryId);
+    }
+    setSelectedIds(newSelection);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === newHistory.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(newHistory.map(e => e.id)));
+    }
+  };
+
+  const handleExitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} selected entries?`)) return;
+
+    setBulkDeleting(true);
+    try {
+      const result = await bulkDeleteHistoryEntries(Array.from(selectedIds));
+      setNewHistory(prev => prev.filter(e => !selectedIds.has(e.id)));
+      setNewHistoryTotal(prev => prev - result.deleted_count);
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+
+      if (result.failed_count > 0) {
+        setError(`Deleted ${result.deleted_count} entries. ${result.failed_count} failed.`);
+      }
+    } catch (err) {
+      setError('Bulk delete failed');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  // Regeneration handler - navigate to appropriate module with params
+  const handleRegenerate = (entry: NewHistoryEntry) => {
+    const params = new URLSearchParams();
+
+    switch (entry.module) {
+      case 'tts':
+        params.set('text', entry.input_text || '');
+        if (entry.provider) params.set('provider', entry.provider);
+        if (entry.model) params.set('model', entry.model);
+        if (entry.metadata?.voice_id) params.set('voice', entry.metadata.voice_id);
+        router.push(`/?${params.toString()}`);
+        break;
+      case 'stt':
+        router.push('/dictate');
+        break;
+      case 'voice-changer':
+        if (entry.metadata?.target_voice_id) params.set('voice', entry.metadata.target_voice_id);
+        router.push(`/voice-changer?${params.toString()}`);
+        break;
+      case 'voice-isolator':
+        if (entry.provider) params.set('provider', entry.provider);
+        router.push(`/voice-isolator?${params.toString()}`);
+        break;
+      case 'sfx':
+        if (entry.input_text) params.set('prompt', entry.input_text);
+        router.push(`/sfx?${params.toString()}`);
+        break;
+      case 'music':
+        if (entry.metadata?.lyrics) params.set('lyrics', entry.metadata.lyrics);
+        if (entry.metadata?.style) params.set('style', entry.metadata.style);
+        router.push(`/music?${params.toString()}`);
+        break;
+      case 'translate':
+        params.set('text', entry.input_text || '');
+        if (entry.metadata?.source_language) params.set('from', entry.metadata.source_language);
+        if (entry.metadata?.target_language) params.set('to', entry.metadata.target_language);
+        router.push(`/translate?${params.toString()}`);
+        break;
+      case 'ai-edit':
+        params.set('text', entry.input_text || '');
+        if (entry.metadata?.instruction) params.set('command', entry.metadata.instruction);
+        router.push(`/ai-edit?${params.toString()}`);
+        break;
+      case 'reader':
+        if (entry.input_text) params.set('text', entry.input_text);
+        if (entry.metadata?.source_url) params.set('url', entry.metadata.source_url);
+        if (entry.metadata?.voice_id) params.set('voice', entry.metadata.voice_id);
+        router.push(`/reader?${params.toString()}`);
+        break;
+      default:
+        // For other modules, just navigate to the module page
+        router.push(`/${entry.module}`);
     }
   };
 
@@ -194,14 +363,26 @@ export default function HistoryPage() {
   const formatBillingValue = (value?: number | null) =>
     value != null ? new Intl.NumberFormat().format(value) : null;
 
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  };
+
   const modelNames: Record<string, string> = {
     original: 'Original',
     turbo: 'Turbo',
     multilingual: 'Multilingual',
   };
 
-  const loading = activeTab === 'tts' ? ttsLoading : transcriptionsLoading;
-  const total = activeTab === 'tts' ? ttsTotal : transcriptionsTotal;
+  const loading = activeTab === 'all' ? newHistoryLoading
+    : activeTab === 'tts' ? ttsLoading
+    : transcriptionsLoading;
+
+  const total = activeTab === 'all' ? newHistoryTotal
+    : activeTab === 'tts' ? ttsTotal
+    : transcriptionsTotal;
 
   // Filter and sort transcriptions
   const filteredTranscriptions = transcriptions
@@ -221,13 +402,16 @@ export default function HistoryPage() {
     cancelled: transcriptions.filter(j => j.status === 'cancelled').length,
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[300px]">
-        <RefreshCw className="w-8 h-8 animate-spin text-slate-400" />
-      </div>
-    );
-  }
+  const handleRefresh = () => {
+    if (activeTab === 'all') {
+      loadNewHistory();
+      loadStats();
+    } else if (activeTab === 'tts') {
+      loadTtsHistory();
+    } else {
+      loadTranscriptionHistory();
+    }
+  };
 
   return (
     <div className="space-y-8 animate-slide-up">
@@ -237,7 +421,7 @@ export default function HistoryPage() {
             <History className="w-7 h-7" />
             History
           </h1>
-          <p className="mt-2 text-slate-400">
+          <p className="mt-2 text-foreground-secondary">
             {activeTab === 'transcriptions' && statusFilter !== 'all'
               ? `${filteredTranscriptions.length} of ${total} entries`
               : `${total} ${total === 1 ? 'entry' : 'entries'} saved`}
@@ -246,13 +430,22 @@ export default function HistoryPage() {
 
         <div className="flex gap-2">
           <button
-            onClick={() => activeTab === 'tts' ? loadTtsHistory() : loadTranscriptionHistory()}
+            onClick={handleRefresh}
             className="btn btn-secondary"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
             Refresh
           </button>
-          {((activeTab === 'tts' && ttsHistory.length > 0) || (activeTab === 'transcriptions' && transcriptions.length > 0)) && (
+          {activeTab === 'all' && newHistory.length > 0 && !selectionMode && (
+            <button
+              onClick={() => setSelectionMode(true)}
+              className="btn btn-secondary"
+            >
+              <CheckSquare className="w-4 h-4" />
+              Select
+            </button>
+          )}
+          {activeTab !== 'all' && ((activeTab === 'tts' && ttsHistory.length > 0) || (activeTab === 'transcriptions' && transcriptions.length > 0)) && (
             <button
               onClick={handleClearAll}
               className="btn btn-danger"
@@ -264,21 +457,137 @@ export default function HistoryPage() {
         </div>
       </div>
 
+      {/* Selection Action Bar */}
+      {selectionMode && (
+        <div className="flex items-center justify-between p-4 bg-surface-2 rounded-xl border border-border">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={handleSelectAll}
+              className="flex items-center gap-2 text-sm hover:text-accent-primary transition-colors"
+            >
+              {selectedIds.size === newHistory.length ? (
+                <>
+                  <CheckSquare className="w-4 h-4" />
+                  Deselect All
+                </>
+              ) : (
+                <>
+                  <Square className="w-4 h-4" />
+                  Select All ({newHistory.length})
+                </>
+              )}
+            </button>
+            <span className="text-sm text-foreground-muted">
+              {selectedIds.size} selected
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBulkDelete}
+              disabled={selectedIds.size === 0 || bulkDeleting}
+              className={cn(
+                'btn btn-danger',
+                (selectedIds.size === 0 || bulkDeleting) && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              {bulkDeleting ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4" />
+              )}
+              Delete ({selectedIds.size})
+            </button>
+            <button
+              onClick={handleExitSelectionMode}
+              className="btn btn-secondary"
+            >
+              <X className="w-4 h-4" />
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Stats Summary */}
+      {activeTab === 'all' && stats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="card p-4 rounded-xl">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-accent-primary/10">
+                <LayoutGrid className="w-5 h-5 text-accent-primary" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{stats.total_entries}</p>
+                <p className="text-xs text-foreground-muted">Total Entries</p>
+              </div>
+            </div>
+          </div>
+          <div className="card p-4 rounded-xl">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-emerald-500/10">
+                <Clock className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{formatDuration(stats.total_duration_seconds)}</p>
+                <p className="text-xs text-foreground-muted">Total Duration</p>
+              </div>
+            </div>
+          </div>
+          <div className="card p-4 rounded-xl">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-500/10">
+                <FileText className="w-5 h-5 text-blue-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{stats.total_characters.toLocaleString()}</p>
+                <p className="text-xs text-foreground-muted">Characters</p>
+              </div>
+            </div>
+          </div>
+          <div className="card p-4 rounded-xl">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-amber-500/10">
+                <BarChart3 className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{formatBytes(stats.storage_bytes)}</p>
+                <p className="text-xs text-foreground-muted">Storage Used</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-white/10 pb-2">
+      <div className="flex gap-2 border-b border-border pb-2">
+        <button
+          onClick={() => setActiveTab('all')}
+          className={cn(
+            "px-4 py-2 rounded-t-lg flex items-center gap-2 transition-colors",
+            activeTab === 'all'
+              ? "bg-surface-2 text-foreground"
+              : "text-foreground-secondary hover:text-foreground"
+          )}
+        >
+          <LayoutGrid className="w-4 h-4" />
+          All Modules
+          {newHistoryTotal > 0 && (
+            <span className="text-xs bg-accent-primary/20 text-accent-primary px-2 py-0.5 rounded-full">{newHistoryTotal}</span>
+          )}
+        </button>
         <button
           onClick={() => setActiveTab('tts')}
           className={cn(
             "px-4 py-2 rounded-t-lg flex items-center gap-2 transition-colors",
             activeTab === 'tts'
-              ? "bg-white/10 text-slate-100"
-              : "text-slate-400 hover:text-slate-100"
+              ? "bg-surface-2 text-foreground"
+              : "text-foreground-secondary hover:text-foreground"
           )}
         >
           <Mic className="w-4 h-4" />
-          TTS Generations
+          TTS (Legacy)
           {ttsTotal > 0 && (
-            <span className="text-xs bg-white/10 px-2 py-0.5 rounded-full">{ttsTotal}</span>
+            <span className="text-xs bg-surface-3 px-2 py-0.5 rounded-full">{ttsTotal}</span>
           )}
         </button>
         <button
@@ -286,24 +595,32 @@ export default function HistoryPage() {
           className={cn(
             "px-4 py-2 rounded-t-lg flex items-center gap-2 transition-colors",
             activeTab === 'transcriptions'
-              ? "bg-white/10 text-slate-100"
-              : "text-slate-400 hover:text-slate-100"
+              ? "bg-surface-2 text-foreground"
+              : "text-foreground-secondary hover:text-foreground"
           )}
         >
           <FileText className="w-4 h-4" />
           Transcriptions
           {transcriptionsTotal > 0 && (
-            <span className="text-xs bg-white/10 px-2 py-0.5 rounded-full">{transcriptionsTotal}</span>
+            <span className="text-xs bg-surface-3 px-2 py-0.5 rounded-full">{transcriptionsTotal}</span>
           )}
         </button>
       </div>
+
+      {/* New History Filters */}
+      {activeTab === 'all' && (
+        <HistoryFilters
+          filters={filters}
+          onFiltersChange={handleFiltersChange}
+        />
+      )}
 
       {/* Transcription Filters */}
       {activeTab === 'transcriptions' && transcriptions.length > 0 && (
         <div className="flex flex-wrap items-center gap-4">
           {/* Status Filter */}
           <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-slate-400" />
+            <Filter className="w-4 h-4 text-foreground-muted" />
             <div className="flex flex-wrap gap-1">
               {(['all', 'completed', 'paused', 'interrupted', 'error'] as TranscriptionStatus[]).map((status) => (
                 statusCounts[status] > 0 && (
@@ -317,8 +634,8 @@ export default function HistoryPage() {
                           : status === 'paused' ? "bg-blue-500/30 text-blue-300"
                           : status === 'interrupted' ? "bg-amber-500/30 text-amber-300"
                           : status === 'error' ? "bg-red-500/30 text-red-300"
-                          : "bg-white/20 text-slate-100"
-                        : "bg-white/5 text-slate-400 hover:bg-white/10"
+                          : "bg-surface-3 text-foreground"
+                        : "bg-surface-2 text-foreground-secondary hover:bg-surface-3"
                     )}
                   >
                     {status === 'all' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
@@ -332,7 +649,7 @@ export default function HistoryPage() {
           {/* Sort Order */}
           <button
             onClick={() => setSortOrder(sortOrder === 'newest' ? 'oldest' : 'newest')}
-            className="flex items-center gap-1 px-3 py-1 text-xs rounded-full bg-white/5 text-slate-400 hover:bg-white/10 transition-colors"
+            className="flex items-center gap-1 px-3 py-1 text-xs rounded-full bg-surface-2 text-foreground-secondary hover:bg-surface-3 transition-colors"
           >
             {sortOrder === 'newest' ? (
               <>
@@ -350,16 +667,61 @@ export default function HistoryPage() {
       )}
 
       {error && (
-        <div className="glass-card p-4 border-red-500/30 bg-red-500/10 text-red-300 flex items-center gap-2">
+        <div className="card p-4 border-error/30 bg-error/10 text-error flex items-center gap-2">
           <AlertCircle className="w-5 h-5" />
           {error}
         </div>
       )}
 
-      {/* TTS History */}
-      {activeTab === 'tts' && (
+      {/* Loading State */}
+      {loading && (
+        <div className="flex items-center justify-center min-h-[200px]">
+          <RefreshCw className="w-8 h-8 animate-spin text-foreground-muted" />
+        </div>
+      )}
+
+      {/* New History (All Modules) */}
+      {activeTab === 'all' && !loading && (
+        newHistory.length === 0 ? (
+          <div className="text-center py-16 text-foreground-muted">
+            <LayoutGrid className="w-16 h-16 mx-auto mb-4 opacity-50" />
+            <p className="text-lg">No history yet</p>
+            <p className="text-sm mt-2">Your activity across all modules will appear here</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {newHistory.map((entry) => (
+              <HistoryEntryCard
+                key={entry.id}
+                entry={entry}
+                onUpdate={handleEntryUpdate}
+                onDelete={handleEntryDelete}
+                onRegenerate={handleRegenerate}
+                selectionMode={selectionMode}
+                selected={selectedIds.has(entry.id)}
+                onSelectionChange={handleSelectionChange}
+              />
+            ))}
+
+            {/* Load More */}
+            {newHistory.length < newHistoryTotal && (
+              <div className="text-center pt-4">
+                <button
+                  onClick={() => setFilters(prev => ({ ...prev, limit: (prev.limit || 50) + 50 }))}
+                  className="btn btn-secondary"
+                >
+                  Load More ({newHistory.length} of {newHistoryTotal})
+                </button>
+              </div>
+            )}
+          </div>
+        )
+      )}
+
+      {/* TTS History (Legacy) */}
+      {activeTab === 'tts' && !loading && (
         ttsHistory.length === 0 ? (
-          <div className="text-center py-16 text-slate-400">
+          <div className="text-center py-16 text-foreground-muted">
             <FileAudio className="w-16 h-16 mx-auto mb-4 opacity-50" />
             <p className="text-lg">No TTS history yet</p>
             <p className="text-sm mt-2">Your TTS generations will show up here</p>
@@ -370,7 +732,7 @@ export default function HistoryPage() {
               <div
                 key={entry.id}
                 className={cn(
-                  'glass-card p-4 flex items-start gap-4',
+                  'card p-4 rounded-xl flex items-start gap-4',
                   !entry.file_exists && 'opacity-60'
                 )}
               >
@@ -382,8 +744,8 @@ export default function HistoryPage() {
                     entry.file_exists
                       ? playingId === entry.id
                         ? 'bg-emerald-500 text-white'
-                        : 'bg-white/10 text-slate-100 hover:bg-white/20'
-                      : 'bg-white/5 text-slate-400 cursor-not-allowed'
+                        : 'bg-surface-2 text-foreground hover:bg-surface-3'
+                      : 'bg-surface-1 text-foreground-muted cursor-not-allowed'
                   )}
                 >
                   {playingId === entry.id ? (
@@ -394,7 +756,7 @@ export default function HistoryPage() {
                 </button>
 
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-100 line-clamp-2">{entry.text}</p>
+                  <p className="text-sm text-foreground line-clamp-2">{entry.text}</p>
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
                     <span className="badge">{(entry.model && modelNames[entry.model]) || entry.model || 'unknown'}</span>
                     <span className="badge">{(entry.language || 'en').toUpperCase()}</span>
@@ -417,7 +779,7 @@ export default function HistoryPage() {
                 </div>
 
                 <div className="flex flex-col items-end gap-3 text-right">
-                  <div className="text-xs text-slate-400 flex items-center gap-1">
+                  <div className="text-xs text-foreground-muted flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     {formatDate(entry.created_at)}
                   </div>
@@ -447,15 +809,15 @@ export default function HistoryPage() {
       )}
 
       {/* Transcription History */}
-      {activeTab === 'transcriptions' && (
+      {activeTab === 'transcriptions' && !loading && (
         transcriptions.length === 0 ? (
-          <div className="text-center py-16 text-slate-400">
+          <div className="text-center py-16 text-foreground-muted">
             <FileText className="w-16 h-16 mx-auto mb-4 opacity-50" />
             <p className="text-lg">No transcriptions yet</p>
             <p className="text-sm mt-2">Your transcriptions will show up here</p>
           </div>
         ) : filteredTranscriptions.length === 0 ? (
-          <div className="text-center py-16 text-slate-400">
+          <div className="text-center py-16 text-foreground-muted">
             <Filter className="w-16 h-16 mx-auto mb-4 opacity-50" />
             <p className="text-lg">No transcriptions match this filter</p>
             <button
@@ -470,16 +832,16 @@ export default function HistoryPage() {
             {filteredTranscriptions.map((job) => (
               <div
                 key={job.job_id}
-                className="glass-card p-4 cursor-pointer hover:border-white/20 transition-colors"
+                className="card p-4 rounded-xl cursor-pointer hover:border-border-hover transition-colors"
                 onClick={() => router.push(`/transcribe?job=${job.job_id}`)}
               >
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-5 h-5 text-slate-400" />
+                  <div className="w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-5 h-5 text-foreground-muted" />
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-100">
+                    <p className="text-sm font-medium text-foreground">
                       {job.filename || 'Untitled'}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2 text-xs">
@@ -493,7 +855,6 @@ export default function HistoryPage() {
                       )}>
                         {job.status}
                       </span>
-                      {/* Show partial segments info for paused/interrupted jobs */}
                       {(job.status === 'interrupted' || job.status === 'paused') && job.segments?.length > 0 && (
                         <span className="badge bg-blue-500/10 text-blue-300">
                           {job.segments.length} segments saved
@@ -519,7 +880,7 @@ export default function HistoryPage() {
                   </div>
 
                   <div className="flex flex-col items-end gap-3 text-right">
-                    <div className="text-xs text-slate-400 flex items-center gap-1">
+                    <div className="text-xs text-foreground-muted flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {formatDate(job.created_at)}
                     </div>

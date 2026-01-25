@@ -1,24 +1,31 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mic, Square, Loader2, Copy, RefreshCw } from 'lucide-react';
+import { Mic, Square, Loader2, Copy, Check, RefreshCw, MessageSquare, Trash2 } from 'lucide-react';
 import {
   startStt,
   stopStt,
   cancelStt,
   partialStt,
+  finalizeStt,
   installSttEngine,
   ServiceProviderInfo,
   getProviderSelection,
   getAllModels,
   setProvider,
+  getSTTSettings,
+  STTSettings,
 } from '@/lib/api';
-import { formatDuration } from '@/lib/utils';
+import { formatDuration, cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { SelectMenu } from '@/components/SelectMenu';
 import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
 import { insertTextAtCursor, setLastSttTranscript } from '@/lib/sttHelper';
 import { playActionSound } from '@/lib/actionSounds';
+import {
+  ModuleShell,
+  ActionBar,
+} from '@/components/module';
 
 const languageOptions = [
   { value: 'auto', label: 'Auto' },
@@ -49,8 +56,24 @@ export default function DictatePage() {
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installOutput, setInstallOutput] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [sttSettings, setSttSettings] = useState<STTSettings>({
+    auto_punctuation: true,
+    filler_removal: true,
+    backtrack: true,
+    smart_formatting: true,
+    language: 'auto',
+    transcription_mode: 'final',
+    hotkey_mode: 'toggle',
+    auto_paste: false,
+    overlay_enabled: true,
+  });
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const hotkeyHeldRef = useRef(false);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const streamActiveRef = useRef(false);
@@ -60,6 +83,7 @@ export default function DictatePage() {
   const disablePartialRef = useRef(false);
   const didLoadRef = useRef(false);
 
+  // === CLEANUP ===
   useEffect(() => {
     return () => {
       streamActiveRef.current = false;
@@ -67,10 +91,26 @@ export default function DictatePage() {
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
       if (mediaRecorderRef.current?.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
+      window.electronAPI?.hideSttOverlay?.();
     };
+  }, []);
+
+  // === SETTINGS LOADERS ===
+  useEffect(() => {
+    getSTTSettings()
+      .then((settings) => {
+        setSttSettings(settings);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -194,6 +234,55 @@ export default function DictatePage() {
     setProviderState(nextProvider);
   };
 
+  // === AUDIO MONITORING ===
+  const startAudioLevelMonitoring = useCallback((stream: MediaStream) => {
+    if (!sttSettings.overlay_enabled) return;
+
+    try {
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const analyser = audioContext.createAnalyser();
+      analyserRef.current = analyser;
+      analyser.fftSize = 256;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      const updateLevel = () => {
+        if (!streamActiveRef.current) {
+          window.electronAPI?.updateSttOverlayLevel?.(0);
+          return;
+        }
+        analyser.getByteFrequencyData(dataArray);
+        const sum = dataArray.reduce((a, b) => a + b, 0);
+        const avg = sum / dataArray.length;
+        const level = Math.min(1, avg / 128);
+        window.electronAPI?.updateSttOverlayLevel?.(level);
+        animationFrameRef.current = requestAnimationFrame(updateLevel);
+      };
+
+      updateLevel();
+    } catch (err) {
+      console.warn('[AudioLevel] Failed to start monitoring:', err);
+    }
+  }, [sttSettings.overlay_enabled]);
+
+  const stopAudioLevelMonitoring = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    window.electronAPI?.updateSttOverlayLevel?.(0);
+  }, []);
+
+  // === ERROR HANDLING ===
   const handleSttError = useCallback((err: any, fallback: string) => {
     const message = err.response?.data?.detail || err.message || fallback;
     const normalized = typeof message === 'string' ? message.toLowerCase() : '';
@@ -209,6 +298,7 @@ export default function DictatePage() {
     setError(message);
   }, []);
 
+  // === PARTIAL TRANSCRIPTION ===
   const sendPartial = useCallback(async (activeSessionId: string, activeLanguage: string, activePrompt: string) => {
     if (streamSendingRef.current || !streamActiveRef.current || disablePartialRef.current) return;
     const now = Date.now();
@@ -232,6 +322,7 @@ export default function DictatePage() {
     }
   }, [handleSttError]);
 
+  // === RECORDING CONTROLS ===
   const startRecording = useCallback(async () => {
     setError(null);
     setIsPreparing(true);
@@ -241,11 +332,13 @@ export default function DictatePage() {
     if (providerInfo?.type === 'local' && !providerInfo.is_available) {
       setShowInstallPrompt(true);
       setIsPreparing(false);
+      window.electronAPI?.hideSttOverlay?.();
       return;
     }
     if (providerInfo?.type === 'api' && !providerInfo.is_available) {
       setError('Configure the API key in Settings before using this provider.');
       setIsPreparing(false);
+      window.electronAPI?.hideSttOverlay?.();
       return;
     }
 
@@ -262,14 +355,24 @@ export default function DictatePage() {
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
       streamActiveRef.current = true;
-      disablePartialRef.current = false;
       mimeTypeRef.current = mimeType;
       lastPartialAtRef.current = 0;
+
+      // Disable partials if transcription_mode is 'final'
+      disablePartialRef.current = sttSettings.transcription_mode === 'final';
+
+      // Show overlay and start audio monitoring
+      if (sttSettings.overlay_enabled) {
+        window.electronAPI?.showSttOverlay?.();
+        window.electronAPI?.updateSttOverlayState?.('listening');
+        startAudioLevelMonitoring(stream);
+      }
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           chunksRef.current.push(event.data);
-          if (streamActiveRef.current) {
+          // Only send partials if in 'live' mode
+          if (streamActiveRef.current && sttSettings.transcription_mode === 'live') {
             sendPartial(session.session_id, language, prompt);
           }
         }
@@ -277,27 +380,54 @@ export default function DictatePage() {
 
       recorder.onstop = async () => {
         stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(chunksRef.current, { type: mimeType });
+        stopAudioLevelMonitoring();
 
         if (!session.session_id) {
           setError('STT session was not created');
+          window.electronAPI?.hideSttOverlay?.();
           return;
         }
 
         setIsTranscribing(true);
         streamActiveRef.current = false;
+
+        // Update overlay to show "Transcribing"
+        if (sttSettings.overlay_enabled) {
+          window.electronAPI?.updateSttOverlayState?.('transcribing');
+        }
+
         try {
-          const result = await stopStt(session.session_id, blob, language, prompt || undefined);
+          let result;
+
+          if (sttSettings.transcription_mode === 'live') {
+            // Live mode: use finalizeStt which formats accumulated partial text
+            result = await finalizeStt(session.session_id);
+          } else {
+            // Final mode: send full audio for transcription
+            const blob = new Blob(chunksRef.current, { type: mimeType });
+            result = await stopStt(session.session_id, blob, language, prompt || undefined);
+          }
+
           setTranscript(result.text);
           setRawTranscript(result.raw_text);
           setLastSttTranscript(result.text);
-          insertTextAtCursor(result.text);
+
+          // Notify main process about the transcript
+          window.electronAPI?.setLastSttTranscript?.(result.text);
+
+          // Auto-paste if enabled
+          if (sttSettings.auto_paste && result.text) {
+            window.electronAPI?.pasteLastTranscript?.(result.text);
+          } else {
+            insertTextAtCursor(result.text);
+          }
         } catch (err: any) {
           handleSttError(err, 'Transcription failed');
         } finally {
           setIsTranscribing(false);
           setSessionId(null);
           playActionSound('complete');
+          window.electronAPI?.hideSttOverlay?.();
         }
       };
 
@@ -313,8 +443,9 @@ export default function DictatePage() {
     } catch (err: any) {
       setIsPreparing(false);
       handleSttError(err, 'Could not access microphone');
+      window.electronAPI?.hideSttOverlay?.();
     }
-  }, [language, prompt, sendPartial, handleSttError]);
+  }, [language, prompt, sendPartial, handleSttError, sttSettings, providerInfo, startAudioLevelMonitoring, stopAudioLevelMonitoring]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
@@ -336,32 +467,69 @@ export default function DictatePage() {
     setIsRecording(false);
     setIsTranscribing(false);
     streamActiveRef.current = false;
+    stopAudioLevelMonitoring();
+    window.electronAPI?.hideSttOverlay?.();
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
   };
 
+  // === CLIPBOARD ACTIONS ===
   const copyToClipboard = async () => {
     if (!transcript) return;
-    await navigator.clipboard.writeText(transcript);
+    try {
+      await navigator.clipboard.writeText(transcript);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Failed to copy to clipboard');
+    }
   };
 
+  const clearTranscript = () => {
+    setTranscript('');
+    setRawTranscript('');
+  };
+
+  // === HOTKEY HANDLER ===
   useEffect(() => {
-    const handler = (event: Event) => {
+    const handleHotkey = (event: Event) => {
       const action = (event as CustomEvent).detail;
-      if (action !== 'dictate-toggle') return;
-      if (isRecording) {
-        stopRecording();
-      } else if (!isPreparing && !isTranscribing) {
-        startRecording();
+
+      if (action === 'dictate-toggle') {
+        // Toggle mode: press to start/stop
+        if (isRecording) {
+          stopRecording();
+        } else if (!isPreparing && !isTranscribing) {
+          startRecording();
+        }
+      } else if (action === 'dictate-start') {
+        // Hold mode: start on keydown
+        if (!isRecording && !isPreparing && !isTranscribing) {
+          hotkeyHeldRef.current = true;
+          startRecording();
+        }
+      } else if (action === 'dictate-stop') {
+        // Hold mode: stop on keyup
+        if (isRecording && hotkeyHeldRef.current) {
+          hotkeyHeldRef.current = false;
+          stopRecording();
+        }
       }
     };
-    window.addEventListener('hotkey-action', handler as EventListener);
-    return () => window.removeEventListener('hotkey-action', handler as EventListener);
+
+    window.addEventListener('hotkey-action', handleHotkey as EventListener);
+    return () => window.removeEventListener('hotkey-action', handleHotkey as EventListener);
   }, [isRecording, isPreparing, isTranscribing, startRecording, stopRecording]);
 
+  // === COMPUTED ===
+  const isProcessing = isPreparing || isTranscribing;
+  const hasTranscript = transcript.trim().length > 0;
+
+  // === RENDER ===
   return (
-    <div className="space-y-8 animate-slide-up">
+    <>
+      {/* Install Dialog */}
       <ConfirmDialog
         open={showInstallPrompt}
         title="Install STT engine?"
@@ -415,24 +583,31 @@ export default function DictatePage() {
         }}
         busy={installing}
       />
-      <div className="space-y-2">
-        <h1 className="text-4xl font-bold text-gradient">Speech to Text</h1>
-        <p className="text-slate-400">
-          Dictate inside Whisperall with smart formatting and backtrack rules.
-        </p>
-      </div>
 
-      {error && (
-        <div className="glass-card p-4 border-red-500/30 bg-red-500/10 text-red-300">
-          {error}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 space-y-6">
-          <div className="glass-card p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-slate-100">Dictation Controls</h2>
-
+      <ModuleShell
+        title="Speech to Text"
+        description="Dictate inside Whisperall with smart formatting and backtrack rules."
+        icon={Mic}
+        layout="split"
+        settingsPosition="left"
+        settingsTitle="Dictation Controls"
+        // Engine selector
+        engineSelector={
+          <UnifiedProviderSelector
+            service="stt"
+            selected={provider}
+            onSelect={updateProvider}
+            selectedModel={providerModel}
+            onModelChange={setProviderModel}
+            onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
+            variant="dropdown"
+            showModelSelector
+            label="Transcription Engine"
+          />
+        }
+        // Settings panel content
+        settings={
+          <>
             <SelectMenu
               label="Language"
               value={language}
@@ -440,119 +615,131 @@ export default function DictatePage() {
               onChange={setLanguage}
             />
 
-            <UnifiedProviderSelector
-              service="stt"
-              selected={provider}
-              onSelect={updateProvider}
-              selectedModel={providerModel}
-              onModelChange={setProviderModel}
-              onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
-              variant="dropdown"
-              showModelSelector
-              label="Transcription Engine"
-            />
-
-            <label className="label mt-4">Prompt (optional)</label>
-            <input
-              className="input"
-              placeholder="Project names, acronyms, or style notes"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-            />
-
-            <div className="flex items-center gap-3 mt-4">
-              {!isRecording ? (
-                <button
-                  onClick={startRecording}
-                  disabled={isPreparing || isTranscribing}
-                  className="btn btn-primary w-full"
-                >
-                  {isPreparing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Preparing...
-                    </>
-                  ) : (
-                    <>
-                      <Mic className="w-4 h-4" />
-                      Start Dictation
-                    </>
-                  )}
-                </button>
-              ) : (
-                <button
-                  onClick={stopRecording}
-                  className="btn btn-secondary w-full"
-                >
-                  <Square className="w-4 h-4" />
-                  Stop Dictation
-                </button>
-              )}
+            <div className="space-y-1.5">
+              <label className="label">Prompt (optional)</label>
+              <input
+                className="input"
+                placeholder="Project names, acronyms, or style notes"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+              />
             </div>
 
+            {/* Recording status */}
             {isRecording && (
-              <div className="flex items-center justify-between text-sm text-slate-400">
-                <span>Recording...</span>
-                <span className="font-mono">{formatDuration(duration)}</span>
+              <div className="flex items-center justify-between py-3 px-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-sm text-red-400">Recording...</span>
+                </div>
+                <span className="font-mono text-sm text-red-400">{formatDuration(duration)}</span>
               </div>
             )}
 
-            {sessionId && (
+            {/* Cancel session button */}
+            {sessionId && !isRecording && (
               <button onClick={cancelRecording} className="btn btn-ghost w-full">
                 Cancel Session
               </button>
             )}
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 space-y-6">
-          <div className="glass-card p-6 space-y-4">
+          </>
+        }
+        // Action buttons
+        actions={
+          <ActionBar
+            primary={
+              isRecording
+                ? {
+                    label: 'Stop Dictation',
+                    icon: Square,
+                    onClick: stopRecording,
+                  }
+                : {
+                    label: 'Start Dictation',
+                    icon: Mic,
+                    onClick: startRecording,
+                    disabled: isProcessing,
+                  }
+            }
+            loading={isPreparing}
+            loadingText="Preparing..."
+            pulse={!isRecording && !isProcessing}
+          />
+        }
+        // Main content: Transcription panel
+        main={
+          <div className="glass-card p-6 space-y-4 h-full flex flex-col">
+            {/* Header */}
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-100">Transcription</h2>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-foreground-muted" />
+                <h2 className="text-lg font-semibold text-foreground">Transcription</h2>
+              </div>
+              <div className="flex gap-1">
                 <button
                   onClick={copyToClipboard}
-                  disabled={!transcript}
-                  className="btn btn-secondary btn-icon"
-                  title="Copy to clipboard"
+                  disabled={!hasTranscript}
+                  className={cn(
+                    'p-2 rounded-lg transition-colors',
+                    copied
+                      ? 'text-emerald-400 bg-emerald-500/10'
+                      : 'text-foreground-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed'
+                  )}
+                  title={copied ? 'Copied!' : 'Copy to clipboard'}
                 >
-                  <Copy className="w-4 h-4" />
+                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                 </button>
                 <button
-                  onClick={() => {
-                    setTranscript('');
-                    setRawTranscript('');
-                  }}
-                  className="btn btn-ghost btn-icon"
-                  title="Clear"
+                  onClick={clearTranscript}
+                  disabled={!hasTranscript}
+                  className="p-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="Clear transcript"
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
+            {/* Transcribing indicator */}
             {isTranscribing && (
-              <div className="flex items-center gap-3 text-slate-400">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Transcribing audio...
+              <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-accent-primary/10 border border-accent-primary/20">
+                <Loader2 className="w-4 h-4 animate-spin text-accent-primary" />
+                <span className="text-sm text-accent-primary">Transcribing audio...</span>
               </div>
             )}
 
+            {/* Editable transcript textarea */}
             <textarea
-              className="input textarea min-h-[220px]"
+              className="input textarea flex-1 min-h-[300px] resize-none font-sans text-base leading-relaxed focus:ring-0 border-transparent bg-surface-1"
               placeholder="Your transcription will appear here..."
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
             />
 
-            {rawTranscript && (
-              <div className="text-xs text-slate-400">
-                Raw transcript: {rawTranscript}
+            {/* Raw transcript (if different) */}
+            {rawTranscript && rawTranscript !== transcript && (
+              <details className="text-xs text-foreground-muted">
+                <summary className="cursor-pointer hover:text-foreground transition-colors">
+                  Show raw transcript
+                </summary>
+                <div className="mt-2 p-3 rounded-lg bg-surface-1 font-mono">
+                  {rawTranscript}
+                </div>
+              </details>
+            )}
+
+            {/* Character count */}
+            {hasTranscript && (
+              <div className="text-xs text-foreground-muted text-right">
+                {transcript.length.toLocaleString()} characters
               </div>
             )}
           </div>
-        </div>
-      </div>
-    </div>
+        }
+        // Status
+        error={error}
+        onErrorDismiss={() => setError(null)}
+      />
+    </>
   );
 }

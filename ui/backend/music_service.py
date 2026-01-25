@@ -19,6 +19,10 @@ import time
 from app_paths import get_output_dir
 from settings_service import settings_service
 
+# Diagnostics
+from diagnostics import log_function, error_context, log_info, log_error, set_job_id
+from diagnostics.error_codes import ErrorCode
+
 
 class MusicJobStatus(str, Enum):
     PENDING = "pending"
@@ -77,12 +81,14 @@ class MusicService:
                 "id": info.id,
                 "name": info.name,
                 "description": info.description,
+                "type": getattr(info, 'provider_type', 'local'),
                 "max_duration_seconds": info.max_duration_seconds,
                 "supported_genres": info.supported_genres,
                 "requires_lyrics": info.requires_lyrics,
                 "vram_gb": info.vram_requirement_gb,
                 "models": info.models,
                 "default_model": info.default_model,
+                "supports_fast_mode": getattr(info, 'supports_fast_mode', False),
                 "ready": is_provider_ready(provider_id),
             })
         return providers
@@ -126,47 +132,80 @@ class MusicService:
         if not job:
             return
 
+        # Set job context for logging
+        set_job_id(job_id)
+
         try:
-            job.status = MusicJobStatus.PROCESSING
-            job.progress = 0.1
+            with error_context(
+                provider=job.provider,
+                model=job.model,
+                job_id=job_id,
+                duration=job.duration_seconds,
+            ):
+                job.status = MusicJobStatus.PROCESSING
+                job.progress = 0.1
 
-            from music_providers import get_provider
+                from music_providers import get_provider
 
-            # Get provider
-            provider = get_provider(job.provider)
+                # Get provider
+                log_info("music", "_run_generation", f"Getting provider {job.provider}", job_id=job_id)
+                provider = get_provider(job.provider)
 
-            # Load model if needed
-            if not provider.is_loaded():
-                job.progress = 0.2
-                provider.load(job.model if job.model else None)
+                # Load model if needed
+                if not provider.is_loaded():
+                    job.progress = 0.2
+                    log_info("music", "_run_generation", f"Loading model", model=job.model, job_id=job_id)
+                    provider.load(job.model if job.model else None)
 
-            job.progress = 0.3
+                job.progress = 0.3
 
-            # Generate music
-            audio, sample_rate = provider.generate(
-                lyrics=job.lyrics,
-                style_prompt=job.style_prompt,
-                duration_seconds=job.duration_seconds,
-                model=job.model if job.model else None,
-                **extra_params
-            )
+                # Generate music
+                log_info("music", "_run_generation", f"Starting generation", duration=job.duration_seconds, job_id=job_id)
+                audio, sample_rate = provider.generate(
+                    lyrics=job.lyrics,
+                    style_prompt=job.style_prompt,
+                    duration_seconds=job.duration_seconds,
+                    model=job.model if job.model else None,
+                    **extra_params
+                )
 
-            job.progress = 0.9
+                job.progress = 0.9
 
-            # Save output
-            output_filename = f"music_{job_id}_{int(time.time())}.wav"
-            output_path = self._output_dir / output_filename
-            sf.write(str(output_path), audio, sample_rate)
+                # Save output
+                output_filename = f"music_{job_id}_{int(time.time())}.wav"
+                output_path = self._output_dir / output_filename
+                sf.write(str(output_path), audio, sample_rate)
 
-            job.output_path = str(output_path)
-            job.status = MusicJobStatus.COMPLETED
-            job.progress = 1.0
-            job.completed_at = time.time()
+                job.output_path = str(output_path)
+                job.status = MusicJobStatus.COMPLETED
+                job.progress = 1.0
+                job.completed_at = time.time()
+
+                log_info("music", "_run_generation", f"Generation complete", job_id=job_id, output=str(output_path))
+
+                # Save to history
+                try:
+                    from history_service import get_history_service
+                    import librosa
+                    duration = librosa.get_duration(filename=str(output_path))
+                    history_svc = get_history_service()
+                    history_svc.save_music_entry(
+                        prompt=job.style_prompt,
+                        audio_path=str(output_path),
+                        provider=job.provider,
+                        model=job.model or None,
+                        duration_seconds=duration,
+                        lyrics=job.lyrics,
+                        style=job.style_prompt,
+                    )
+                except Exception as he:
+                    log_error("music", "_run_generation", f"Failed to save to history: {he}", job_id=job_id)
 
         except Exception as e:
             job.status = MusicJobStatus.FAILED
             job.error = str(e)
-            print(f"[MusicService] Job {job_id} failed: {e}")
+            log_error("music", "_run_generation", f"Job {job_id} failed: {e}",
+                      error_code=ErrorCode.MUSIC_GENERATION_FAILED, exception=e, job_id=job_id)
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get job status"""

@@ -15,29 +15,46 @@ SETTINGS_FILE = get_settings_path()
 
 
 class TTSProviderSettings(BaseModel):
-    """Configuracion de proveedores TTS"""
+    """Configuracion de proveedores TTS - 20 providers totales"""
     selected: str = "chatterbox"
-    chatterbox: Dict[str, Any] = {"model": "base", "voice_id": None}
-    kokoro: Dict[str, Any] = {"voice": "af_sky", "speed": 1.0}
-    elevenlabs: Dict[str, Any] = {"voice_id": None, "model": "eleven_turbo_v2"}
-    openai: Dict[str, Any] = {"voice": "alloy", "model": "tts-1"}
+    # Local providers (10) - model IDs must match provider's models list
+    chatterbox: Dict[str, Any] = {"model": "multilingual", "voice_id": None, "exaggeration": 0.5, "cfg_weight": 0.5}
+    f5_tts: Dict[str, Any] = {"model": "F5TTS_v1_Base", "voice_id": None}
+    orpheus: Dict[str, Any] = {"model": "orpheus-3b", "voice_id": None}
+    kokoro: Dict[str, Any] = {"model": "kokoro-v0.19", "voice": "af_sky", "speed": 1.0}
+    fish_speech: Dict[str, Any] = {"model": "fish-speech-1.4", "voice_id": None}
+    openvoice: Dict[str, Any] = {"model": "openvoice-v2", "voice_id": None}
+    zonos: Dict[str, Any] = {"model": "zonos-hybrid", "voice_id": None}
+    vibevoice: Dict[str, Any] = {"model": "vibevoice-0.5b", "voice_id": None}
+    voxcpm: Dict[str, Any] = {"model": "voxcpm-base", "voice_id": None}
+    dia: Dict[str, Any] = {"model": "dia-1.6b", "voice_id": None}
+    # API providers (10)
+    openai_tts: Dict[str, Any] = {"voice": "alloy", "model": "tts-1"}
+    elevenlabs: Dict[str, Any] = {"voice_id": None, "model": "eleven_multilingual_v2"}
     fishaudio: Dict[str, Any] = {"voice_id": None, "model": "default"}
-    siliconflow: Dict[str, Any] = {"voice_id": None, "model": "cosyvoice"}
-    minimax: Dict[str, Any] = {"voice_id": None, "model": "speech-02"}
+    cartesia: Dict[str, Any] = {"voice_id": None, "model": "sonic-multilingual"}
+    playht: Dict[str, Any] = {"voice_id": None, "model": "PlayHT2.0-turbo"}
+    siliconflow: Dict[str, Any] = {"voice_id": None, "model": "FunAudioLLM/CosyVoice2-0.5B"}
+    minimax: Dict[str, Any] = {"voice_id": None, "model": "speech-01-turbo"}
+    zyphra: Dict[str, Any] = {"voice_id": None, "model": "zonos-v1"}
+    narilabs: Dict[str, Any] = {"voice_id": None, "model": "dia-1.6b"}
+    deepinfra_tts: Dict[str, Any] = {"voice_id": None, "model": "kokoro"}
 
 
 class STTProviderSettings(BaseModel):
     """Configuracion de proveedores STT"""
-    selected: str = "faster-whisper-base"
-    faster_whisper: Dict[str, Any] = {"model": "base", "language": "auto", "device": "auto"}
-    openai_whisper: Dict[str, Any] = {"model": "whisper-1"}
+    selected: str = "faster-whisper"
+    faster_whisper: Dict[str, Any] = {"model": "faster-whisper-base", "language": "auto", "device": "auto"}
+    openai: Dict[str, Any] = {"model": "whisper-1"}
     deepgram: Dict[str, Any] = {"model": "nova-2"}
     groq: Dict[str, Any] = {"model": "whisper-large-v3"}
+    elevenlabs: Dict[str, Any] = {"model": "scribe_v1"}
+    deepinfra: Dict[str, Any] = {"model": "whisper-large-v3-turbo"}
     dashscope: Dict[str, Any] = {"model": "paraformer-v2"}
 
 
 class AIEditProviderSettings(BaseModel):
-    """Configuracion de proveedores AI Edit"""
+    """Configuracion de proveedores AI Edit - 9 providers"""
     selected: str = "openai"
     ollama: Dict[str, Any] = {"model": "llama3", "base_url": "http://localhost:11434"}
     openai: Dict[str, Any] = {"model": "gpt-4o-mini"}
@@ -47,6 +64,7 @@ class AIEditProviderSettings(BaseModel):
     moonshot: Dict[str, Any] = {"model": "kimi-k2-0905", "base_url": "https://api.moonshot.ai"}
     minimax: Dict[str, Any] = {"model": "MiniMax-M2", "base_url": "https://api.minimax.chat"}
     zhipu: Dict[str, Any] = {"model": "glm-4-plus", "base_url": "https://open.bigmodel.cn/api/paas"}
+    deepinfra: Dict[str, Any] = {"model": "meta-llama/Llama-3.3-70B-Instruct"}
 
 
 class TranslationProviderSettings(BaseModel):
@@ -59,12 +77,61 @@ class TranslationProviderSettings(BaseModel):
     zhipu: Dict[str, Any] = {"source_lang": "auto", "target_lang": "en", "model": "glm-4-plus"}
 
 
+class MusicProviderSettings(BaseModel):
+    """Configuracion de proveedores de musica"""
+    selected: str = "diffrhythm"
+    diffrhythm: Dict[str, Any] = {"model": "diffrhythm", "duration": 30}
+
+
+class SFXProviderSettings(BaseModel):
+    """Configuracion de proveedores de efectos de sonido"""
+    selected: str = "mmaudio"
+    mmaudio: Dict[str, Any] = {"model": "mmaudio", "duration": 8}
+    elevenlabs: Dict[str, Any] = {"model": "sound-effects", "duration": 8}
+
+
+class VoiceChangerProviderSettings(BaseModel):
+    """Configuracion de proveedores de cambio de voz"""
+    selected: str = "elevenlabs"
+    elevenlabs: Dict[str, Any] = {"model": "eleven_english_sts_v2", "voice_id": None}
+
+
+class VoiceIsolatorProviderSettings(BaseModel):
+    """Configuracion de proveedores de aislamiento de voz"""
+    selected: str = "elevenlabs"
+    elevenlabs: Dict[str, Any] = {}
+    demucs: Dict[str, Any] = {}
+
+
+class DubbingProviderSettings(BaseModel):
+    """Configuracion de proveedores de doblaje"""
+    selected: str = "elevenlabs"
+    elevenlabs: Dict[str, Any] = {"source_language": "auto", "target_language": "es"}
+
+
+class LoopbackProviderSettings(BaseModel):
+    """Configuracion de loopback/transcripcion en vivo"""
+    selected: str = "default"
+    default: Dict[str, Any] = {
+        "source_language": "auto",
+        "target_language": "en",
+        "enable_diarization": True,
+        "enable_translation": False,
+    }
+
+
 class ProvidersSettings(BaseModel):
     """Configuracion de todos los proveedores"""
     tts: TTSProviderSettings = TTSProviderSettings()
     stt: STTProviderSettings = STTProviderSettings()
     ai_edit: AIEditProviderSettings = AIEditProviderSettings()
     translation: TranslationProviderSettings = TranslationProviderSettings()
+    music: MusicProviderSettings = MusicProviderSettings()
+    sfx: SFXProviderSettings = SFXProviderSettings()
+    voice_changer: VoiceChangerProviderSettings = VoiceChangerProviderSettings()
+    voice_isolator: VoiceIsolatorProviderSettings = VoiceIsolatorProviderSettings()
+    dubbing: DubbingProviderSettings = DubbingProviderSettings()
+    loopback: LoopbackProviderSettings = LoopbackProviderSettings()
 
 
 class APIKeysSettings(BaseModel):
@@ -115,6 +182,7 @@ class ReaderSettings(BaseModel):
     skip_code: bool = False
     voice: str = "af_sky"
     highlight_words: bool = True
+    language: str = "en"  # Idioma seleccionado para TTS
 
 
 class STTSettings(BaseModel):
@@ -128,6 +196,7 @@ class STTSettings(BaseModel):
     hotkey_mode: str = "toggle"  # toggle | hold
     auto_paste: bool = False
     overlay_enabled: bool = True
+    overlay_always_on: bool = False
 
 
 class DiarizationSafetySettings(BaseModel):
@@ -174,6 +243,34 @@ class UISettings(BaseModel):
     action_sounds: ActionSoundSettings = ActionSoundSettings()
 
 
+class WidgetReaderSettings(BaseModel):
+    """Configuracion del modulo Reader del widget"""
+    speed: float = 1.0
+    voice: Optional[str] = None
+    language: str = "en"
+
+
+class WidgetTTSSettings(BaseModel):
+    """Configuracion del modulo TTS del widget"""
+    speed: float = 1.0
+    voice: Optional[str] = None
+    language: str = "en"
+
+
+class WidgetSTTSettings(BaseModel):
+    """Configuracion del modulo STT del widget"""
+    language: str = "auto"
+    autoPaste: bool = False
+
+
+class WidgetSettings(BaseModel):
+    """Configuracion del widget flotante"""
+    currentModule: str = "reader"
+    reader: WidgetReaderSettings = WidgetReaderSettings()
+    tts: WidgetTTSSettings = WidgetTTSSettings()
+    stt: WidgetSTTSettings = WidgetSTTSettings()
+
+
 class AppSettings(BaseModel):
     """Configuracion completa de la aplicacion"""
     providers: ProvidersSettings = ProvidersSettings()
@@ -184,6 +281,7 @@ class AppSettings(BaseModel):
     diarization: DiarizationSettings = DiarizationSettings()
     performance: PerformanceSettings = PerformanceSettings()
     ui: UISettings = UISettings()
+    widget: WidgetSettings = WidgetSettings()
     models_installed: list = []
     onboarding_completed: bool = False
 
@@ -212,12 +310,76 @@ class SettingsService:
         self._settings: AppSettings = self._load_settings()
         self._save_lock = threading.Lock()
 
+    def _migrate_settings(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Migrate old settings field names to new ones - comprehensive migration"""
+        if "providers" not in data:
+            return data
+
+        providers = data["providers"]
+
+        # === STT Migrations ===
+        if "stt" in providers:
+            stt = providers["stt"]
+            # Field renames
+            stt_renames = {"openai_whisper": "openai"}
+            for old_name, new_name in stt_renames.items():
+                if old_name in stt and new_name not in stt:
+                    stt[new_name] = stt.pop(old_name)
+            # Fix legacy selected values like "faster-whisper-base"
+            if stt.get("selected", "").startswith("faster-whisper-"):
+                stt["selected"] = "faster-whisper"
+            # Migrate faster_whisper model IDs (short -> full)
+            model_id_map = {
+                "tiny": "faster-whisper-tiny",
+                "base": "faster-whisper-base",
+                "small": "faster-whisper-small",
+                "medium": "faster-whisper-medium",
+                "large-v3": "faster-whisper-large-v3",
+            }
+            if "faster_whisper" in stt and isinstance(stt["faster_whisper"], dict):
+                old_model = stt["faster_whisper"].get("model", "")
+                if old_model in model_id_map:
+                    stt["faster_whisper"]["model"] = model_id_map[old_model]
+
+        # === TTS Migrations ===
+        if "tts" in providers:
+            tts = providers["tts"]
+            # Field renames: openai -> openai_tts (since provider ID is openai-tts)
+            tts_renames = {"openai": "openai_tts"}
+            for old_name, new_name in tts_renames.items():
+                if old_name in tts and new_name not in tts:
+                    tts[new_name] = tts.pop(old_name)
+            # Migrate chatterbox model IDs
+            if "chatterbox" in tts and isinstance(tts["chatterbox"], dict):
+                old_model = tts["chatterbox"].get("model", "")
+                if old_model == "base":
+                    tts["chatterbox"]["model"] = "chatterbox-base"
+                elif old_model == "turbo":
+                    tts["chatterbox"]["model"] = "chatterbox-turbo"
+
+        # === Voice Changer Migrations ===
+        if "voice_changer" in providers:
+            vc = providers["voice_changer"]
+            # Only elevenlabs is supported now
+            if vc.get("selected") in ("rvc", "openvoice"):
+                vc["selected"] = "elevenlabs"
+
+        # === Music Migrations ===
+        if "music" in providers:
+            music = providers["music"]
+            # Remove unsupported providers
+            if music.get("selected") == "acemusic":
+                music["selected"] = "diffrhythm"
+
+        return data
+
     def _load_settings(self) -> AppSettings:
         """Carga settings desde archivo o usa defaults"""
         if SETTINGS_FILE.exists():
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                data = self._migrate_settings(data)
                 return AppSettings(**data)
             except Exception as e:
                 print(f"Error loading settings: {e}")

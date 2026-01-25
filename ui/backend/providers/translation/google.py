@@ -2,14 +2,28 @@
 
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import TranslationProvider, TranslationProviderInfo
 from ..base import ProviderType
+from core.api_provider import BaseAPIProvider, APIProviderConfig
 
 
-class GoogleProvider(TranslationProvider):
+class GoogleProvider(BaseAPIProvider, TranslationProvider):
     """Google Cloud Translation API"""
+
+    CONFIG = APIProviderConfig(
+        provider_id="google",
+        provider_name="Google Translate",
+        api_key_name="google",
+        base_url="https://translation.googleapis.com",
+        timeout=60
+    )
+
+    def __init__(self):
+        BaseAPIProvider.__init__(self)
+
+    def _get_auth_header(self, api_key: str) -> Dict[str, str]:
+        """Google uses key in request body, not header."""
+        return {}
 
     @classmethod
     def get_info(cls) -> TranslationProviderInfo:
@@ -33,30 +47,18 @@ class GoogleProvider(TranslationProvider):
         target_lang: str = "en",
         **kwargs
     ) -> Tuple[str, Dict[str, Any]]:
-        from settings_service import settings_service
-
-        key = settings_service.get_api_key("google")
-        if not key:
-            raise RuntimeError("Google Translate API key is not configured")
-
+        # Google uses API key in request body
         params = {
-            "key": key,
+            "key": self._api_key,
             "q": text,
             "target": target_lang,
         }
         if source_lang != "auto":
             params["source"] = source_lang
 
-        resp = requests.post(
-            "https://translation.googleapis.com/language/translate/v2",
-            data=params,
-            timeout=60
-        )
+        response = self.client.post("/language/translate/v2", data=params)
+        result = response.json()
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Google Translate error: HTTP {resp.status_code}")
-
-        result = resp.json()
         translations = result.get("data", {}).get("translations") or []
         translated_text = translations[0].get("translatedText", "") if translations else ""
 

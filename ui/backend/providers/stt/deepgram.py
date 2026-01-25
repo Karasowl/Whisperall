@@ -3,14 +3,27 @@
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import STTProvider, STTProviderInfo
 from ..base import ProviderType, ModelVariant
+from core.api_provider import BaseAPIProvider, APIProviderConfig
 
 
-class DeepgramProvider(STTProvider):
+class DeepgramProvider(BaseAPIProvider, STTProvider):
     """Deepgram's advanced speech recognition API"""
+
+    CONFIG = APIProviderConfig(
+        provider_id="deepgram",
+        provider_name="Deepgram",
+        api_key_name="deepgram",
+        base_url="https://api.deepgram.com"
+    )
+
+    def __init__(self):
+        BaseAPIProvider.__init__(self)
+
+    def _get_auth_header(self, api_key: str) -> Dict[str, str]:
+        """Deepgram uses Token auth instead of Bearer."""
+        return {"Authorization": f"Token {api_key}"}
 
     @classmethod
     def get_info(cls) -> STTProviderInfo:
@@ -46,10 +59,6 @@ class DeepgramProvider(STTProvider):
     ) -> Tuple[str, Dict[str, Any]]:
         from settings_service import settings_service
 
-        key = settings_service.get_api_key("deepgram")
-        if not key:
-            raise RuntimeError("Deepgram API key is not configured")
-
         model_name = model or settings_service.get("providers.stt.deepgram.model", "nova-2")
 
         params = {
@@ -60,19 +69,16 @@ class DeepgramProvider(STTProvider):
         if language != "auto":
             params["language"] = language
 
+        # Deepgram uses raw binary upload, not multipart
         with audio_path.open("rb") as audio_file:
-            resp = requests.post(
-                "https://api.deepgram.com/v1/listen",
-                headers={"Authorization": f"Token {key}"},
+            response = self.client.post(
+                "/v1/listen",
+                data=audio_file.read(),
                 params=params,
-                data=audio_file,
-                timeout=120
+                headers={"Content-Type": "audio/wav"}
             )
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Deepgram STT error: HTTP {resp.status_code}")
-
-        result = resp.json()
+        result = response.json()
         alternatives = result.get("results", {}).get("channels", [{}])[0].get("alternatives", [])
         transcript = alternatives[0].get("transcript", "") if alternatives else ""
 

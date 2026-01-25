@@ -13,12 +13,19 @@ def _register_providers():
     """Register all available providers"""
     global _PROVIDERS
 
-    # Register MMAudio provider
+    # Register MMAudio provider (local)
     try:
         from .mmaudio_provider import MMAudioProvider
         _PROVIDERS["mmaudio"] = MMAudioProvider
     except Exception as e:
         print(f"[SFX Registry] Could not load MMAudioProvider: {e}")
+
+    # Register ElevenLabs provider (API)
+    try:
+        from .elevenlabs_provider import ElevenLabsSFXProvider
+        _PROVIDERS["elevenlabs"] = ElevenLabsSFXProvider
+    except Exception as e:
+        print(f"[SFX Registry] Could not load ElevenLabsSFXProvider: {e}")
 
 
 def _check_import(module_name: str) -> bool:
@@ -30,10 +37,21 @@ def _check_import(module_name: str) -> bool:
         return False
 
 
+def _check_api_key(key_name: str) -> bool:
+    """Check if an API key is configured"""
+    try:
+        from settings_service import settings_service
+        key = settings_service.get_api_key(key_name)
+        return bool(key and len(key) > 10)
+    except Exception:
+        return False
+
+
 def is_provider_ready(provider_id: str) -> bool:
     """Check if a provider's dependencies are installed"""
     dep_checks = {
         "mmaudio": lambda: _check_import("mmaudio"),
+        "elevenlabs": lambda: _check_api_key("elevenlabs"),
     }
     check = dep_checks.get(provider_id)
     return check() if check else False

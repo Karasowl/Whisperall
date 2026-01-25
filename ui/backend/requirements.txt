@@ -1,6 +1,8 @@
 fastapi>=0.100.0
 uvicorn[standard]>=0.23.0
 python-multipart>=0.0.6
+loguru>=0.7.0
+psutil>=5.9.0
 pydub>=0.25.1
 PyPDF2>=3.0.0
 aiofiles>=23.0.0
@@ -17,12 +19,14 @@ soundfile>=0.12.0
 librosa>=0.10.0
 numpy>=1.24.0
 scipy>=1.10.0
+pyaudiowpatch>=0.2.12  # WASAPI loopback support for Windows
 
 # ML/AI frameworks (install torch separately for your CUDA version)
 # torch>=2.0.0
 # torchaudio>=2.0.0  # Required by: Dia, Zonos, VoxCPM, VibeVoice
 huggingface_hub>=0.20.0
 httpx>=0.24.0  # Required by API TTS providers
+peft>=0.18.1   # Required by diffusers to avoid LoRACompatibleLinear deprecation
 
 # Optional local TTS providers (install as needed)
 # kokoro>=0.1.0
@@ -39,3 +43,4 @@ pyht>=0.0.28
 # diffrhythm>=0.1.0
 # demucs>=4.0.0
 # mmaudio>=0.1.0
+peft

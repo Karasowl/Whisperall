@@ -1,10 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRightLeft, Copy, Loader2 } from 'lucide-react';
+import { ArrowRightLeft, Copy, Check, Languages } from 'lucide-react';
 import { translateText, ServiceProviderInfo, getProviderSelection, setProvider } from '@/lib/api';
 import { SelectMenu } from '@/components/SelectMenu';
 import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
+import {
+  ModuleShell,
+  ActionBar,
+  SidebarPanel,
+} from '@/components/module';
 
 const languageOptions = [
   { value: 'auto', label: 'Auto' },
@@ -27,6 +32,7 @@ export default function TranslatePage() {
   const [result, setResult] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const didLoadRef = useRef(false);
   const supportsAutoDetect = providerInfo?.supports_auto_detect !== false;
   const sourceOptions = supportsAutoDetect
@@ -117,108 +123,154 @@ export default function TranslatePage() {
   const copyToClipboard = async () => {
     if (!result) return;
     await navigator.clipboard.writeText(result);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
+  const isReady = text.trim().length > 0;
+
   return (
-    <div className="space-y-8 animate-slide-up">
-      <div className="space-y-2">
-        <h1 className="text-4xl font-bold text-gradient">Translation</h1>
-        <p className="text-slate-400">
-          Translate text locally with Argos or with cloud providers.
-        </p>
-      </div>
+    <ModuleShell
+      title="Translation"
+      description="Translate text locally with Argos or with cloud providers."
+      icon={Languages}
+      layout="split"
+      settingsPosition="left"
+      settingsTitle="Translation Settings"
+      // Engine selector
+      engineSelector={
+        <UnifiedProviderSelector
+          service="translation"
+          selected={provider}
+          onSelect={setProviderState}
+          selectedModel={providerModel}
+          onModelChange={setProviderModel}
+          onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
+          variant="dropdown"
+          showModelSelector
+          label="Translation Engine"
+        />
+      }
+      // Settings panel (left side)
+      settings={
+        <>
+          <SelectMenu
+            label="Source Language"
+            value={source}
+            options={sourceOptions}
+            onChange={setSource}
+          />
+          {!supportsAutoDetect && (
+            <p className="text-xs text-foreground-muted -mt-2">
+              Auto-detect is not supported by this provider.
+            </p>
+          )}
 
-      {error && (
-        <div className="glass-card p-4 border-red-500/30 bg-red-500/10 text-red-300">
-          {error}
-        </div>
-      )}
+          <SelectMenu
+            label="Target Language"
+            value={target}
+            options={languageOptions.filter((opt) => opt.value !== 'auto')}
+            onChange={setTarget}
+          />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 space-y-6">
-          <div className="glass-card p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-slate-100">Translation Settings</h2>
-
-            <SelectMenu
-              label="Source"
-              value={source}
-              options={sourceOptions}
-              onChange={setSource}
-            />
-            {!supportsAutoDetect && (
-              <p className="text-xs text-slate-400">
-                Auto-detect is not supported by this provider.
-              </p>
-            )}
-
-            <SelectMenu
-              label="Target"
-              value={target}
-              options={languageOptions.filter((opt) => opt.value !== 'auto')}
-              onChange={setTarget}
-            />
-
-            <button onClick={swapLanguages} className="btn btn-secondary w-full">
-              <ArrowRightLeft className="w-4 h-4" />
-              Swap Languages
-            </button>
-
-            <UnifiedProviderSelector
-              service="translation"
-              selected={provider}
-              onSelect={setProviderState}
-              selectedModel={providerModel}
-              onModelChange={setProviderModel}
-              onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
-              variant="dropdown"
-              showModelSelector
-              label="Translation Engine"
-            />
-
-            <button onClick={handleTranslate} className="btn btn-primary w-full mt-4" disabled={isLoading}>
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Translating...
-                </>
-              ) : (
-                'Translate'
-              )}
-            </button>
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 space-y-6">
-          <div className="glass-card p-6 space-y-4">
+          <button
+            onClick={swapLanguages}
+            disabled={source === 'auto'}
+            className="btn btn-secondary w-full"
+          >
+            <ArrowRightLeft className="w-4 h-4" />
+            Swap Languages
+          </button>
+        </>
+      }
+      // Action button
+      actions={
+        <ActionBar
+          primary={{
+            label: 'Translate',
+            icon: Languages,
+            onClick: handleTranslate,
+            disabled: !isReady,
+          }}
+          loading={isLoading}
+          loadingText="Translating..."
+          pulse={isReady && !isLoading}
+        />
+      }
+      // Main content - text areas
+      main={
+        <div className="space-y-6 h-full flex flex-col">
+          {/* Source Text */}
+          <div className="glass-card p-6 space-y-4 flex-1 flex flex-col">
             <label className="label">Source Text</label>
             <textarea
-              className="input textarea min-h-[200px]"
+              className="input textarea flex-1 min-h-[200px] resize-none"
               placeholder="Paste or type text to translate"
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
+            <div className="text-xs text-foreground-muted text-right">
+              {text.length.toLocaleString()} characters
+            </div>
           </div>
 
-          <div className="glass-card p-6 space-y-4">
+          {/* Translation Output */}
+          <div className="glass-card p-6 space-y-4 flex-1 flex flex-col">
             <div className="flex items-center justify-between">
               <label className="label">Translation</label>
               <button
                 onClick={copyToClipboard}
-                className="btn btn-secondary btn-icon"
-                title="Copy translation"
+                disabled={!result}
+                className={`p-2 rounded-lg transition-colors ${
+                  copied
+                    ? 'text-emerald-400 bg-emerald-500/10'
+                    : 'text-foreground-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed'
+                }`}
+                title={copied ? 'Copied!' : 'Copy to clipboard'}
               >
-                <Copy className="w-4 h-4" />
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
             <textarea
-              className="input textarea min-h-[200px]"
+              className="input textarea flex-1 min-h-[200px] resize-none"
               placeholder="Translation output"
               value={result}
               onChange={(e) => setResult(e.target.value)}
             />
+            {result && (
+              <div className="text-xs text-foreground-muted text-right">
+                {result.length.toLocaleString()} characters
+              </div>
+            )}
           </div>
         </div>
-      </div>
-    </div>
+      }
+      // Sidebar with tips
+      sidebar={
+        <SidebarPanel
+          title="Translation"
+          description="Translate text between languages using local or cloud-based translation engines."
+          icon={Languages}
+          tips={[
+            'Argos runs locally with no usage limits',
+            'Cloud providers may offer better quality',
+            'Use swap to quickly reverse direction',
+            'Output is editable if you need adjustments',
+          ]}
+          metadata={
+            providerInfo
+              ? [
+                  { label: 'Provider', value: providerInfo.name },
+                  { label: 'Model', value: providerModel || providerInfo.default_model || 'Default' },
+                  { label: 'Direction', value: `${source === 'auto' ? 'Auto' : source.toUpperCase()} → ${target.toUpperCase()}` },
+                ]
+              : undefined
+          }
+        />
+      }
+      // Error handling
+      error={error}
+      onErrorDismiss={() => setError(null)}
+    />
   );
 }

@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Subtitles</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --speaker-1: #38bdf8;
+        --speaker-2: #a78bfa;
+        --speaker-3: #f472b6;
+        --speaker-4: #22c55e;
+        --speaker-5: #fb923c;
+        --speaker-6: #f87171;
+        --speaker-7: #67e8f9;
+        --speaker-8: #fde047;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: transparent;
+        font-family: "Segoe UI", "SF Pro Display", Arial, sans-serif;
+        -webkit-user-select: none;
+        overflow: hidden;
+      }
+
+      .container {
+        display: flex;
+        flex-direction: column;
+        min-width: 300px;
+        max-width: 800px;
+        padding: 8px;
+        background: rgba(4, 10, 20, 0.85);
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.15);
+        box-shadow: 0 12px 40px rgba(2, 6, 23, 0.5);
+        -webkit-app-region: drag;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 8px 8px;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        margin-bottom: 8px;
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #6b7280;
+        transition: background 0.2s;
+      }
+
+      .status-dot.capturing {
+        background: #22c55e;
+        box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+      }
+
+      .status-dot.paused {
+        background: #f59e0b;
+      }
+
+      .status-text {
+        font-size: 11px;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .controls {
+        display: flex;
+        gap: 4px;
+        -webkit-app-region: no-drag;
+      }
+
+      .btn {
+        width: 24px;
+        height: 24px;
+        border: none;
+        background: rgba(148, 163, 184, 0.1);
+        border-radius: 4px;
+        color: #94a3b8;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s;
+      }
+
+      .btn:hover {
+        background: rgba(148, 163, 184, 0.2);
+        color: #e2e8f0;
+      }
+
+      .btn svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .subtitles {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 300px;
+        overflow-y: auto;
+        padding: 4px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
+      }
+
+      .subtitles::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      .subtitles::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.2);
+        border-radius: 2px;
+      }
+
+      .subtitle-entry {
+        display: flex;
+        gap: 8px;
+        padding: 6px 8px;
+        background: rgba(15, 23, 42, 0.5);
+        border-radius: 8px;
+        animation: fadeIn 0.2s ease-out;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .speaker-badge {
+        flex-shrink: 0;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        background: rgba(56, 189, 248, 0.15);
+        color: var(--speaker-1);
+      }
+
+      .speaker-1 { background: rgba(56, 189, 248, 0.15); color: var(--speaker-1); }
+      .speaker-2 { background: rgba(167, 139, 250, 0.15); color: var(--speaker-2); }
+      .speaker-3 { background: rgba(244, 114, 182, 0.15); color: var(--speaker-3); }
+      .speaker-4 { background: rgba(34, 197, 94, 0.15); color: var(--speaker-4); }
+      .speaker-5 { background: rgba(251, 146, 60, 0.15); color: var(--speaker-5); }
+      .speaker-6 { background: rgba(248, 113, 113, 0.15); color: var(--speaker-6); }
+      .speaker-7 { background: rgba(103, 232, 249, 0.15); color: var(--speaker-7); }
+      .speaker-8 { background: rgba(253, 224, 71, 0.15); color: var(--speaker-8); }
+
+      .subtitle-text {
+        flex: 1;
+        font-size: 14px;
+        line-height: 1.4;
+        color: #e2e8f0;
+      }
+
+      .translation {
+        font-size: 13px;
+        color: #94a3b8;
+        font-style: italic;
+        margin-top: 4px;
+        padding-top: 4px;
+        border-top: 1px solid rgba(148, 163, 184, 0.1);
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 24px 16px;
+        color: #64748b;
+        font-size: 13px;
+      }
+
+      .resize-handle {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 16px;
+        height: 16px;
+        cursor: nwse-resize;
+        -webkit-app-region: no-drag;
+      }
+
+      /* Settings panel */
+      .settings-panel {
+        display: none;
+        padding: 12px;
+        border-top: 1px solid rgba(148, 163, 184, 0.1);
+        margin-top: 8px;
+      }
+
+      .settings-panel.visible {
+        display: block;
+      }
+
+      .setting-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+
+      .setting-label {
+        font-size: 12px;
+        color: #94a3b8;
+      }
+
+      .setting-value {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .slider {
+        width: 100px;
+        height: 4px;
+        -webkit-appearance: none;
+        background: rgba(148, 163, 184, 0.2);
+        border-radius: 2px;
+        -webkit-app-region: no-drag;
+      }
+
+      .slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        background: #38bdf8;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+
+      select {
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 4px;
+        color: #e2e8f0;
+        padding: 4px 8px;
+        font-size: 12px;
+        -webkit-app-region: no-drag;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container" id="container">
+      <div class="header">
+        <div class="status">
+          <div class="status-dot" id="statusDot"></div>
+          <span class="status-text" id="statusText">Disconnected</span>
+        </div>
+        <div class="controls">
+          <button class="btn" id="settingsBtn" title="Settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+          <button class="btn" id="clearBtn" title="Clear">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+          </button>
+          <button class="btn" id="closeBtn" title="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="subtitles" id="subtitles">
+        <div class="empty-state" id="emptyState">
+          Waiting for audio...
+        </div>
+      </div>
+
+      <div class="settings-panel" id="settingsPanel">
+        <div class="setting-row">
+          <span class="setting-label">Font Size</span>
+          <div class="setting-value">
+            <input type="range" class="slider" id="fontSizeSlider" min="10" max="24" value="14">
+            <span id="fontSizeValue">14px</span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Opacity</span>
+          <div class="setting-value">
+            <input type="range" class="slider" id="opacitySlider" min="50" max="100" value="85">
+            <span id="opacityValue">85%</span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Max Lines</span>
+          <div class="setting-value">
+            <select id="maxLinesSelect">
+              <option value="3">3 lines</option>
+              <option value="5" selected>5 lines</option>
+              <option value="10">10 lines</option>
+              <option value="20">20 lines</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="resize-handle" id="resizeHandle"></div>
+    </div>
+
+    <script>
+      (function () {
+        const container = document.getElementById('container');
+        const subtitles = document.getElementById('subtitles');
+        const emptyState = document.getElementById('emptyState');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsPanel = document.getElementById('settingsPanel');
+        const clearBtn = document.getElementById('clearBtn');
+        const closeBtn = document.getElementById('closeBtn');
+        const fontSizeSlider = document.getElementById('fontSizeSlider');
+        const fontSizeValue = document.getElementById('fontSizeValue');
+        const opacitySlider = document.getElementById('opacitySlider');
+        const opacityValue = document.getElementById('opacityValue');
+        const maxLinesSelect = document.getElementById('maxLinesSelect');
+
+        let entries = [];
+        let maxLines = 5;
+        let fontSize = 14;
+
+        // Settings toggle
+        settingsBtn.addEventListener('click', () => {
+          settingsPanel.classList.toggle('visible');
+        });
+
+        // Clear subtitles
+        clearBtn.addEventListener('click', () => {
+          entries = [];
+          renderSubtitles();
+        });
+
+        // Close overlay
+        closeBtn.addEventListener('click', () => {
+          if (window.electronAPI?.hideSubtitleOverlay) {
+            window.electronAPI.hideSubtitleOverlay();
+          }
+        });
+
+        // Font size
+        fontSizeSlider.addEventListener('input', (e) => {
+          fontSize = parseInt(e.target.value);
+          fontSizeValue.textContent = fontSize + 'px';
+          document.querySelectorAll('.subtitle-text').forEach(el => {
+            el.style.fontSize = fontSize + 'px';
+          });
+        });
+
+        // Opacity
+        opacitySlider.addEventListener('input', (e) => {
+          const opacity = parseInt(e.target.value) / 100;
+          opacityValue.textContent = e.target.value + '%';
+          container.style.background = `rgba(4, 10, 20, ${opacity})`;
+        });
+
+        // Max lines
+        maxLinesSelect.addEventListener('change', (e) => {
+          maxLines = parseInt(e.target.value);
+          renderSubtitles();
+        });
+
+        function renderSubtitles() {
+          if (entries.length === 0) {
+            subtitles.innerHTML = '<div class="empty-state">Waiting for audio...</div>';
+            return;
+          }
+
+          const visibleEntries = entries.slice(-maxLines);
+          subtitles.innerHTML = visibleEntries.map(entry => {
+            const speakerClass = `speaker-${((entry.speaker_id - 1) % 8) + 1}`;
+            let html = `
+              <div class="subtitle-entry">
+                <span class="speaker-badge ${speakerClass}">${entry.speaker_name}</span>
+                <div>
+                  <div class="subtitle-text" style="font-size: ${fontSize}px">${entry.text}</div>
+                  ${entry.translation ? `<div class="translation">${entry.translation}</div>` : ''}
+                </div>
+              </div>
+            `;
+            return html;
+          }).join('');
+
+          subtitles.scrollTop = subtitles.scrollHeight;
+        }
+
+        function setStatus(state) {
+          statusDot.className = 'status-dot ' + state;
+          const labels = {
+            capturing: 'Live',
+            paused: 'Paused',
+            stopped: 'Stopped',
+            error: 'Error',
+            '': 'Disconnected'
+          };
+          statusText.textContent = labels[state] || state;
+        }
+
+        // Listen for subtitle messages from main process
+        if (window.electronAPI?.onSubtitleMessage) {
+          window.electronAPI.onSubtitleMessage((message) => {
+            if (message.type === 'transcript') {
+              entries.push({
+                speaker_id: message.speaker_id || 0,
+                speaker_name: message.speaker_name || 'Speaker',
+                text: message.text,
+                translation: null
+              });
+              renderSubtitles();
+            } else if (message.type === 'translation') {
+              // Update the last entry with translation
+              if (entries.length > 0) {
+                entries[entries.length - 1].translation = message.translated;
+                renderSubtitles();
+              }
+            } else if (message.type === 'state') {
+              setStatus(message.state);
+            } else if (message.type === 'clear') {
+              entries = [];
+              renderSubtitles();
+            }
+          });
+        }
+
+        // Initialize
+        setStatus('');
+        renderSubtitles();
+      })();
+    </script>
+  </body>
+</html>

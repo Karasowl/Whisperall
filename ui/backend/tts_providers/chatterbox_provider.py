@@ -62,6 +62,7 @@ class ChatterboxProvider(TTSProvider):
                 {"id": "turbo", "name": "Turbo (350M)", "size_gb": 1.5, "vram_gb": 3, "description": "Rápido, tags emocionales"},
             ],
             default_model="multilingual",
+            provider_type="local",
             sample_rate=24000,
             requires_reference_text=False,
             min_reference_duration=5.0,
@@ -69,6 +70,7 @@ class ChatterboxProvider(TTSProvider):
             vram_requirement_gb=4.0,
             supports_streaming=False,
             supports_emotion_tags=True,  # Turbo supports paralinguistic tags
+            supports_fast_mode=True,  # CFG can be disabled for ~50% faster generation
             extra_params={
                 "temperature": {"type": "float", "default": 0.8, "min": 0.1, "max": 1.5},
                 "exaggeration": {"type": "float", "default": 0.5, "min": 0.0, "max": 1.0},

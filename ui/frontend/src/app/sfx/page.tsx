@@ -4,19 +4,25 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Volume2,
   Loader2,
-  AlertCircle,
   Download,
-  Play,
-  Pause,
-  Upload,
   Video,
-  Info,
   ChevronDown,
   ChevronUp,
   Sparkles,
   X,
+  Check,
 } from 'lucide-react';
-import { ProgressBar } from '@/components/ProgressBar';
+import { cn } from '@/lib/utils';
+import {
+  ModuleShell,
+  Dropzone,
+  ActionBar,
+  SidebarPanel,
+  ExecutionModeSwitch,
+  type ExecutionMode,
+} from '@/components/module';
+import { Slider } from '@/components/Slider';
+import { Toggle } from '@/components/Toggle';
 import {
   getSFXProviders,
   uploadVideoForSFX,
@@ -24,6 +30,8 @@ import {
   getSFXJobStatus,
   getSFXAudioDownloadUrl,
   getSFXVideoDownloadUrl,
+  getProviderSelection,
+  setProvider,
   SFXProviderInfo,
   SFXJob,
 } from '@/lib/api';
@@ -51,7 +59,6 @@ export default function SFXPage() {
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
 
   // Form
   const [prompt, setPrompt] = useState('');
@@ -68,28 +75,55 @@ export default function SFXPage() {
   const [currentJob, setCurrentJob] = useState<SFXJob | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Device state (for local providers)
+  const [device, setDevice] = useState<ExecutionMode>('auto');
+
   // Playback
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const didLoadProviderRef = useRef(false);
 
-  // Load providers
+  // Load providers and saved selection
   useEffect(() => {
-    async function loadProviders() {
+    async function loadProvidersAndSelection() {
       try {
-        const data = await getSFXProviders();
+        const [data, selection] = await Promise.all([
+          getSFXProviders(),
+          getProviderSelection('sfx').catch(() => null),
+        ]);
         setProviders(data);
-        if (data.length > 0) {
+
+        if (selection?.selected) {
+          setSelectedProvider(selection.selected);
+          if (selection.config?.model) {
+            setSelectedModel(selection.config.model);
+          } else {
+            const provider = data.find((p) => p.id === selection.selected);
+            if (provider) {
+              setSelectedModel(provider.default_model);
+            }
+          }
+        } else if (data.length > 0) {
           setSelectedProvider(data[0].id);
           setSelectedModel(data[0].default_model);
         }
       } catch (err: any) {
         console.error('Failed to load SFX providers:', err);
+      } finally {
+        didLoadProviderRef.current = true;
       }
     }
-    loadProviders();
+    loadProvidersAndSelection();
   }, []);
+
+  // Persist provider selection
+  useEffect(() => {
+    if (!didLoadProviderRef.current) return;
+    setProvider('sfx', selectedProvider, { model: selectedModel }).catch((err) => {
+      console.error('Failed to save SFX provider selection:', err);
+    });
+  }, [selectedProvider, selectedModel]);
 
   // Poll job status
   useEffect(() => {
@@ -119,18 +153,6 @@ export default function SFXPage() {
   const currentProviderInfo = providers.find((p) => p.id === selectedProvider);
 
   const handleFileSelect = useCallback(async (file: File) => {
-    // Validate file type
-    if (!file.type.startsWith('video/')) {
-      setUploadError('Please select a video file');
-      return;
-    }
-
-    // Validate file size (max 500MB)
-    if (file.size > 500 * 1024 * 1024) {
-      setUploadError('File too large. Maximum size is 500MB');
-      return;
-    }
-
     setVideoFile(file);
     setUploadError(null);
     setError(null);
@@ -153,35 +175,6 @@ export default function SFXPage() {
     }
   }, []);
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-
-      const file = e.dataTransfer.files[0];
-      if (file) {
-        handleFileSelect(file);
-      }
-    },
-    [handleFileSelect]
-  );
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleFileSelect(file);
-    }
-  };
-
   const handleClearVideo = () => {
     setVideoFile(null);
     setVideoPath('');
@@ -190,9 +183,7 @@ export default function SFXPage() {
     }
     setVideoPreviewUrl('');
     setCurrentJob(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    setUploadError(null);
   };
 
   const handleGenerate = async () => {
@@ -219,25 +210,12 @@ export default function SFXPage() {
         guidance_scale: guidanceScale,
       });
 
-      // Start polling
       const initialStatus = await getSFXJobStatus(job_id);
       setCurrentJob(initialStatus);
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to start generation');
       setIsGenerating(false);
     }
-  };
-
-  const handlePlayPause = () => {
-    const mediaElement = currentJob?.output_video_path ? videoRef.current : audioRef.current;
-    if (!mediaElement) return;
-
-    if (isPlaying) {
-      mediaElement.pause();
-    } else {
-      mediaElement.play();
-    }
-    setIsPlaying(!isPlaying);
   };
 
   const handleDownloadAudio = () => {
@@ -250,29 +228,140 @@ export default function SFXPage() {
     window.open(getSFXVideoDownloadUrl(currentJob.id), '_blank');
   };
 
+  const isReady = !!videoPath && !isUploading && !isGenerating;
+
   return (
-    <div className="space-y-8 animate-slide-up">
-      {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-4xl font-bold text-gradient tracking-tight">Sound Effects Generator</h1>
-        <p className="text-foreground-secondary text-lg">
-          Generate synchronized audio and sound effects from video using AI
-        </p>
-      </div>
+    <ModuleShell
+      title="Sound Effects Generator"
+      description="Generate synchronized audio and sound effects from video using AI"
+      icon={Volume2}
+      layout="default"
+      settingsPosition="right"
+      settingsTitle="Output Settings"
+      // Execution controls (only for local providers)
+      executionControls={
+        currentProviderInfo?.type === 'local' && (
+          <ExecutionModeSwitch
+            mode={device}
+            onModeChange={setDevice}
+            showFastMode={currentProviderInfo?.supports_fast_mode ?? false}
+          />
+        )
+      }
+      // Progress state
+      progress={
+        isGenerating && currentJob
+          ? {
+            value: currentJob.progress * 100,
+            status: 'Generating sound effects...',
+            details: currentJob.status,
+          }
+          : null
+      }
+      // Settings panel (right side)
+      settings={
+        <>
+          {/* Output Options */}
+          <div className="space-y-4">
+            <Toggle
+              label="Merge audio with video"
+              enabled={mergeWithVideo}
+              onChange={setMergeWithVideo}
+            />
+            <p className="text-xs text-foreground-muted -mt-2 ml-11">
+              Create a new video file with the generated audio
+            </p>
 
-      {/* Error Alert */}
-      {error && (
-        <div className="card p-4 flex items-center gap-3 border-error/30 bg-error/10">
-          <AlertCircle className="w-5 h-5 text-error flex-shrink-0" />
-          <p className="text-error-300">{error}</p>
-        </div>
-      )}
+            {mergeWithVideo && (
+              <div className="ml-4 pl-4 border-l border-glass-border space-y-4">
+                <Toggle
+                  label="Mix with original audio"
+                  enabled={mixOriginal}
+                  onChange={setMixOriginal}
+                />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left column - Main controls */}
-        <div className="lg:col-span-2 space-y-6">
+                {mixOriginal && (
+                  <Slider
+                    label="Original Volume"
+                    value={originalVolume}
+                    onChange={setOriginalVolume}
+                    min={0}
+                    max={1}
+                    step={0.1}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Advanced Settings */}
+          <div className="border-t border-glass-border pt-4">
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <span className="text-sm font-medium text-foreground">Advanced Settings</span>
+              {showAdvanced ? (
+                <ChevronUp className="w-4 h-4 text-foreground-muted" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-foreground-muted" />
+              )}
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-4 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="label text-sm">Seed (-1 for random)</label>
+                  <input
+                    type="number"
+                    value={seed}
+                    onChange={(e) => setSeed(Number(e.target.value))}
+                    min={-1}
+                    className="input w-full"
+                  />
+                </div>
+
+                <Slider
+                  label="Inference Steps"
+                  value={numSteps}
+                  onChange={setNumSteps}
+                  min={10}
+                  max={100}
+                  step={5}
+                />
+
+                <Slider
+                  label="Guidance Scale"
+                  value={guidanceScale}
+                  onChange={setGuidanceScale}
+                  min={1}
+                  max={10}
+                  step={0.5}
+                />
+              </div>
+            )}
+          </div>
+        </>
+      }
+      // Action button
+      actions={
+        <ActionBar
+          primary={{
+            label: isGenerating ? 'Generating...' : isUploading ? 'Uploading...' : 'Generate SFX',
+            icon: Sparkles,
+            onClick: handleGenerate,
+            disabled: !isReady,
+          }}
+          loading={isGenerating || isUploading}
+          loadingText={isUploading ? 'Uploading...' : 'Generating...'}
+          pulse={isReady}
+        />
+      }
+      // Main content
+      main={
+        <div className="space-y-6">
           {/* Provider Selection */}
-          <div className="card p-6 space-y-4">
+          <div className="glass-card p-6 space-y-4">
             <label className="label flex items-center gap-2">
               <Volume2 className="w-4 h-4" />
               SFX Engine
@@ -287,21 +376,28 @@ export default function SFXPage() {
                     setSelectedModel(provider.default_model);
                   }}
                   disabled={!provider.ready}
-                  className={`p-4 rounded-xl border-2 text-left transition-all ${
+                  className={cn(
+                    'p-4 rounded-xl border-2 text-left transition-all',
                     selectedProvider === provider.id
                       ? 'border-accent-primary bg-accent-primary/10'
-                      : 'border-border hover:border-border-hover bg-surface-1'
-                  } ${!provider.ready ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      : 'border-glass-border hover:border-glass-border-hover bg-surface-1',
+                    !provider.ready && 'opacity-50 cursor-not-allowed'
+                  )}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-semibold">{provider.name}</span>
+                    <span className="font-semibold flex items-center gap-2">
+                      {provider.name}
+                      {selectedProvider === provider.id && (
+                        <Check className="w-4 h-4 text-accent-primary" />
+                      )}
+                    </span>
                     <span className="text-xs px-2 py-1 rounded-full bg-surface-2">
                       {provider.vram_gb}GB VRAM
                     </span>
                   </div>
                   <p className="text-sm text-foreground-muted">{provider.description}</p>
                   {!provider.ready && (
-                    <p className="text-xs text-warning mt-2">Not installed - pip install mmaudio</p>
+                    <p className="text-xs text-amber-400 mt-2">Not installed - pip install mmaudio</p>
                   )}
                 </button>
               ))}
@@ -309,18 +405,19 @@ export default function SFXPage() {
 
             {/* Model variant selector */}
             {currentProviderInfo && currentProviderInfo.models.length > 1 && (
-              <div className="mt-4">
+              <div className="mt-4 pt-4 border-t border-glass-border">
                 <label className="label text-sm mb-2">Model Size</label>
                 <div className="flex gap-2 flex-wrap">
                   {currentProviderInfo.models.map((model) => (
                     <button
                       key={model.id}
                       onClick={() => setSelectedModel(model.id)}
-                      className={`px-4 py-2 rounded-lg text-sm transition-all ${
+                      className={cn(
+                        'px-4 py-2 rounded-lg text-sm transition-all',
                         selectedModel === model.id
-                          ? 'bg-accent-primary text-black'
+                          ? 'bg-accent-primary text-black font-medium'
                           : 'bg-surface-2 hover:bg-surface-3'
-                      }`}
+                      )}
                     >
                       {model.name} ({model.vram_gb}GB)
                     </button>
@@ -331,83 +428,59 @@ export default function SFXPage() {
           </div>
 
           {/* Video Upload */}
-          <div className="card p-6 space-y-4">
-            <label className="label flex items-center gap-2">
-              <Video className="w-4 h-4" />
-              Input Video
-            </label>
+          {!videoFile ? (
+            <Dropzone
+              onFile={handleFileSelect}
+              file={videoFile}
+              onClear={handleClearVideo}
+              fileType="video"
+              maxSize={500 * 1024 * 1024}
+              uploading={isUploading}
+              error={uploadError}
+              title="Drag and drop your video here, or"
+              subtitle="Supports MP4, WebM, MOV (max 500MB)"
+            />
+          ) : (
+            <div className="glass-card p-6 space-y-4">
+              <label className="label flex items-center gap-2">
+                <Video className="w-4 h-4" />
+                Input Video
+              </label>
 
-            {!videoFile ? (
-              <div
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${
-                  isDragging
-                    ? 'border-accent-primary bg-accent-primary/10'
-                    : 'border-border hover:border-border-hover'
-                }`}
-              >
-                <Upload className="w-12 h-12 mx-auto text-foreground-muted mb-4" />
-                <p className="text-foreground-secondary mb-2">
-                  Drag and drop your video here, or
-                </p>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="btn btn-secondary"
-                >
-                  Select File
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/*"
-                  onChange={handleFileInputChange}
-                  className="hidden"
+              <div className="relative rounded-xl overflow-hidden bg-black">
+                <video
+                  src={videoPreviewUrl}
+                  className="w-full max-h-[300px] object-contain"
+                  controls
                 />
-                <p className="text-xs text-foreground-muted mt-4">
-                  Supports MP4, WebM, MOV (max 500MB)
-                </p>
+                <button
+                  onClick={handleClearVideo}
+                  className="absolute top-2 right-2 p-2 bg-black/50 hover:bg-black/70 rounded-full transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="relative rounded-xl overflow-hidden bg-black">
-                  <video
-                    src={videoPreviewUrl}
-                    className="w-full max-h-[300px] object-contain"
-                    controls
-                  />
-                  <button
-                    onClick={handleClearVideo}
-                    className="absolute top-2 right-2 p-2 bg-black/50 hover:bg-black/70 rounded-full"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
 
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-foreground-muted">{videoFile.name}</span>
-                  <span className="text-foreground-muted">
-                    {(videoFile.size / (1024 * 1024)).toFixed(1)} MB
-                  </span>
-                </div>
-
-                {isUploading && (
-                  <div className="flex items-center gap-2 text-sm text-foreground-muted">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Uploading...
-                  </div>
-                )}
-
-                {uploadError && (
-                  <p className="text-sm text-error">{uploadError}</p>
-                )}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-foreground-muted">{videoFile.name}</span>
+                <span className="text-foreground-muted">
+                  {(videoFile.size / (1024 * 1024)).toFixed(1)} MB
+                </span>
               </div>
-            )}
-          </div>
+
+              {isUploading && (
+                <div className="flex items-center gap-2 text-sm text-foreground-muted">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Uploading...
+                </div>
+              )}
+
+              {uploadError && <p className="text-sm text-red-400">{uploadError}</p>}
+            </div>
+          )}
 
           {/* Prompt */}
-          <div className="card p-6 space-y-4">
+          <div className="glass-card p-6 space-y-4">
             <div className="flex items-center justify-between">
               <label className="label">Prompt (Optional)</label>
               {currentProviderInfo?.supports_prompt && (
@@ -417,12 +490,17 @@ export default function SFXPage() {
               )}
             </div>
 
-            <div className="flex gap-2 flex-wrap mb-2">
+            <div className="flex gap-2 flex-wrap">
               {PROMPT_EXAMPLES.slice(0, 4).map((example) => (
                 <button
                   key={example}
                   onClick={() => setPrompt(example)}
-                  className="text-xs px-3 py-1 rounded-full bg-surface-2 hover:bg-surface-3"
+                  className={cn(
+                    'text-xs px-3 py-1.5 rounded-full transition-colors',
+                    prompt === example
+                      ? 'bg-accent-primary text-black'
+                      : 'bg-surface-2 hover:bg-surface-3'
+                  )}
                 >
                   {example}
                 </button>
@@ -438,136 +516,17 @@ export default function SFXPage() {
             />
           </div>
 
-          {/* Output Options */}
-          <div className="card p-6 space-y-4">
-            <label className="label">Output Options</label>
-
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={mergeWithVideo}
-                onChange={(e) => setMergeWithVideo(e.target.checked)}
-                className="w-5 h-5 rounded accent-accent-primary"
-              />
-              <div>
-                <span className="font-medium">Merge audio with video</span>
-                <p className="text-sm text-foreground-muted">
-                  Create a new video file with the generated audio
-                </p>
-              </div>
-            </label>
-
-            {mergeWithVideo && (
-              <div className="ml-8 space-y-4">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={mixOriginal}
-                    onChange={(e) => setMixOriginal(e.target.checked)}
-                    className="w-5 h-5 rounded accent-accent-primary"
-                  />
-                  <div>
-                    <span className="font-medium">Mix with original audio</span>
-                    <p className="text-sm text-foreground-muted">
-                      Blend generated SFX with the original video audio
-                    </p>
-                  </div>
-                </label>
-
-                {mixOriginal && (
-                  <div className="ml-8">
-                    <label className="label text-sm mb-2">
-                      Original Audio Volume: {Math.round(originalVolume * 100)}%
-                    </label>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.1}
-                      value={originalVolume}
-                      onChange={(e) => setOriginalVolume(Number(e.target.value))}
-                      className="w-full accent-accent-primary"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Advanced Settings */}
-          <div className="card p-6">
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center justify-between w-full"
-            >
-              <span className="label">Advanced Settings</span>
-              {showAdvanced ? (
-                <ChevronUp className="w-5 h-5" />
-              ) : (
-                <ChevronDown className="w-5 h-5" />
-              )}
-            </button>
-
-            {showAdvanced && (
-              <div className="mt-4 space-y-4">
-                <div>
-                  <label className="label text-sm mb-2">Seed (-1 for random)</label>
-                  <input
-                    type="number"
-                    value={seed}
-                    onChange={(e) => setSeed(Number(e.target.value))}
-                    min={-1}
-                    className="input w-full"
-                  />
-                </div>
-
-                <div>
-                  <label className="label text-sm mb-2">Inference Steps: {numSteps}</label>
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    value={numSteps}
-                    onChange={(e) => setNumSteps(Number(e.target.value))}
-                    className="w-full accent-accent-primary"
-                  />
-                </div>
-
-                <div>
-                  <label className="label text-sm mb-2">
-                    Guidance Scale: {guidanceScale.toFixed(1)}
-                  </label>
-                  <input
-                    type="range"
-                    min={1}
-                    max={10}
-                    step={0.5}
-                    value={guidanceScale}
-                    onChange={(e) => setGuidanceScale(Number(e.target.value))}
-                    className="w-full accent-accent-primary"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Progress */}
-          {isGenerating && currentJob && (
-            <div className="card p-6">
-              <ProgressBar
-                progress={currentJob.progress * 100}
-                status={`Generating sound effects... ${Math.round(currentJob.progress * 100)}%`}
-                details={currentJob.status}
-              />
-            </div>
-          )}
-
           {/* Result */}
           {currentJob?.status === 'completed' && (
-            <div className="card p-6 space-y-4 animate-fade-in">
+            <div className="glass-card p-6 space-y-4 animate-fade-in">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Generated Sound Effects</h3>
-                <span className="badge badge-success">Completed</span>
+                <div className="flex items-center gap-2">
+                  <Volume2 className="w-5 h-5 text-accent-primary" />
+                  <h3 className="text-lg font-semibold">Generated Sound Effects</h3>
+                </div>
+                <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400">
+                  Completed
+                </span>
               </div>
 
               {currentJob.output_video_path ? (
@@ -577,14 +536,12 @@ export default function SFXPage() {
                     src={getSFXVideoDownloadUrl(currentJob.id)}
                     className="w-full max-h-[400px] object-contain"
                     controls
-                    onEnded={() => setIsPlaying(false)}
                   />
                 </div>
               ) : (
                 <audio
                   ref={audioRef}
                   src={getSFXAudioDownloadUrl(currentJob.id)}
-                  onEnded={() => setIsPlaying(false)}
                   controls
                   className="w-full"
                 />
@@ -606,75 +563,36 @@ export default function SFXPage() {
             </div>
           )}
         </div>
-
-        {/* Right column - Generate button and info */}
-        <div className="space-y-6">
-          <div className="card p-6 sticky top-24 space-y-4">
-            <div className="text-center">
-              <Volume2 className="w-16 h-16 mx-auto text-accent-primary mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Video to Audio</h3>
-              <p className="text-sm text-foreground-muted">
-                AI analyzes your video and generates synchronized sound effects that match the
-                visual content.
-              </p>
-            </div>
-
-            <button
-              onClick={handleGenerate}
-              disabled={isGenerating || !videoPath || isUploading}
-              className="btn btn-primary w-full py-4 text-base animate-pulse-glow"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Generating...
-                </>
-              ) : isUploading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Uploading...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5 fill-current" />
-                  Generate SFX
-                </>
-              )}
-            </button>
-
-            {currentProviderInfo && (
-              <div className="bg-surface-1 rounded-lg p-4 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-foreground-muted">Engine</span>
-                  <span>{currentProviderInfo.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-foreground-muted">Max Video</span>
-                  <span>{Math.floor(currentProviderInfo.max_video_duration_seconds / 60)} min</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-foreground-muted">VRAM Required</span>
-                  <span>{currentProviderInfo.vram_gb}GB</span>
-                </div>
-              </div>
-            )}
-
-            <div className="bg-surface-1 rounded-lg p-4">
-              <div className="flex items-start gap-2 text-sm text-foreground-muted">
-                <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="font-medium text-foreground mb-1">Tips</p>
-                  <ul className="list-disc list-inside space-y-1 text-xs">
-                    <li>Works best with clear visual actions</li>
-                    <li>Add a prompt to guide specific sounds</li>
-                    <li>Enable mixing to keep original dialogue</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+      }
+      // Sidebar with tips and summary
+      sidebar={
+        <SidebarPanel
+          title="Video to Audio"
+          description="AI analyzes your video and generates synchronized sound effects that match the visual content."
+          icon={Volume2}
+          tips={[
+            'Works best with clear visual actions',
+            'Add a prompt to guide specific sounds',
+            'Enable mixing to keep original dialogue',
+            'Longer videos require more processing time',
+          ]}
+          metadata={
+            currentProviderInfo
+              ? [
+                { label: 'Engine', value: currentProviderInfo.name },
+                {
+                  label: 'Max Video',
+                  value: `${Math.floor(currentProviderInfo.max_video_duration_seconds / 60)} min`,
+                },
+                { label: 'VRAM Required', value: `${currentProviderInfo.vram_gb}GB` },
+              ]
+              : undefined
+          }
+        />
+      }
+      // Error handling
+      error={error}
+      onErrorDismiss={() => setError(null)}
+    />
   );
 }

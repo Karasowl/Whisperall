@@ -2,14 +2,28 @@
 
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import TranslationProvider, TranslationProviderInfo
 from ..base import ProviderType
+from core.api_provider import BaseAPIProvider, APIProviderConfig
 
 
-class DeepLProvider(TranslationProvider):
+class DeepLProvider(BaseAPIProvider, TranslationProvider):
     """DeepL API for high-quality translation"""
+
+    CONFIG = APIProviderConfig(
+        provider_id="deepl",
+        provider_name="DeepL",
+        api_key_name="deepl",
+        base_url="https://api-free.deepl.com",
+        timeout=60
+    )
+
+    def __init__(self):
+        BaseAPIProvider.__init__(self)
+
+    def _get_auth_header(self, api_key: str) -> Dict[str, str]:
+        """DeepL uses DeepL-Auth-Key header."""
+        return {"Authorization": f"DeepL-Auth-Key {api_key}"}
 
     @classmethod
     def get_info(cls) -> TranslationProviderInfo:
@@ -33,12 +47,6 @@ class DeepLProvider(TranslationProvider):
         target_lang: str = "en",
         **kwargs
     ) -> Tuple[str, Dict[str, Any]]:
-        from settings_service import settings_service
-
-        key = settings_service.get_api_key("deepl")
-        if not key:
-            raise RuntimeError("DeepL API key is not configured")
-
         data = {
             "text": text,
             "target_lang": target_lang.upper(),
@@ -46,17 +54,9 @@ class DeepLProvider(TranslationProvider):
         if source_lang != "auto":
             data["source_lang"] = source_lang.upper()
 
-        resp = requests.post(
-            "https://api-free.deepl.com/v2/translate",
-            headers={"Authorization": f"DeepL-Auth-Key {key}"},
-            data=data,
-            timeout=60
-        )
+        response = self.client.post("/v2/translate", data=data)
+        result = response.json()
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"DeepL error: HTTP {resp.status_code}")
-
-        result = resp.json()
         translations = result.get("translations") or []
         translated_text = translations[0].get("text", "") if translations else ""
 

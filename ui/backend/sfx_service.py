@@ -19,6 +19,10 @@ import shutil
 from app_paths import get_output_dir, get_temp_dir
 from settings_service import settings_service
 
+# Diagnostics
+from diagnostics import log_function, error_context, log_info, log_error, set_job_id
+from diagnostics.error_codes import ErrorCode
+
 
 class SFXJobStatus(str, Enum):
     PENDING = "pending"
@@ -81,11 +85,13 @@ class SFXService:
                     "id": info.id,
                     "name": info.name,
                     "description": info.description,
+                    "type": getattr(info, 'provider_type', 'local'),
                     "vram_gb": info.vram_requirement_gb,
                     "models": info.models,
                     "default_model": info.default_model,
                     "max_video_duration_seconds": info.max_video_duration_seconds,
                     "supports_prompt": info.supports_prompt,
+                    "supports_fast_mode": getattr(info, 'supports_fast_mode', False),
                     "ready": is_provider_ready(provider_id),
                 })
             return providers
@@ -145,63 +151,101 @@ class SFXService:
         if not job:
             return
 
+        # Set job context for logging
+        set_job_id(job_id)
+
         try:
-            job.status = SFXJobStatus.PROCESSING
-            job.progress = 0.1
-
-            from sfx_providers import get_provider
-
-            # Get provider
-            provider = get_provider(job.provider)
-
-            # Load model if needed
-            if not provider.is_loaded():
-                job.progress = 0.2
-                provider.load(job.model if job.model else None)
-
-            job.progress = 0.3
-
-            # Generate sound effects
-            audio, sample_rate = provider.generate(
+            with error_context(
+                provider=job.provider,
+                model=job.model,
+                job_id=job_id,
                 video_path=job.video_path,
-                prompt=job.prompt if job.prompt else None,
-                model=job.model if job.model else None,
-                **extra_params
-            )
+            ):
+                job.status = SFXJobStatus.PROCESSING
+                job.progress = 0.1
 
-            job.progress = 0.8
+                from sfx_providers import get_provider
 
-            # Save audio
-            audio_filename = f"sfx_{job_id}_{int(time.time())}.wav"
-            audio_path = self._output_dir / audio_filename
-            sf.write(str(audio_path), audio, sample_rate)
-            job.output_audio_path = str(audio_path)
+                # Get provider
+                log_info("sfx", "_run_generation", f"Getting provider {job.provider}", job_id=job_id)
+                provider = get_provider(job.provider)
 
-            # Optionally merge with video
-            if merge_with_video:
-                job.progress = 0.9
-                video_filename = f"sfx_video_{job_id}_{int(time.time())}.mp4"
-                video_output_path = self._output_dir / video_filename
+                # Load model if needed
+                if not provider.is_loaded():
+                    job.progress = 0.2
+                    log_info("sfx", "_run_generation", "Loading model", model=job.model, job_id=job_id)
+                    provider.load(job.model if job.model else None)
 
-                provider.merge_audio_with_video(
+                job.progress = 0.3
+
+                # Generate sound effects
+                log_info("sfx", "_run_generation", "Starting SFX generation", job_id=job_id)
+                audio, sample_rate = provider.generate(
                     video_path=job.video_path,
-                    audio=audio,
-                    sample_rate=sample_rate,
-                    output_path=str(video_output_path),
-                    mix_original=mix_original,
-                    original_volume=original_volume,
+                    prompt=job.prompt if job.prompt else None,
+                    model=job.model if job.model else None,
+                    **extra_params
                 )
 
-                job.output_video_path = str(video_output_path)
+                job.progress = 0.8
 
-            job.status = SFXJobStatus.COMPLETED
-            job.progress = 1.0
-            job.completed_at = time.time()
+                # Save audio
+                audio_filename = f"sfx_{job_id}_{int(time.time())}.wav"
+                audio_path = self._output_dir / audio_filename
+                sf.write(str(audio_path), audio, sample_rate)
+                job.output_audio_path = str(audio_path)
+
+                # Optionally merge with video
+                if merge_with_video:
+                    job.progress = 0.9
+                    log_info("sfx", "_run_generation", "Merging audio with video", job_id=job_id)
+                    video_filename = f"sfx_video_{job_id}_{int(time.time())}.mp4"
+                    video_output_path = self._output_dir / video_filename
+
+                    provider.merge_audio_with_video(
+                        video_path=job.video_path,
+                        audio=audio,
+                        sample_rate=sample_rate,
+                        output_path=str(video_output_path),
+                        mix_original=mix_original,
+                        original_volume=original_volume,
+                    )
+
+                    job.output_video_path = str(video_output_path)
+
+                job.status = SFXJobStatus.COMPLETED
+                job.progress = 1.0
+                job.completed_at = time.time()
+
+                log_info("sfx", "_run_generation", "Generation complete", job_id=job_id, output=str(audio_path))
+
+                # Save to history
+                try:
+                    from history_service import get_history_service
+                    import librosa
+                    duration = librosa.get_duration(filename=str(audio_path))
+                    history_svc = get_history_service()
+                    history_svc.save_sfx_entry(
+                        prompt=job.prompt,
+                        audio_path=str(audio_path),
+                        provider=job.provider,
+                        model=job.model or None,
+                        duration_seconds=duration,
+                        settings={
+                            "video_path": job.video_path,
+                            "merge_with_video": merge_with_video,
+                            "mix_original": mix_original,
+                            "original_volume": original_volume,
+                        },
+                    )
+                except Exception as he:
+                    log_error("sfx", "_run_generation", f"Failed to save to history: {he}", job_id=job_id)
 
         except Exception as e:
             job.status = SFXJobStatus.FAILED
             job.error = str(e)
-            print(f"[SFXService] Job {job_id} failed: {e}")
+            log_error("sfx", "_run_generation", f"Job {job_id} failed: {e}",
+                      error_code=ErrorCode.SFX_GENERATION_FAILED, exception=e, job_id=job_id)
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get job status"""

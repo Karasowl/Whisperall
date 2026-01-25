@@ -1,10 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Copy, Loader2 } from 'lucide-react';
+import { Sparkles, Copy, Check, Wand2 } from 'lucide-react';
 import { aiEdit, ServiceProviderInfo, getProviderSelection, setProvider } from '@/lib/api';
 import { SelectMenu } from '@/components/SelectMenu';
 import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
+import {
+  ModuleShell,
+  ActionBar,
+  SidebarPanel,
+} from '@/components/module';
 
 const commandOptions = [
   'Make this more formal',
@@ -28,6 +33,7 @@ export default function AIEditPage() {
   const [result, setResult] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const didLoadRef = useRef(false);
 
   const effectiveCommand = command === 'Custom command' ? customCommand : command;
@@ -98,111 +104,144 @@ export default function AIEditPage() {
   const copyToClipboard = async () => {
     if (!result) return;
     await navigator.clipboard.writeText(result);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
+  const isReady = text.trim().length > 0 && effectiveCommand.trim().length > 0;
+
   return (
-    <div className="space-y-8 animate-slide-up">
-      <div className="space-y-2">
-        <h1 className="text-4xl font-bold text-gradient">AI Text Editing</h1>
-        <p className="text-slate-400">
-          Rewrite, summarize, translate, and clean up text with AI commands.
-        </p>
-      </div>
+    <ModuleShell
+      title="AI Text Editing"
+      description="Rewrite, summarize, translate, and clean up text with AI commands."
+      icon={Wand2}
+      layout="split"
+      settingsPosition="left"
+      settingsTitle="Command Settings"
+      // Engine selector
+      engineSelector={
+        <UnifiedProviderSelector
+          service="ai_edit"
+          selected={provider}
+          onSelect={updateProvider}
+          selectedModel={providerModel}
+          onModelChange={setProviderModel}
+          onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
+          variant="dropdown"
+          showModelSelector
+          label="AI Provider"
+        />
+      }
+      // Settings panel (left side)
+      settings={
+        <>
+          <SelectMenu
+            label="Command Preset"
+            value={command}
+            options={commandOptions}
+            onChange={setCommand}
+          />
 
-      {error && (
-        <div className="glass-card p-4 border-red-500/30 bg-red-500/10 text-red-300">
-          {error}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 space-y-6">
-          <div className="glass-card p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-slate-100">Command</h2>
-
-            <SelectMenu
-              label="Preset"
-              value={command}
-              options={commandOptions}
-              onChange={setCommand}
-            />
-
-            {command === 'Custom command' && (
-              <>
-                <label className="label mt-4">Custom command</label>
-                <input
-                  className="input"
-                  placeholder="Describe what to do with the text"
-                  value={customCommand}
-                  onChange={(e) => setCustomCommand(e.target.value)}
-                />
-              </>
-            )}
-
-            <UnifiedProviderSelector
-              service="ai_edit"
-              selected={provider}
-              onSelect={updateProvider}
-              selectedModel={providerModel}
-              onModelChange={setProviderModel}
-              onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
-              variant="dropdown"
-              showModelSelector
-              label="AI Provider"
-            />
-
-            <button
-              onClick={handleEdit}
-              disabled={isLoading}
-              className="btn btn-primary w-full mt-4"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Editing...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4" />
-                  Apply Command
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 space-y-6">
-          <div className="glass-card p-6 space-y-4">
+          {command === 'Custom command' && (
+            <div className="space-y-1.5">
+              <label className="label">Custom Command</label>
+              <input
+                className="input"
+                placeholder="Describe what to do with the text"
+                value={customCommand}
+                onChange={(e) => setCustomCommand(e.target.value)}
+              />
+            </div>
+          )}
+        </>
+      }
+      // Action button
+      actions={
+        <ActionBar
+          primary={{
+            label: 'Apply Command',
+            icon: Sparkles,
+            onClick: handleEdit,
+            disabled: !isReady,
+          }}
+          loading={isLoading}
+          loadingText="Editing..."
+          pulse={isReady && !isLoading}
+        />
+      }
+      // Main content - text areas
+      main={
+        <div className="space-y-6 h-full flex flex-col">
+          {/* Original Text */}
+          <div className="glass-card p-6 space-y-4 flex-1 flex flex-col">
             <label className="label">Original Text</label>
             <textarea
-              className="input textarea min-h-[220px]"
+              className="input textarea flex-1 min-h-[200px] resize-none"
               placeholder="Paste or type text to edit"
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
+            <div className="text-xs text-foreground-muted text-right">
+              {text.length.toLocaleString()} characters
+            </div>
           </div>
 
-          <div className="glass-card p-6 space-y-4">
+          {/* AI Output */}
+          <div className="glass-card p-6 space-y-4 flex-1 flex flex-col">
             <div className="flex items-center justify-between">
               <label className="label">AI Output</label>
               <button
                 onClick={copyToClipboard}
                 disabled={!result}
-                className="btn btn-secondary btn-icon"
-                title="Copy output"
+                className={`p-2 rounded-lg transition-colors ${
+                  copied
+                    ? 'text-emerald-400 bg-emerald-500/10'
+                    : 'text-foreground-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed'
+                }`}
+                title={copied ? 'Copied!' : 'Copy to clipboard'}
               >
-                <Copy className="w-4 h-4" />
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
             <textarea
-              className="input textarea min-h-[220px]"
+              className="input textarea flex-1 min-h-[200px] resize-none"
               placeholder="Edited text will appear here"
               value={result}
               onChange={(e) => setResult(e.target.value)}
             />
+            {result && (
+              <div className="text-xs text-foreground-muted text-right">
+                {result.length.toLocaleString()} characters
+              </div>
+            )}
           </div>
         </div>
-      </div>
-    </div>
+      }
+      // Sidebar with tips
+      sidebar={
+        <SidebarPanel
+          title="Text Transformation"
+          description="Use AI to transform your text with preset commands or custom instructions."
+          icon={Wand2}
+          tips={[
+            'Use preset commands for quick transformations',
+            'Custom commands allow any text instruction',
+            'Output is editable if you need adjustments',
+            'Copy result directly to clipboard',
+          ]}
+          metadata={
+            providerInfo
+              ? [
+                  { label: 'Provider', value: providerInfo.name },
+                  { label: 'Model', value: providerModel || providerInfo.default_model || 'Default' },
+                ]
+              : undefined
+          }
+        />
+      }
+      // Error handling
+      error={error}
+      onErrorDismiss={() => setError(null)}
+    />
   );
 }

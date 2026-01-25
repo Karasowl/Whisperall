@@ -1,21 +1,23 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Cpu, Zap, Globe, Mic, AlertTriangle, Check, Download } from 'lucide-react';
+import { Cpu, Zap, Globe, Mic, AlertTriangle, Check, Download, Music } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { TTSProviderInfo, getTTSProviders } from '@/lib/api';
+import { TTSProviderInfo, getTTSProviders, MusicProviderInfo } from '@/lib/api';
 import Link from 'next/link';
 
 interface ProviderSelectorProps {
   selected: string;
   onSelect: (providerId: string) => void;
   selectedLanguage?: string;
-  onProviderInfoChange?: (info: TTSProviderInfo | null) => void;
+  onProviderInfoChange?: (info: TTSProviderInfo | MusicProviderInfo | null) => void;
+  providers?: (TTSProviderInfo | MusicProviderInfo)[]; // Allow passing providers directly
+  isLoading?: boolean; // explicit loading state
   className?: string;
 }
 
 // Provider icons and colors
-const PROVIDER_STYLES: Record<string, { icon: typeof Cpu; color: string; gradient: string }> = {
+const PROVIDER_STYLES: Record<string, { icon: any; color: string; gradient: string }> = {
   'chatterbox': {
     icon: Mic,
     color: 'text-emerald-400',
@@ -36,6 +38,11 @@ const PROVIDER_STYLES: Record<string, { icon: typeof Cpu; color: string; gradien
     color: 'text-blue-400',
     gradient: 'from-blue-400 to-cyan-500',
   },
+  'diffrhythm': {
+    icon: Music,
+    color: 'text-pink-400',
+    gradient: 'from-pink-400 to-rose-500',
+  },
 };
 
 export function ProviderSelector({
@@ -43,22 +50,34 @@ export function ProviderSelector({
   onSelect,
   selectedLanguage = 'en',
   onProviderInfoChange,
+  providers: explicitProviders,
+  isLoading: explicitLoading,
   className,
 }: ProviderSelectorProps) {
-  const [providers, setProviders] = useState<TTSProviderInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [internalProviders, setInternalProviders] = useState<(TTSProviderInfo | MusicProviderInfo)[]>([]);
+  const [internalLoading, setInternalLoading] = useState(!explicitProviders);
   const [error, setError] = useState<string | null>(null);
 
+  const providers = explicitProviders || internalProviders;
+  const isLoading = explicitLoading !== undefined ? explicitLoading : internalLoading;
+
   useEffect(() => {
+    if (explicitProviders) {
+      setInternalLoading(false);
+      return;
+    }
+
     async function loadProviders() {
       try {
-        setLoading(true);
+        setInternalLoading(true);
         const data = await getTTSProviders();
-        setProviders(data);
+        setInternalProviders(data);
 
         // Auto-select first ready provider if current selection is not ready
         const currentProvider = data.find(p => p.id === selected);
-        if (!currentProvider?.is_ready) {
+        const isCurrentReady = currentProvider ? (currentProvider.is_ready !== false) : false;
+
+        if (!isCurrentReady) {
           const firstReady = data.find(p => p.is_ready !== false);
           if (firstReady) {
             onSelect(firstReady.id);
@@ -71,14 +90,14 @@ export function ProviderSelector({
           onProviderInfoChange(selectedInfo || null);
         }
       } catch (err) {
-        setError('Failed to load TTS providers');
+        setError('Failed to load providers');
         console.error(err);
       } finally {
-        setLoading(false);
+        setInternalLoading(false);
       }
     }
     loadProviders();
-  }, []);
+  }, [explicitProviders]);
 
   // Update parent when selection changes
   useEffect(() => {
@@ -93,19 +112,22 @@ export function ProviderSelector({
   };
 
   // Check if provider supports the selected language
-  const supportsLanguage = (provider: TTSProviderInfo) => {
+  const supportsLanguage = (provider: TTSProviderInfo | MusicProviderInfo) => {
+    // If provider doesn't have supported_languages (e.g. MusicProvider), assume true or handle differently
+    if (!('supported_languages' in provider)) return true;
+
     const langBase = selectedLanguage.split('-')[0];
     return provider.supported_languages.some(l =>
       l === selectedLanguage || l.startsWith(langBase) || langBase === l.split('-')[0]
     );
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className={cn('space-y-4', className)}>
         <label className="label flex items-center gap-2">
           <Cpu className="w-4 h-4" />
-          Voice Engine
+          Engine
         </label>
         <div className="grid grid-cols-2 gap-3">
           {[1, 2, 3, 4].map(i => (
@@ -121,10 +143,25 @@ export function ProviderSelector({
       <div className={cn('space-y-4', className)}>
         <label className="label flex items-center gap-2">
           <Cpu className="w-4 h-4" />
-          Voice Engine
+          Engine
         </label>
         <div className="card p-4 rounded-xl border-error/30 bg-error/10">
           <p className="text-error text-sm">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (providers.length === 0) {
+    return (
+      <div className={cn('space-y-4', className)}>
+        <label className="label flex items-center gap-2">
+          <Cpu className="w-4 h-4" />
+          Engine
+        </label>
+        <div className="card p-6 border-dashed flex flex-col items-center justify-center text-center gap-2">
+          <AlertTriangle className="w-8 h-8 text-foreground-muted opacity-50" />
+          <p className="text-foreground-secondary font-medium">No engines available</p>
         </div>
       </div>
     );
@@ -134,7 +171,7 @@ export function ProviderSelector({
     <div className={cn('space-y-4', className)}>
       <label className="label flex items-center gap-2">
         <Cpu className="w-4 h-4" />
-        Voice Engine
+        Engine
       </label>
 
       <div className="grid grid-cols-2 gap-3">
@@ -143,8 +180,14 @@ export function ProviderSelector({
           const Icon = style.icon;
           const isSelected = selected === provider.id;
           const langSupported = supportsLanguage(provider);
-          const hasCloning = provider.voice_cloning !== 'none';
-          const isReady = provider.is_ready !== false; // Default to true for backwards compat
+
+          // Safe ready check
+          const isReady = 'is_ready' in provider
+            ? (provider as any).is_ready !== false
+            : ('ready' in provider ? (provider as any).ready : true);
+
+          const hasCloning = 'voice_cloning' in provider && (provider as any).voice_cloning !== 'none';
+
           // Only show as visually selected if both selected AND ready
           const showAsSelected = isSelected && isReady;
 

@@ -3,11 +3,11 @@
 import { useMemo } from 'react';
 import { HardDrive, Cpu, Zap, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { TTSProviderInfo, TTSModelVariant } from '@/lib/api';
+import { TTSProviderInfo, TTSModelVariant, MusicProviderInfo } from '@/lib/api';
 import Link from 'next/link';
 
 interface ProviderModelSelectorProps {
-  providerInfo: TTSProviderInfo | null;
+  providerInfo: TTSProviderInfo | MusicProviderInfo | null;
   selectedModel: string;
   onModelSelect: (modelId: string) => void;
   className?: string;
@@ -19,8 +19,10 @@ export function ProviderModelSelector({
   onModelSelect,
   className,
 }: ProviderModelSelectorProps) {
-  // Check if provider is ready (installed)
-  const isProviderReady = providerInfo?.is_ready !== false;
+  // Check if provider is ready (installed) - default to true if property missing
+  const isProviderReady = 'is_ready' in (providerInfo || {})
+    ? (providerInfo as any).is_ready !== false
+    : ('ready' in (providerInfo || {}) ? (providerInfo as any).ready : true);
 
   // Normalize models to always be TTSModelVariant format
   const models = useMemo(() => {

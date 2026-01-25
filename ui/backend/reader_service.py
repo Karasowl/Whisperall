@@ -13,6 +13,10 @@ from tts_service import get_tts_service
 from tts_providers import get_provider
 from tts_providers.registry import list_providers, is_provider_ready
 
+# Diagnostics
+from diagnostics import log_function, error_context, log_info, log_error
+from diagnostics.error_codes import ErrorCode
+
 
 class ReaderService:
     def _get_provider_config(self, provider_id: str) -> dict:
@@ -36,6 +40,7 @@ class ReaderService:
             )
         return provider_id
 
+    @log_function(module="reader", error_code=ErrorCode.READ_TTS_FAILED)
     def synthesize(
         self,
         text: str,
@@ -47,117 +52,125 @@ class ReaderService:
     ):
         from settings_service import settings_service
 
+        if not text or not text.strip():
+            log_error("reader", "synthesize", "Empty text provided",
+                      error_code=ErrorCode.READ_TEXT_EMPTY)
+            raise ValueError("Text cannot be empty")
+
         provider_id = self._resolve_provider()
-        provider = get_provider(provider_id, device=device)
-        config = self._get_provider_config(provider_id)
+        log_info("reader", "synthesize", f"Using provider {provider_id}", text_length=len(text))
 
-        if fast_mode is None:
-            fast_mode = settings_service.get("performance.fast_mode", False)
+        with error_context(provider=provider_id, language=language, voice=voice, text_length=len(text)):
+            provider = get_provider(provider_id, device=device)
+            config = self._get_provider_config(provider_id)
 
-        model = config.get("model")
-        preset_voice_id = config.get("preset_voice_id")
-        voice_id = voice or preset_voice_id
+            if fast_mode is None:
+                fast_mode = settings_service.get("performance.fast_mode", False)
 
-        gen_kwargs = {
-            "language": language,
-            "speed": speed,
-        }
+            model = config.get("model")
+            preset_voice_id = config.get("preset_voice_id")
+            voice_id = voice or preset_voice_id
 
-        if model:
-            gen_kwargs["model"] = model
+            gen_kwargs = {
+                "language": language,
+                "speed": speed,
+            }
 
-        if provider_id == "chatterbox":
-            gen_kwargs.update({
-                "temperature": 0.8,
-                "exaggeration": 0.5,
-                "cfg_weight": 0.0 if fast_mode else 0.5,
-                "top_p": 0.95,
-                "top_k": 1000,
-            })
-        elif provider_id == "f5-tts":
-            gen_kwargs.update({
-                "model": model if model != "multilingual" else None,
-            })
-        elif provider_id == "orpheus":
-            gen_kwargs.update({
-                "model": model if model not in ["multilingual", "original", "turbo"] else None,
-                "temperature": 0.8,
-                "top_p": 0.9,
-            })
-        elif provider_id == "kokoro":
-            gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "zonos":
-            gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "vibevoice":
-            gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
-            gen_kwargs["temperature"] = 0.8
-        elif provider_id == "voxcpm":
-            gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
-            gen_kwargs["temperature"] = 0.8
-            gen_kwargs["top_p"] = 0.9
-        elif provider_id == "dia":
-            gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "openvoice":
-            gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
-        elif provider_id == "fish-speech":
-            gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
-            gen_kwargs["temperature"] = 0.8
-            gen_kwargs["top_p"] = 0.9
-        # API Providers
-        elif provider_id == "openai-tts":
-            gen_kwargs["model"] = model or "tts-1"
-            gen_kwargs["voice_id"] = voice_id or "alloy"
-        elif provider_id == "elevenlabs":
-            gen_kwargs["model"] = model or "eleven_multilingual_v2"
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "fishaudio":
-            gen_kwargs["model"] = model or "default"
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "cartesia":
-            gen_kwargs["model"] = model or "sonic-2"
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "playht":
-            gen_kwargs["model"] = model or "PlayHT2.0-turbo"
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "siliconflow":
-            gen_kwargs["model"] = model or "CosyVoice-300M-SFT"
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "minimax":
-            gen_kwargs["model"] = model or "speech-01-turbo"
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "zyphra":
-            gen_kwargs["model"] = model or "zonos-v1"
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        elif provider_id == "narilabs":
-            gen_kwargs["model"] = model or "dia-1.6b"
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
-        else:
-            # Fallback for unknown providers
-            if voice_id:
-                gen_kwargs["voice_id"] = voice_id
+            if model:
+                gen_kwargs["model"] = model
 
-        audio, sample_rate = provider.generate(text=text, **gen_kwargs)
+            if provider_id == "chatterbox":
+                gen_kwargs.update({
+                    "temperature": 0.8,
+                    "exaggeration": 0.5,
+                    "cfg_weight": 0.0 if fast_mode else 0.5,
+                    "top_p": 0.95,
+                    "top_k": 1000,
+                })
+            elif provider_id == "f5-tts":
+                gen_kwargs.update({
+                    "model": model if model != "multilingual" else None,
+                })
+            elif provider_id == "orpheus":
+                gen_kwargs.update({
+                    "model": model if model not in ["multilingual", "original", "turbo"] else None,
+                    "temperature": 0.8,
+                    "top_p": 0.9,
+                })
+            elif provider_id == "kokoro":
+                gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "zonos":
+                gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "vibevoice":
+                gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
+                gen_kwargs["temperature"] = 0.8
+            elif provider_id == "voxcpm":
+                gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
+                gen_kwargs["temperature"] = 0.8
+                gen_kwargs["top_p"] = 0.9
+            elif provider_id == "dia":
+                gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "openvoice":
+                gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
+            elif provider_id == "fish-speech":
+                gen_kwargs["model"] = model if model not in ["multilingual", "original"] else None
+                gen_kwargs["temperature"] = 0.8
+                gen_kwargs["top_p"] = 0.9
+            # API Providers
+            elif provider_id == "openai-tts":
+                gen_kwargs["model"] = model or "tts-1"
+                gen_kwargs["voice_id"] = voice_id or "alloy"
+            elif provider_id == "elevenlabs":
+                gen_kwargs["model"] = model or "eleven_multilingual_v2"
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "fishaudio":
+                gen_kwargs["model"] = model or "default"
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "cartesia":
+                gen_kwargs["model"] = model or "sonic-2"
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "playht":
+                gen_kwargs["model"] = model or "PlayHT2.0-turbo"
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "siliconflow":
+                gen_kwargs["model"] = model or "CosyVoice-300M-SFT"
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "minimax":
+                gen_kwargs["model"] = model or "speech-01-turbo"
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "zyphra":
+                gen_kwargs["model"] = model or "zonos-v1"
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            elif provider_id == "narilabs":
+                gen_kwargs["model"] = model or "dia-1.6b"
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
+            else:
+                # Fallback for unknown providers
+                if voice_id:
+                    gen_kwargs["voice_id"] = voice_id
 
-        # API providers and some local providers handle speed internally
-        providers_with_internal_speed = [
-            "f5-tts", "kokoro", "openai-tts", "elevenlabs", "fishaudio",
-            "cartesia", "playht", "siliconflow", "minimax", "zyphra", "narilabs"
-        ]
-        if speed != 1.0 and provider_id not in providers_with_internal_speed:
-            audio = change_speed(audio, sample_rate, speed)
-        return audio, sample_rate
+            audio, sample_rate = provider.generate(text=text, **gen_kwargs)
+
+            # API providers and some local providers handle speed internally
+            providers_with_internal_speed = [
+                "f5-tts", "kokoro", "openai-tts", "elevenlabs", "fishaudio",
+                "cartesia", "playht", "siliconflow", "minimax", "zyphra", "narilabs"
+            ]
+            if speed != 1.0 and provider_id not in providers_with_internal_speed:
+                audio = change_speed(audio, sample_rate, speed)
+            return audio, sample_rate
 
     def synthesize_to_file(
         self,

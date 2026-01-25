@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional, List
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -1225,107 +1225,110 @@ def save_history_entry(module: str, entry: dict):
     save_history(module, history)
 
 
-@app.get("/api/history")
-async def get_history_list(limit: int = 50, offset: int = 0, module: Optional[str] = None):
-    """Get module history (default: tts)."""
-    module_id = normalize_history_module(module)
-    history = load_history(module_id)
-
-    valid_history = []
-    for entry in history:
-        if module_id in {"tts", "reader"} and entry.get("filename"):
-            output_path = OUTPUT_DIR / entry["filename"]
-            if output_path.exists():
-                entry["file_exists"] = True
-                entry["file_size_bytes"] = output_path.stat().st_size
-                entry["file_size_mb"] = round(output_path.stat().st_size / (1024 * 1024), 2)
-            else:
-                entry["file_exists"] = False
-        valid_history.append(entry)
-
-    total = len(valid_history)
-    paginated = valid_history[offset:offset + limit]
-
-    return {
-        "module": module_id,
-        "history": paginated,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
-
-
-@app.get("/api/history/{history_id}")
-async def get_history_entry(history_id: str, module: Optional[str] = None):
-    """Get a specific history entry."""
-    module_id = normalize_history_module(module)
-    history = load_history(module_id)
-    entry = next((h for h in history if h["id"] == history_id), None)
-    if not entry:
-        raise HTTPException(404, "History entry not found")
-
-    if module_id in {"tts", "reader"} and entry.get("filename"):
-        output_path = OUTPUT_DIR / entry["filename"]
-        entry["file_exists"] = output_path.exists()
-        if entry["file_exists"]:
-            entry["file_size_bytes"] = output_path.stat().st_size
-
-    return entry
-
-
-@app.delete("/api/history/{history_id}")
-async def delete_history_entry(history_id: str, delete_file: bool = True, module: Optional[str] = None):
-    """Delete a history entry and optionally its audio file."""
-    module_id = normalize_history_module(module)
-    history = load_history(module_id)
-
-    entry = next((h for h in history if h["id"] == history_id), None)
-    if not entry:
-        raise HTTPException(404, "History entry not found")
-
-    freed_space = 0
-    if delete_file and module_id in {"tts", "reader"} and entry.get("filename"):
-        output_path = OUTPUT_DIR / entry["filename"]
-        if output_path.exists():
-            freed_space = output_path.stat().st_size
-            output_path.unlink()
-
-    history = [h for h in history if h["id"] != history_id]
-    save_history(module_id, history)
-
-    return {
-        "message": "History entry deleted",
-        "id": history_id,
-        "file_deleted": delete_file,
-        "freed_bytes": freed_space,
-    }
-
-
-@app.delete("/api/history")
-async def clear_history(delete_files: bool = False, module: Optional[str] = None):
-    """Clear all history entries for a module."""
-    module_id = normalize_history_module(module)
-    history = load_history(module_id)
-    freed_space = 0
-
-    if delete_files and module_id in {"tts", "reader"}:
-        for entry in history:
-            filename = entry.get("filename")
-            if not filename:
-                continue
-            output_path = OUTPUT_DIR / filename
-            if output_path.exists():
-                freed_space += output_path.stat().st_size
-                output_path.unlink()
-
-    save_history(module_id, [])
-
-    return {
-        "message": "History cleared",
-        "entries_deleted": len(history),
-        "files_deleted": delete_files,
-        "freed_bytes": freed_space,
-    }
+# NOTE: Old file-based history routes commented out - replaced by new database-based routes
+# defined later in the file (around line 6757+). See history_service.py and history_db.py.
+#
+# @app.get("/api/history")
+# async def get_history_list(limit: int = 50, offset: int = 0, module: Optional[str] = None):
+#     """Get module history (default: tts)."""
+#     module_id = normalize_history_module(module)
+#     history = load_history(module_id)
+#
+#     valid_history = []
+#     for entry in history:
+#         if module_id in {"tts", "reader"} and entry.get("filename"):
+#             output_path = OUTPUT_DIR / entry["filename"]
+#             if output_path.exists():
+#                 entry["file_exists"] = True
+#                 entry["file_size_bytes"] = output_path.stat().st_size
+#                 entry["file_size_mb"] = round(output_path.stat().st_size / (1024 * 1024), 2)
+#             else:
+#                 entry["file_exists"] = False
+#         valid_history.append(entry)
+#
+#     total = len(valid_history)
+#     paginated = valid_history[offset:offset + limit]
+#
+#     return {
+#         "module": module_id,
+#         "history": paginated,
+#         "total": total,
+#         "limit": limit,
+#         "offset": offset,
+#     }
+#
+#
+# @app.get("/api/history/{history_id}")
+# async def get_history_entry(history_id: str, module: Optional[str] = None):
+#     """Get a specific history entry."""
+#     module_id = normalize_history_module(module)
+#     history = load_history(module_id)
+#     entry = next((h for h in history if h["id"] == history_id), None)
+#     if not entry:
+#         raise HTTPException(404, "History entry not found")
+#
+#     if module_id in {"tts", "reader"} and entry.get("filename"):
+#         output_path = OUTPUT_DIR / entry["filename"]
+#         entry["file_exists"] = output_path.exists()
+#         if entry["file_exists"]:
+#             entry["file_size_bytes"] = output_path.stat().st_size
+#
+#     return entry
+#
+#
+# @app.delete("/api/history/{history_id}")
+# async def delete_history_entry(history_id: str, delete_file: bool = True, module: Optional[str] = None):
+#     """Delete a history entry and optionally its audio file."""
+#     module_id = normalize_history_module(module)
+#     history = load_history(module_id)
+#
+#     entry = next((h for h in history if h["id"] == history_id), None)
+#     if not entry:
+#         raise HTTPException(404, "History entry not found")
+#
+#     freed_space = 0
+#     if delete_file and module_id in {"tts", "reader"} and entry.get("filename"):
+#         output_path = OUTPUT_DIR / entry["filename"]
+#         if output_path.exists():
+#             freed_space = output_path.stat().st_size
+#             output_path.unlink()
+#
+#     history = [h for h in history if h["id"] != history_id]
+#     save_history(module_id, history)
+#
+#     return {
+#         "message": "History entry deleted",
+#         "id": history_id,
+#         "file_deleted": delete_file,
+#         "freed_bytes": freed_space,
+#     }
+#
+#
+# @app.delete("/api/history")
+# async def clear_history(delete_files: bool = False, module: Optional[str] = None):
+#     """Clear all history entries for a module."""
+#     module_id = normalize_history_module(module)
+#     history = load_history(module_id)
+#     freed_space = 0
+#
+#     if delete_files and module_id in {"tts", "reader"}:
+#         for entry in history:
+#             filename = entry.get("filename")
+#             if not filename:
+#                 continue
+#             output_path = OUTPUT_DIR / filename
+#             if output_path.exists():
+#                 freed_space += output_path.stat().st_size
+#                 output_path.unlink()
+#
+#     save_history(module_id, [])
+#
+#     return {
+#         "message": "History cleared",
+#         "entries_deleted": len(history),
+#         "files_deleted": delete_files,
+#         "freed_bytes": freed_space,
+#     }
 
 
  # =====================================================
@@ -1405,6 +1408,7 @@ async def list_tts_providers():
                 "vram_gb": info.vram_requirement_gb,
                 "supports_streaming": info.supports_streaming,
                 "supports_emotion_tags": info.supports_emotion_tags,
+                "supports_fast_mode": getattr(info, 'supports_fast_mode', False),
                 "requires_reference_text": info.requires_reference_text,
                 "min_reference_duration": info.min_reference_duration,
                 "max_reference_duration": info.max_reference_duration,
@@ -1594,6 +1598,24 @@ async def unload_tts_provider(provider_id: str):
 
     unloaded = unload_provider(provider_id)
     return {"provider": provider_id, "unloaded": unloaded}
+
+
+@app.post("/api/tts/speak")
+async def speak_text(request: GenerateRequest):
+    """Generate audio and return it directly as a file response (for widget)"""
+    # Reuse generation logic by calling the service directly or via internal call
+    # Ideally we refactor 'generate_audio' to be reusable, but for now we can wrap it.
+    # However, 'generate_audio' returns a JSON with URL.
+    # We want to return the binary/file.
+    
+    # Let's call generate_audio logic.
+    res = await generate_audio(request)
+    if isinstance(res, dict) and res.get("success"):
+        filename = res["filename"]
+        file_path = OUTPUT_DIR / filename
+        return FileResponse(file_path, media_type="audio/wav")
+    
+    raise HTTPException(500, "Generation failed")
 
 
 @app.post("/api/generate")
@@ -1817,7 +1839,7 @@ async def generate_audio(request: GenerateRequest):
         output_path.unlink()  # Remove WAV
         output_path = Path(converted_path)
 
-    # Save to history
+    # Save to history (legacy JSON system)
     from datetime import datetime
     history_entry = {
         "id": output_id,
@@ -1840,6 +1862,45 @@ async def generate_audio(request: GenerateRequest):
         "billing": billing_info,
     }
     save_history_entry("tts", history_entry)
+
+    # Save to new history system (SQLite with file storage)
+    try:
+        from history_service import get_history_service
+        import librosa
+        # Get audio duration
+        duration = librosa.get_duration(filename=str(output_path))
+        # Get voice name if available
+        voice_name = None
+        if request.voice_id:
+            metadata_file = VOICES_DIR / "metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file) as f:
+                    voices = json.load(f)
+                voice = next((v for v in voices if v["id"] == request.voice_id), None)
+                if voice:
+                    voice_name = voice.get("name")
+
+        history_svc = get_history_service()
+        history_svc.save_tts_entry(
+            text=request.text,
+            audio_path=str(output_path),
+            provider=provider_id,
+            model=request.model,
+            voice_id=request.voice_id or request.preset_voice_id,
+            voice_name=voice_name,
+            settings={
+                "language": request.language,
+                "temperature": request.temperature,
+                "exaggeration": request.exaggeration,
+                "cfg_weight": request.cfg_weight,
+                "speed": request.speed,
+                "output_format": request.output_format,
+            },
+            duration_seconds=duration,
+            characters_count=len(request.text),
+        )
+    except Exception as e:
+        print(f"[History] Failed to save TTS entry: {e}")
 
     return {
         "success": True,
@@ -2278,14 +2339,18 @@ async def stt_stop(
         f.write(content)
 
     stt_service = get_stt_service()
+    audio_duration = None
     try:
         raw_text, meta = stt_service.transcribe(temp_path, language=language, prompt=prompt)
+        # Get audio duration for history
+        try:
+            import librosa
+            audio_duration = librosa.get_duration(filename=str(temp_path))
+        except Exception:
+            pass
     except Exception as exc:
         detail = f"STT transcription failed: {exc}"
         raise HTTPException(400, detail) from exc
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()
 
     stt_cfg = settings_service.settings.stt
     formatter = SmartFormatter(
@@ -2308,6 +2373,26 @@ async def stt_stop(
         "created_at": datetime.datetime.now().isoformat(),
     }
     save_history_entry("stt", history_entry)
+
+    # Save to new history system (SQLite with file storage)
+    try:
+        from history_service import get_history_service
+        history_svc = get_history_service()
+        history_svc.save_stt_entry(
+            audio_path=str(temp_path),
+            transcription=formatted_text,
+            provider=meta.get("provider") if isinstance(meta, dict) else "unknown",
+            model=meta.get("model") if isinstance(meta, dict) else None,
+            language=language,
+            language_detected=meta.get("language") if isinstance(meta, dict) else None,
+            duration_seconds=audio_duration,
+        )
+    except Exception as e:
+        print(f"[History] Failed to save STT entry: {e}")
+    finally:
+        # Clean up temp file after saving to history
+        if temp_path.exists():
+            temp_path.unlink()
 
     return {
         "session_id": session_id,
@@ -2399,6 +2484,22 @@ async def stt_finalize(session_id: str = Form(...)):
         "created_at": datetime.datetime.now().isoformat(),
     }
     save_history_entry("stt", history_entry)
+
+    # Save to new history system (no audio for finalize - audio was processed in partials)
+    try:
+        from history_service import get_history_service
+        history_svc = get_history_service()
+        history_svc.save_stt_entry(
+            audio_path="",  # No audio file for finalize (processed in partials)
+            transcription=formatted_text,
+            provider=meta.get("provider") if isinstance(meta, dict) else "unknown",
+            model=meta.get("model") if isinstance(meta, dict) else None,
+            language=language,
+            language_detected=meta.get("language") if isinstance(meta, dict) else None,
+            duration_seconds=meta.get("duration") if isinstance(meta, dict) else None,
+        )
+    except Exception as e:
+        print(f"[History] Failed to save STT finalize entry: {e}")
 
     return {
         "session_id": session_id,
@@ -2493,6 +2594,24 @@ async def reader_speak(request: ReaderRequest):
         "created_at": datetime.datetime.now().isoformat(),
     }
     save_history_entry("reader", history_entry)
+
+    # Save to new history system (SQLite)
+    try:
+        from history_service import get_history_service
+        import librosa
+        duration = librosa.get_duration(filename=str(output_path))
+        history_svc = get_history_service()
+        history_svc.save_reader_entry(
+            text=request.text,
+            audio_path=str(output_path),
+            provider="kokoro",
+            voice_id=request.voice,
+            voice_name=request.voice,
+            duration_seconds=duration,
+        )
+    except Exception as e:
+        print(f"[History] Failed to save Reader entry: {e}")
+
     return {
         "output_url": f"/output/{output_path.name}",
         "filename": output_path.name,
@@ -2522,6 +2641,23 @@ async def ai_edit(request: AIEditRequest):
         "created_at": datetime.datetime.now().isoformat(),
     }
     save_history_entry("ai_edit", history_entry)
+
+    # Save to new history system (SQLite)
+    try:
+        from history_service import get_history_service
+        history_svc = get_history_service()
+        provider_id = meta.get("provider") if isinstance(meta, dict) else request.provider or "unknown"
+        model_id = meta.get("model") if isinstance(meta, dict) else None
+        history_svc.save_ai_edit_entry(
+            original_text=request.text,
+            edited_text=edited_text,
+            instruction=request.command,
+            provider=provider_id,
+            model=model_id,
+        )
+    except Exception as e:
+        print(f"[History] Failed to save AI Edit entry: {e}")
+
     return {"text": edited_text, "meta": meta}
 
 
@@ -2554,6 +2690,24 @@ async def translate_text(request: TranslateRequest):
         "created_at": datetime.datetime.now().isoformat(),
     }
     save_history_entry("translation", history_entry)
+
+    # Save to new history system (SQLite)
+    try:
+        from history_service import get_history_service
+        history_svc = get_history_service()
+        provider_id = meta.get("provider") if isinstance(meta, dict) else request.provider or "argos"
+        model_id = meta.get("model") if isinstance(meta, dict) else None
+        history_svc.save_translate_entry(
+            original_text=request.text,
+            translated_text=translated,
+            source_language=request.source_lang or "auto",
+            target_language=request.target_lang or "en",
+            provider=provider_id,
+            model=model_id,
+        )
+    except Exception as e:
+        print(f"[History] Failed to save Translate entry: {e}")
+
     return {"text": translated, "meta": meta}
 
 
@@ -4492,6 +4646,59 @@ async def reset_settings(section: Optional[str] = None):
     return {"message": f"Settings reset {'for ' + section if section else 'completely'}"}
 
 
+# =====================================================
+# WIDGET OVERLAY SETTINGS ENDPOINTS
+# =====================================================
+
+class WidgetReaderSettingsModel(BaseModel):
+    speed: float = 1.0
+    voice: Optional[str] = None
+    language: str = "en"
+
+
+class WidgetTTSSettingsModel(BaseModel):
+    speed: float = 1.0
+    voice: Optional[str] = None
+    language: str = "en"
+
+
+class WidgetSTTSettingsModel(BaseModel):
+    language: str = "auto"
+    autoPaste: bool = False
+
+
+class WidgetSettingsUpdate(BaseModel):
+    currentModule: str = "reader"
+    reader: Optional[WidgetReaderSettingsModel] = None
+    tts: Optional[WidgetTTSSettingsModel] = None
+    stt: Optional[WidgetSTTSettingsModel] = None
+
+
+@app.get("/api/widget/settings")
+async def get_widget_settings():
+    """Get widget overlay settings"""
+    widget = settings_service.get("widget", {})
+    return {
+        "currentModule": widget.get("currentModule", "reader"),
+        "reader": widget.get("reader", {"speed": 1.0, "voice": None, "language": "en"}),
+        "tts": widget.get("tts", {"speed": 1.0, "voice": None, "language": "en"}),
+        "stt": widget.get("stt", {"language": "auto", "autoPaste": False}),
+    }
+
+
+@app.put("/api/widget/settings")
+async def update_widget_settings(settings: WidgetSettingsUpdate):
+    """Update widget overlay settings"""
+    settings_service.set("widget.currentModule", settings.currentModule)
+    if settings.reader:
+        settings_service.set("widget.reader", settings.reader.model_dump())
+    if settings.tts:
+        settings_service.set("widget.tts", settings.tts.model_dump())
+    if settings.stt:
+        settings_service.set("widget.stt", settings.stt.model_dump())
+    return {"updated": True}
+
+
 class SettingUpdate(BaseModel):
     value: Any
 
@@ -4697,7 +4904,7 @@ async def ensure_provider_ready(
     background_tasks: BackgroundTasks,
 ):
     """Ensure provider dependencies/models are installed (auto-install when possible)."""
-    valid_services = ["tts", "stt", "ai_edit", "translation"]
+    valid_services = ["tts", "stt", "ai_edit", "translation", "music", "sfx", "voice_changer", "voice_isolator"]
     if service not in valid_services:
         raise HTTPException(400, f"Invalid service. Valid options: {valid_services}")
 
@@ -4986,9 +5193,15 @@ async def set_function_provider(function: str, data: dict):
     if not success:
         raise HTTPException(400, f"Could not set provider for: {function}")
 
-    # Also update provider-specific config if provided
-    if "config" in data:
-        settings_service.set(f"providers.{function}.{provider.replace('-', '_')}", data["config"])
+    # Merge new config with existing config (preserves fields not sent by frontend)
+    if "config" in data and data["config"]:
+        config_path = f"providers.{function}.{provider.replace('-', '_')}"
+        existing_config = settings_service.get(config_path, {})
+        if isinstance(existing_config, dict):
+            merged_config = {**existing_config, **data["config"]}
+        else:
+            merged_config = data["config"]
+        settings_service.set(config_path, merged_config)
 
     return {"function": function, "provider": provider, "updated": True}
 
@@ -5893,6 +6106,422 @@ async def unload_stem_model():
 
 
 # =====================================================
+# VOICE CHANGER (ElevenLabs Speech-to-Speech)
+# =====================================================
+
+
+class VoiceChangerRequest(BaseModel):
+    input_path: str
+    voice_id: str
+    model_id: str = "eleven_english_sts_v2"
+    stability: float = 0.5
+    similarity_boost: float = 0.75
+    style: float = 0.0
+    remove_background_noise: bool = False
+
+
+@app.get("/api/voice-changer/providers")
+async def get_voice_changer_providers():
+    """Get available voice changer providers and their models"""
+    from settings_service import settings_service
+
+    # Check if ElevenLabs API key is configured
+    has_elevenlabs_key = bool(settings_service.get_api_key("elevenlabs"))
+
+    providers = [
+        {
+            "id": "elevenlabs",
+            "name": "ElevenLabs",
+            "description": "Transform any voice while preserving emotion. 30 min/month in Starter plan.",
+            "type": "api",
+            "ready": has_elevenlabs_key,
+            "requires_api_key": "elevenlabs",
+            "quota_minutes": 30,
+            "models": [
+                {
+                    "id": "eleven_english_sts_v2",
+                    "name": "English V2",
+                    "description": "Optimized for English, best quality",
+                    "languages": ["en"],
+                },
+                {
+                    "id": "eleven_multilingual_sts_v2",
+                    "name": "Multilingual V2",
+                    "description": "Supports 29 languages",
+                    "languages": ["en", "es", "fr", "de", "it", "pt", "pl", "zh", "ja", "ko", "ar", "hi", "ru"],
+                },
+            ],
+            "default_model": "eleven_english_sts_v2",
+        }
+    ]
+
+    return {"providers": providers}
+
+
+@app.get("/api/voice-changer/voices")
+async def get_voice_changer_voices():
+    """Get available voices for voice changing"""
+    from voice_changer import get_voice_changer_service
+
+    service = get_voice_changer_service()
+    voices = service.get_available_voices()
+    return {"voices": voices}
+
+
+@app.post("/api/voice-changer/upload")
+async def upload_voice_changer_audio(file: UploadFile = File(...)):
+    """Upload audio file for voice changing"""
+    ext = Path(file.filename).suffix or ".wav"
+    unique_filename = f"vc_upload_{uuid.uuid4().hex[:8]}{ext}"
+    file_path = TEMP_DIR / unique_filename
+
+    with open(file_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    return {"input_path": str(file_path), "filename": file.filename}
+
+
+@app.post("/api/voice-changer/convert")
+async def start_voice_changer(request: VoiceChangerRequest):
+    """Start a voice changing job"""
+    from voice_changer import get_voice_changer_service
+
+    service = get_voice_changer_service()
+
+    try:
+        job_id = service.create_job(
+            input_path=request.input_path,
+            voice_id=request.voice_id,
+            model_id=request.model_id,
+            stability=request.stability,
+            similarity_boost=request.similarity_boost,
+            style=request.style,
+            remove_background_noise=request.remove_background_noise,
+        )
+        return {"job_id": job_id}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/voice-changer/jobs/{job_id}")
+async def get_voice_changer_job(job_id: str):
+    """Get voice changer job status"""
+    from voice_changer import get_voice_changer_service
+
+    service = get_voice_changer_service()
+    status = service.get_job_status(job_id)
+
+    if "error" in status and status.get("error") == "Job not found":
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return status
+
+
+@app.get("/api/voice-changer/jobs/{job_id}/download")
+async def download_voice_changer_result(job_id: str):
+    """Download voice changer result"""
+    from voice_changer import get_voice_changer_service
+
+    service = get_voice_changer_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status != "completed":
+        raise HTTPException(status_code=400, detail=f"Job not completed: {job.status}")
+
+    if not job.output_path or not Path(job.output_path).exists():
+        raise HTTPException(status_code=404, detail="Output file not found")
+
+    return FileResponse(
+        job.output_path,
+        media_type="audio/mpeg",
+        filename=f"voice_changed_{job_id}.mp3"
+    )
+
+
+# =====================================================
+# VOICE ISOLATOR (ElevenLabs Audio Isolation)
+# =====================================================
+
+
+@app.get("/api/voice-isolator/providers")
+async def get_voice_isolator_providers():
+    """Get available voice isolator providers"""
+    from settings_service import settings_service
+
+    has_elevenlabs_key = bool(settings_service.get_api_key("elevenlabs"))
+
+    # Check if Demucs is available for local stem separation
+    demucs_available = False
+    try:
+        import demucs
+        demucs_available = True
+    except ImportError:
+        pass
+
+    providers = [
+        {
+            "id": "elevenlabs",
+            "name": "ElevenLabs",
+            "description": "AI-powered noise removal. Isolates speech from music and ambient sounds. 30 min/month in Starter.",
+            "type": "api",
+            "ready": has_elevenlabs_key,
+            "requires_api_key": "elevenlabs",
+            "quota_minutes": 30,
+            "features": ["noise_removal", "music_removal", "ambient_removal"],
+            "supports_fast_mode": False,
+        },
+        {
+            "id": "demucs",
+            "name": "Demucs (Local)",
+            "description": "Local stem separation. Separates vocals, drums, bass, and other instruments.",
+            "type": "local",
+            "ready": demucs_available,
+            "vram_gb": 4,
+            "features": ["vocals", "drums", "bass", "other"],
+            "install_command": "pip install demucs",
+            "supports_fast_mode": False,
+        },
+    ]
+
+    return {"providers": providers}
+
+
+@app.post("/api/voice-isolator/upload")
+async def upload_voice_isolator_audio(file: UploadFile = File(...)):
+    """Upload audio file for voice isolation"""
+    ext = Path(file.filename).suffix or ".wav"
+    unique_filename = f"iso_upload_{uuid.uuid4().hex[:8]}{ext}"
+    file_path = TEMP_DIR / unique_filename
+
+    with open(file_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    return {"input_path": str(file_path), "filename": file.filename}
+
+
+@app.post("/api/voice-isolator/isolate")
+async def start_voice_isolation(input_path: str = Form(...), provider: str = Form("elevenlabs")):
+    """Start a voice isolation job"""
+    from voice_isolator import get_voice_isolator_service
+
+    service = get_voice_isolator_service()
+
+    try:
+        job_id = service.create_job(input_path=input_path, provider=provider)
+        return {"job_id": job_id}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/voice-isolator/jobs/{job_id}")
+async def get_voice_isolator_job(job_id: str):
+    """Get voice isolation job status"""
+    from voice_isolator import get_voice_isolator_service
+
+    service = get_voice_isolator_service()
+    status = service.get_job_status(job_id)
+
+    if "error" in status and status.get("error") == "Job not found":
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return status
+
+
+@app.get("/api/voice-isolator/jobs/{job_id}/download")
+async def download_voice_isolator_result(job_id: str):
+    """Download isolated audio"""
+    from voice_isolator import get_voice_isolator_service
+
+    service = get_voice_isolator_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status != "completed":
+        raise HTTPException(status_code=400, detail=f"Job not completed: {job.status}")
+
+    if not job.output_path or not Path(job.output_path).exists():
+        raise HTTPException(status_code=404, detail="Output file not found")
+
+    return FileResponse(
+        job.output_path,
+        media_type="audio/mpeg",
+        filename=f"isolated_{job_id}.mp3"
+    )
+
+
+# =====================================================
+# DUBBING (ElevenLabs Automatic Dubbing)
+# =====================================================
+
+
+class DubbingRequest(BaseModel):
+    input_path: str
+    target_language: str
+    source_language: str = "auto"
+    name: Optional[str] = None
+    num_speakers: int = 0
+    watermark: bool = True
+    drop_background_audio: bool = False
+    use_profanity_filter: bool = False
+
+
+@app.get("/api/dubbing/providers")
+async def get_dubbing_providers():
+    """Get available dubbing providers"""
+    from settings_service import settings_service
+
+    has_elevenlabs_key = bool(settings_service.get_api_key("elevenlabs"))
+
+    providers = [
+        {
+            "id": "elevenlabs",
+            "name": "ElevenLabs",
+            "description": "AI dubbing with voice cloning. Translates and re-voices in 32+ languages. 6 min video/month in Starter (with watermark).",
+            "type": "api",
+            "ready": has_elevenlabs_key,
+            "requires_api_key": "elevenlabs",
+            "quota_minutes": 6,
+            "quota_type": "video",
+            "watermark_in_starter": True,
+            "supported_languages": 32,
+            "features": [
+                "auto_transcription",
+                "translation",
+                "voice_cloning",
+                "speaker_detection",
+                "lip_sync_preservation",
+            ],
+        }
+    ]
+
+    return {"providers": providers}
+
+
+@app.get("/api/dubbing/languages")
+async def get_dubbing_languages():
+    """Get supported languages for dubbing"""
+    from dubbing import get_dubbing_service
+
+    service = get_dubbing_service()
+    return {"languages": service.get_supported_languages()}
+
+
+@app.post("/api/dubbing/upload")
+async def upload_dubbing_file(file: UploadFile = File(...)):
+    """Upload video/audio file for dubbing"""
+    ext = Path(file.filename).suffix or ".mp4"
+    unique_filename = f"dub_upload_{uuid.uuid4().hex[:8]}{ext}"
+    file_path = TEMP_DIR / unique_filename
+
+    with open(file_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    return {"input_path": str(file_path), "filename": file.filename}
+
+
+@app.post("/api/dubbing/start")
+async def start_dubbing(request: DubbingRequest):
+    """Start a dubbing job"""
+    from dubbing import get_dubbing_service
+
+    service = get_dubbing_service()
+
+    try:
+        job_id = service.create_job(
+            input_path=request.input_path,
+            target_language=request.target_language,
+            source_language=request.source_language,
+            name=request.name,
+            num_speakers=request.num_speakers,
+            watermark=request.watermark,
+            drop_background_audio=request.drop_background_audio,
+            use_profanity_filter=request.use_profanity_filter,
+        )
+        return {"job_id": job_id}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/dubbing/jobs/{job_id}")
+async def get_dubbing_job(job_id: str):
+    """Get dubbing job status"""
+    from dubbing import get_dubbing_service
+
+    service = get_dubbing_service()
+    status = service.get_job_status(job_id)
+
+    if "error" in status and status.get("error") == "Job not found":
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return status
+
+
+@app.get("/api/dubbing/jobs/{job_id}/download")
+async def download_dubbing_result(job_id: str):
+    """Download dubbed video/audio"""
+    from dubbing import get_dubbing_service
+
+    service = get_dubbing_service()
+    job = service.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status != "completed":
+        raise HTTPException(status_code=400, detail=f"Job not completed: {job.status}")
+
+    if not job.output_path or not Path(job.output_path).exists():
+        raise HTTPException(status_code=404, detail="Output file not found")
+
+    # Determine media type
+    ext = Path(job.output_path).suffix.lower()
+    media_type = "video/mp4" if ext == ".mp4" else "audio/mpeg"
+
+    return FileResponse(
+        job.output_path,
+        media_type=media_type,
+        filename=f"dubbed_{job_id}_{job.target_language}{ext}"
+    )
+
+
+@app.get("/api/dubbing/jobs")
+async def list_dubbing_jobs():
+    """List all dubbing jobs"""
+    from dubbing import get_dubbing_service
+
+    service = get_dubbing_service()
+    return {"jobs": service.list_jobs()}
+
+
+@app.delete("/api/dubbing/jobs/{job_id}")
+async def delete_dubbing_job(job_id: str):
+    """Delete a dubbing job"""
+    from dubbing import get_dubbing_service
+
+    service = get_dubbing_service()
+    success = service.delete_job(job_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {"deleted": True}
+
+
+# =====================================================
 # VOICE TRAINING
 # =====================================================
 
@@ -6151,6 +6780,800 @@ async def get_custom_voice_sample(voice_id: str):
         filename=f"{voice['name']}_sample.wav"
     )
 
+
+# =====================================================
+# HISTORY API
+# =====================================================
+
+
+@app.get("/api/history")
+async def list_history(
+    module: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    status: Optional[str] = None,
+    favorite: Optional[bool] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List history entries with optional filters"""
+    from history_service import get_history_service
+
+    service = get_history_service()
+    entries = service.list_entries(
+        module=module,
+        provider=provider,
+        model=model,
+        status=status,
+        favorite=favorite,
+        from_date=from_date,
+        to_date=to_date,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    total = service.count_entries(
+        module=module,
+        provider=provider,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+    return {
+        "entries": [e.to_dict() for e in entries],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/history/stats")
+async def get_history_stats(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+):
+    """Get usage statistics"""
+    try:
+        from history_service import get_history_service
+        from history_db import get_history_db
+
+        service = get_history_service()
+        raw_stats = service.get_stats(from_date=from_date, to_date=to_date)
+        db = get_history_db()
+
+        # Transform to expected frontend format
+        entries_by_module = {
+            module: data['count']
+            for module, data in raw_stats.get('by_module', {}).items()
+        }
+        entries_by_provider = {
+            provider: data['count']
+            for provider, data in raw_stats.get('by_provider', {}).items()
+        }
+
+        # Calculate totals from by_module data
+        total_duration = sum(
+            data.get('total_duration', 0) or 0
+            for data in raw_stats.get('by_module', {}).values()
+        )
+        total_characters = sum(
+            data.get('total_characters', 0) or 0
+            for data in raw_stats.get('by_module', {}).values()
+        )
+
+        # Count favorites
+        favorites_count = db.count_entries(status='completed') if hasattr(db, 'count_entries') else 0
+        try:
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM history_entries WHERE favorite = 1")
+                favorites_count = cursor.fetchone()[0]
+        except Exception:
+            favorites_count = 0
+
+        # Estimate storage (we don't track this in DB, return 0 for now)
+        storage_bytes = 0
+
+        return {
+            "total_entries": raw_stats.get('total_entries', 0),
+            "entries_by_module": entries_by_module,
+            "entries_by_provider": entries_by_provider,
+            "total_duration_seconds": total_duration,
+            "total_characters": total_characters,
+            "favorites_count": favorites_count,
+            "storage_bytes": storage_bytes,
+        }
+    except Exception as e:
+        print(f"[History] Error in get_history_stats: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return empty stats on error
+        return {
+            "total_entries": 0,
+            "entries_by_module": {},
+            "entries_by_provider": {},
+            "total_duration_seconds": 0,
+            "total_characters": 0,
+            "favorites_count": 0,
+            "storage_bytes": 0,
+        }
+
+
+@app.get("/api/history/stats/monthly")
+async def get_monthly_history_stats(year: int, month: int):
+    """Get usage statistics for a specific month"""
+    from history_service import get_history_service
+
+    service = get_history_service()
+    return service.get_monthly_stats(year, month)
+
+
+@app.get("/api/history/{entry_id}")
+async def get_history_entry(entry_id: str):
+    """Get a single history entry"""
+    from history_service import get_history_service
+
+    service = get_history_service()
+    entry = service.get_entry(entry_id)
+
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    return entry.to_dict()
+
+
+@app.patch("/api/history/{entry_id}")
+async def update_history_entry(entry_id: str, updates: dict):
+    """Update a history entry (favorite, tags, notes)"""
+    from history_service import get_history_service
+
+    service = get_history_service()
+
+    if not service.get_entry(entry_id):
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    success = service.update_entry(entry_id, updates)
+    if not success:
+        raise HTTPException(status_code=400, detail="Update failed")
+
+    return {"success": True}
+
+
+@app.delete("/api/history/{entry_id}")
+async def delete_history_entry(entry_id: str):
+    """Delete a history entry and its files"""
+    from history_service import get_history_service
+
+    service = get_history_service()
+    success = service.delete_entry(entry_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    return {"success": True}
+
+
+class BulkDeleteRequest(BaseModel):
+    entry_ids: List[str]
+
+
+@app.post("/api/history/bulk-delete")
+async def bulk_delete_history_entries(request: BulkDeleteRequest):
+    """Delete multiple history entries at once"""
+    from history_service import get_history_service
+
+    service = get_history_service()
+    deleted_count = 0
+    failed_ids = []
+
+    for entry_id in request.entry_ids:
+        try:
+            if service.delete_entry(entry_id):
+                deleted_count += 1
+            else:
+                failed_ids.append(entry_id)
+        except Exception:
+            failed_ids.append(entry_id)
+
+    return {
+        "deleted_count": deleted_count,
+        "failed_count": len(failed_ids),
+        "failed_ids": failed_ids,
+    }
+
+
+@app.post("/api/history/{entry_id}/favorite")
+async def toggle_history_favorite(entry_id: str):
+    """Toggle favorite status of a history entry"""
+    from history_service import get_history_service
+
+    service = get_history_service()
+    success = service.toggle_favorite(entry_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    entry = service.get_entry(entry_id)
+    return {"success": True, "favorite": entry.favorite if entry else False}
+
+
+@app.get("/api/history/{entry_id}/download/{file_type}")
+async def download_history_file(entry_id: str, file_type: str):
+    """Download a file from a history entry
+
+    file_type can be: input_audio, output_audio, input_video, output_video
+    """
+    from history_service import get_history_service
+
+    service = get_history_service()
+    entry = service.get_entry(entry_id)
+
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+
+    path_map = {
+        "input_audio": entry.input_audio_path,
+        "output_audio": entry.output_audio_path,
+        "input_video": entry.input_video_path,
+        "output_video": entry.output_video_path,
+    }
+
+    file_path = path_map.get(file_type)
+    if not file_path:
+        raise HTTPException(status_code=404, detail=f"No {file_type} file for this entry")
+
+    file_path = Path(file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    # Determine media type
+    suffix = file_path.suffix.lower()
+    media_types = {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".webm": "audio/webm",
+        ".ogg": "audio/ogg",
+        ".m4a": "audio/m4a",
+        ".mp4": "video/mp4",
+        ".mov": "video/quicktime",
+    }
+    media_type = media_types.get(suffix, "application/octet-stream")
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        filename=file_path.name,
+    )
+
+
+@app.get("/api/history/modules/list")
+async def get_history_modules():
+    """Get list of modules with history entries"""
+    try:
+        from history_db import get_history_db
+
+        db = get_history_db()
+
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT module, COUNT(*) as count
+                FROM history_entries
+                GROUP BY module
+                ORDER BY count DESC
+            """)
+            modules = [{"module": row[0], "count": row[1]} for row in cursor.fetchall()]
+
+        return {"modules": modules}
+    except Exception as e:
+        print(f"[History] Error in get_history_modules: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return empty list on error instead of 500
+        return {"modules": []}
+
+
+# --- System Audio Loopback & Live Transcription ---
+
+# Active loopback sessions
+_loopback_sessions: dict = {}
+
+
+@app.get("/api/loopback/status")
+async def get_loopback_status():
+    """Get loopback capture availability and status."""
+    from loopback_service import get_loopback_service, is_loopback_available
+
+    available, message = is_loopback_available()
+    service = get_loopback_service()
+
+    return {
+        "available": available,
+        "message": message,
+        "state": service.state.value,
+        "error": service.error_message,
+    }
+
+
+@app.get("/api/loopback/devices")
+async def get_loopback_devices():
+    """Get list of available audio output devices for loopback capture."""
+    from loopback_service import get_loopback_service
+
+    service = get_loopback_service()
+    devices = service.get_loopback_devices()
+
+    return {
+        "devices": [
+            {
+                "index": d.index,
+                "name": d.name,
+                "host_api": d.host_api,
+                "channels": d.channels,
+                "sample_rate": d.sample_rate,
+                "is_loopback": d.is_loopback,
+                "is_default": d.is_default,
+            }
+            for d in devices
+        ]
+    }
+
+
+class LoopbackStartRequest(BaseModel):
+    device_index: Optional[int] = None
+    enable_diarization: bool = True
+    enable_translation: bool = False
+    source_language: str = "auto"
+    target_language: str = "en"
+
+
+@app.post("/api/loopback/start")
+async def start_loopback_capture(request: LoopbackStartRequest):
+    """Start capturing system audio."""
+    from loopback_service import get_loopback_service
+
+    service = get_loopback_service()
+
+    if service.state.value in ("capturing", "starting"):
+        return {"success": True, "message": "Already capturing", "state": service.state.value}
+
+    success = service.start(device_index=request.device_index)
+
+    if not success:
+        raise HTTPException(400, service.error_message or "Failed to start loopback capture")
+
+    return {
+        "success": True,
+        "message": "Loopback capture started",
+        "state": service.state.value,
+    }
+
+
+@app.post("/api/loopback/stop")
+async def stop_loopback_capture():
+    """Stop capturing system audio."""
+    from loopback_service import get_loopback_service
+
+    service = get_loopback_service()
+    service.stop()
+
+    return {"success": True, "message": "Loopback capture stopped", "state": service.state.value}
+
+
+@app.post("/api/loopback/pause")
+async def pause_loopback_capture():
+    """Pause loopback capture."""
+    from loopback_service import get_loopback_service
+
+    service = get_loopback_service()
+    service.pause()
+
+    return {"success": True, "state": service.state.value}
+
+
+@app.post("/api/loopback/resume")
+async def resume_loopback_capture():
+    """Resume loopback capture."""
+    from loopback_service import get_loopback_service
+
+    service = get_loopback_service()
+    success = service.resume()
+
+    return {"success": success, "state": service.state.value}
+
+
+@app.websocket("/ws/loopback")
+async def loopback_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time loopback transcription.
+
+    Messages from server:
+    - {"type": "state", "state": "capturing|paused|stopped|error"}
+    - {"type": "transcript", "text": "...", "speaker_id": 1, "speaker_name": "Speaker 1", "is_final": true}
+    - {"type": "translation", "original": "...", "translated": "...", "source_lang": "es", "target_lang": "en"}
+    - {"type": "error", "message": "..."}
+
+    Messages from client:
+    - {"action": "start", "device_index": null, "enable_diarization": true, "enable_translation": false, "source_language": "auto", "target_language": "en"}
+    - {"action": "stop"}
+    - {"action": "pause"}
+    - {"action": "resume"}
+    - {"action": "set_translation", "enabled": true, "target_language": "es"}
+    """
+    await websocket.accept()
+
+    session_id = id(websocket)
+    _loopback_sessions[session_id] = {
+        "websocket": websocket,
+        "enable_diarization": True,
+        "enable_translation": False,
+        "source_language": "auto",
+        "target_language": "en",
+        "running": True,
+    }
+
+    from loopback_service import get_loopback_service, LoopbackState
+    from realtime_diarization import get_realtime_diarization_service
+
+    loopback_service = get_loopback_service()
+    diarization_service = get_realtime_diarization_service()
+
+    # Get STT provider for transcription
+    stt_provider = None
+    try:
+        from stt_provider_factory import get_stt_provider
+        stt_settings = settings_service.get("stt", {})
+        provider_name = stt_settings.get("provider", "faster-whisper")
+        stt_provider = get_stt_provider(provider_name)
+    except Exception as e:
+        print(f"[Loopback WS] Failed to get STT provider: {e}")
+
+    async def send_message(msg: dict):
+        """Send message to websocket."""
+        try:
+            await websocket.send_json(msg)
+        except Exception:
+            pass
+
+    async def process_audio_chunk(chunk):
+        """Process an audio chunk: transcribe and optionally diarize/translate."""
+        session = _loopback_sessions.get(session_id)
+        if not session or not session.get("running"):
+            return
+
+        try:
+            # Save chunk to temp file for transcription
+            temp_path = loopback_service.chunk_to_temp_file(chunk)
+
+            try:
+                # Transcribe
+                if stt_provider:
+                    result = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: stt_provider.transcribe(
+                            str(temp_path),
+                            language=session.get("source_language", "auto") if session.get("source_language") != "auto" else None
+                        )
+                    )
+                    text = result.get("text", "").strip()
+                    detected_language = result.get("language", "en")
+                else:
+                    text = ""
+                    detected_language = "en"
+
+                if not text:
+                    return
+
+                # Diarization
+                speaker_id = 0
+                speaker_name = "Speaker"
+                confidence = 0.0
+
+                if session.get("enable_diarization"):
+                    try:
+                        speaker_id, speaker_name, confidence = diarization_service.identify_speaker(
+                            chunk.data,
+                            sample_rate=chunk.sample_rate,
+                            channels=chunk.channels,
+                            sample_width=chunk.sample_width
+                        )
+                    except Exception as e:
+                        print(f"[Loopback WS] Diarization error: {e}")
+
+                # Send transcript
+                await send_message({
+                    "type": "transcript",
+                    "text": text,
+                    "speaker_id": speaker_id,
+                    "speaker_name": speaker_name,
+                    "confidence": confidence,
+                    "timestamp": chunk.timestamp,
+                    "duration": chunk.duration_seconds,
+                    "language": detected_language,
+                    "is_final": True,
+                })
+
+                # Translation
+                if session.get("enable_translation"):
+                    target_lang = session.get("target_language", "en")
+                    if detected_language != target_lang:
+                        try:
+                            from translation_service import get_translation_service
+                            translation_svc = get_translation_service()
+                            translated = await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda: translation_svc.translate(text, detected_language, target_lang)
+                            )
+                            await send_message({
+                                "type": "translation",
+                                "original": text,
+                                "translated": translated,
+                                "source_lang": detected_language,
+                                "target_lang": target_lang,
+                                "speaker_id": speaker_id,
+                                "speaker_name": speaker_name,
+                            })
+                        except Exception as e:
+                            print(f"[Loopback WS] Translation error: {e}")
+
+            finally:
+                # Cleanup temp file
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            print(f"[Loopback WS] Process chunk error: {e}")
+            await send_message({"type": "error", "message": str(e)})
+
+    # Background task to process audio chunks
+    async def chunk_processor():
+        session = _loopback_sessions.get(session_id)
+        while session and session.get("running"):
+            if loopback_service.state == LoopbackState.CAPTURING:
+                chunk = loopback_service.get_chunk(timeout=0.5)
+                if chunk:
+                    await process_audio_chunk(chunk)
+            else:
+                await asyncio.sleep(0.1)
+            session = _loopback_sessions.get(session_id)
+
+    # Start chunk processor
+    processor_task = asyncio.create_task(chunk_processor())
+
+    try:
+        # Send initial state
+        await send_message({"type": "state", "state": loopback_service.state.value})
+
+        while True:
+            try:
+                data = await websocket.receive_json()
+                action = data.get("action")
+
+                if action == "start":
+                    device_index = data.get("device_index")
+                    session = _loopback_sessions.get(session_id, {})
+                    session["enable_diarization"] = data.get("enable_diarization", True)
+                    session["enable_translation"] = data.get("enable_translation", False)
+                    session["source_language"] = data.get("source_language", "auto")
+                    session["target_language"] = data.get("target_language", "en")
+
+                    # Reset diarization for new session
+                    diarization_service.reset()
+
+                    success = loopback_service.start(device_index=device_index)
+                    await send_message({
+                        "type": "state",
+                        "state": loopback_service.state.value,
+                        "error": loopback_service.error_message if not success else None
+                    })
+
+                elif action == "stop":
+                    loopback_service.stop()
+                    await send_message({"type": "state", "state": loopback_service.state.value})
+
+                elif action == "pause":
+                    loopback_service.pause()
+                    await send_message({"type": "state", "state": loopback_service.state.value})
+
+                elif action == "resume":
+                    loopback_service.resume()
+                    await send_message({"type": "state", "state": loopback_service.state.value})
+
+                elif action == "set_translation":
+                    session = _loopback_sessions.get(session_id, {})
+                    session["enable_translation"] = data.get("enabled", False)
+                    session["target_language"] = data.get("target_language", session.get("target_language", "en"))
+                    await send_message({
+                        "type": "translation_config",
+                        "enabled": session["enable_translation"],
+                        "target_language": session["target_language"]
+                    })
+
+                elif action == "get_speakers":
+                    speakers = diarization_service.get_speakers()
+                    await send_message({
+                        "type": "speakers",
+                        "speakers": [
+                            {"id": s.id, "name": s.name, "segment_count": s.segment_count}
+                            for s in speakers
+                        ]
+                    })
+
+                elif action == "rename_speaker":
+                    speaker_id = data.get("speaker_id")
+                    new_name = data.get("name")
+                    if speaker_id and new_name:
+                        diarization_service.rename_speaker(speaker_id, new_name)
+                        await send_message({"type": "speaker_renamed", "speaker_id": speaker_id, "name": new_name})
+
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                print(f"[Loopback WS] Error: {e}")
+                await send_message({"type": "error", "message": str(e)})
+
+    finally:
+        # Cleanup
+        session = _loopback_sessions.pop(session_id, None)
+        if session:
+            session["running"] = False
+
+        processor_task.cancel()
+        try:
+            await processor_task
+        except asyncio.CancelledError:
+            pass
+
+        # Stop loopback if no other sessions
+        if not _loopback_sessions:
+            loopback_service.stop()
+
+
+# =====================================================
+# DIAGNOSTICS ENDPOINTS (Dev Mode)
+# =====================================================
+
+# Check if DEV_MODE is enabled
+DEV_MODE = os.environ.get("DEV_MODE", "false").lower() == "true"
+
+
+class DiagnosticsEventAppend(BaseModel):
+    """Request model for appending frontend events"""
+    events: List[dict]
+
+
+@app.get("/api/diagnostics/status")
+async def get_diagnostics_status():
+    """Get current diagnostics status"""
+    from diagnostics import get_event_store
+
+    store = get_event_store()
+    errors_grouped = store.get_errors_by_fingerprint()
+
+    return {
+        "dev_mode": DEV_MODE,
+        "events_count": len(store.get_events(limit=10000)),
+        "errors_count": len(store.get_errors(limit=10000)),
+        "unique_errors": len(errors_grouped),
+    }
+
+
+@app.get("/api/diagnostics/events")
+async def get_diagnostics_events(
+    limit: int = 100,
+    job_id: Optional[str] = None,
+    module: Optional[str] = None,
+    level: Optional[str] = None,
+):
+    """Get recent events"""
+    if not DEV_MODE:
+        raise HTTPException(403, "Dev mode not enabled")
+
+    from diagnostics.bundle import get_recent_events
+
+    events = get_recent_events(limit=limit, job_id=job_id, module=module)
+    return {"events": events, "count": len(events)}
+
+
+@app.get("/api/diagnostics/errors")
+async def get_diagnostics_errors(limit: int = 100):
+    """Get recent errors"""
+    if not DEV_MODE:
+        raise HTTPException(403, "Dev mode not enabled")
+
+    from diagnostics.bundle import get_recent_errors, get_errors_by_fingerprint
+
+    errors = get_recent_errors(limit=limit)
+    grouped = get_errors_by_fingerprint()
+
+    return {
+        "errors": errors,
+        "count": len(errors),
+        "grouped": list(grouped.values()),
+        "unique_count": len(grouped),
+    }
+
+
+@app.post("/api/diagnostics/events")
+async def append_diagnostics_events(request: DiagnosticsEventAppend):
+    """Append events from frontend"""
+    if not DEV_MODE:
+        raise HTTPException(403, "Dev mode not enabled")
+
+    from diagnostics import get_event_store
+
+    store = get_event_store()
+    for event in request.events:
+        # Ensure required fields
+        event.setdefault("source", "frontend")
+        event.setdefault("timestamp", datetime.datetime.now().isoformat())
+        store.add_event(event)
+
+    return {"appended": len(request.events)}
+
+
+@app.post("/api/diagnostics/bundle")
+async def create_diagnostics_bundle_endpoint(
+    job_id: Optional[str] = None,
+    last_n_events: int = 100,
+):
+    """Generate and download diagnostic bundle"""
+    if not DEV_MODE:
+        raise HTTPException(403, "Dev mode not enabled")
+
+    from diagnostics.bundle import create_diagnostic_bundle
+
+    try:
+        zip_path = create_diagnostic_bundle(
+            job_id=job_id,
+            last_n_events=last_n_events,
+        )
+        return FileResponse(
+            path=str(zip_path),
+            filename=zip_path.name,
+            media_type="application/zip",
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Failed to create bundle: {e}")
+
+
+@app.get("/api/diagnostics/bug-report")
+async def get_bug_report():
+    """Get formatted bug report for the last error"""
+    if not DEV_MODE:
+        raise HTTPException(403, "Dev mode not enabled")
+
+    from diagnostics.bundle import get_last_error_report
+
+    report = get_last_error_report()
+    if not report:
+        return {"report": None, "message": "No errors recorded"}
+
+    return {"report": report}
+
+
+@app.get("/api/diagnostics/system")
+async def get_diagnostics_system():
+    """Get system information"""
+    if not DEV_MODE:
+        raise HTTPException(403, "Dev mode not enabled")
+
+    from diagnostics.bundle import get_system_info, get_versions_info
+
+    return {
+        "system": get_system_info(),
+        "versions": get_versions_info(),
+    }
+
+
+# =====================================================
+# STATIC FRONTEND
+# =====================================================
 
 # Serve static frontend in production
 # Check both locations: ui/frontend/out (dev) and electron/frontend (when run via bat)

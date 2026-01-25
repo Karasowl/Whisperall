@@ -15,9 +15,11 @@ class SFXProviderInfo:
     vram_requirement_gb: float
     models: List[Dict[str, Any]]
     default_model: str
+    provider_type: str = "local"  # "local" or "api"
     sample_rate: int = 44100
     max_video_duration_seconds: int = 300  # 5 minutes default
     supports_prompt: bool = True
+    supports_fast_mode: bool = False  # Can disable guidance for faster generation
     extra_params: Dict[str, Any] = field(default_factory=dict)
 
 

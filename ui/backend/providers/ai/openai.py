@@ -2,14 +2,23 @@
 
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import AIProvider, AIProviderInfo, build_prompt
 from ..base import ProviderType, ModelVariant
+from core.api_provider import BaseAPIProvider, APIProviderConfig
 
 
-class OpenAIProvider(AIProvider):
+class OpenAIProvider(BaseAPIProvider, AIProvider):
     """OpenAI GPT models for AI editing"""
+
+    CONFIG = APIProviderConfig(
+        provider_id="openai",
+        provider_name="OpenAI",
+        api_key_name="openai",
+        base_url="https://api.openai.com"
+    )
+
+    def __init__(self):
+        BaseAPIProvider.__init__(self)
 
     @classmethod
     def get_info(cls) -> AIProviderInfo:
@@ -41,10 +50,6 @@ class OpenAIProvider(AIProvider):
     ) -> Tuple[str, Dict[str, Any]]:
         from settings_service import settings_service
 
-        key = settings_service.get_api_key("openai")
-        if not key:
-            raise RuntimeError("OpenAI API key is not configured")
-
         model_name = model or settings_service.get("providers.ai_edit.openai.model", "gpt-4o-mini")
 
         payload = {
@@ -56,17 +61,9 @@ class OpenAIProvider(AIProvider):
             "temperature": 0.2,
         }
 
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {key}"},
-            json=payload,
-            timeout=120
-        )
+        response = self.client.post("/v1/chat/completions", json=payload)
+        data = response.json()
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"OpenAI error: HTTP {resp.status_code}")
-
-        data = resp.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return content.strip(), {
             "provider": "openai",

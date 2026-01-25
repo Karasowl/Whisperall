@@ -3,6 +3,7 @@ import { Inter, Outfit } from "next/font/google"; // Modern, geometric sans
 import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { STTPasteManager } from "@/components/STTPasteManager";
+import { GlobalSttManager } from "@/components/GlobalSttManager";
 import { UISettingsInitializer } from "@/components/UISettingsInitializer";
 
 const inter = Inter({
@@ -21,7 +22,6 @@ export const metadata: Metadata = {
   title: "Whisperall - Local speech suite",
   description: "Free, local text-to-speech with voice cloning",
 };
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -32,6 +32,7 @@ export default function RootLayout({
       <body className={`${inter.variable} ${outfit.variable} bg-[var(--background)] text-[var(--foreground)] h-screen overflow-hidden antialiased selection:bg-accent-primary/30 selection:text-white`}>
         <UISettingsInitializer />
         <STTPasteManager />
+        <GlobalSttManager />
 
         {/* Dynamic Background Mesh */}
         <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">

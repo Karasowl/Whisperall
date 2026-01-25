@@ -1,6 +1,8 @@
 'use client';
 
 import { SelectMenu } from './SelectMenu';
+import { Toggle } from './Toggle';
+import { Slider } from './Slider';
 
 /**
  * Parameter definition from backend provider's extra_params
@@ -76,25 +78,17 @@ export function DynamicParamsEditor({
           const numValue = typeof value === 'number' ? value : (typeof param.default === 'number' ? param.default : min);
 
           return (
-            <div key={key} className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="label text-sm">{label}</label>
-                <span className="text-xs text-foreground-muted font-mono">
-                  {(numValue ?? min).toFixed(2)}
-                </span>
-              </div>
-              <input
-                type="range"
+            <div key={key}>
+              <Slider
+                label={label}
+                value={numValue ?? min}
                 min={min}
                 max={max}
                 step={step}
-                value={numValue ?? min}
-                onChange={(e) => onChange(key, parseFloat(e.target.value))}
-                className="w-full accent-accent-primary"
+                onChange={(v) => onChange(key, v)}
+                description={!compact ? param.description : undefined}
+                showValue={true}
               />
-              {param.description && !compact && (
-                <p className="text-xs text-foreground-muted">{param.description}</p>
-              )}
             </div>
           );
         }
@@ -108,25 +102,17 @@ export function DynamicParamsEditor({
           // Use slider for reasonable ranges, number input for large ranges
           if (max - min <= 100) {
             return (
-              <div key={key} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="label text-sm">{label}</label>
-                  <span className="text-xs text-foreground-muted font-mono">
-                    {numValue ?? min}
-                  </span>
-                </div>
-                <input
-                  type="range"
+              <div key={key}>
+                <Slider
+                  label={label}
+                  value={numValue ?? min}
                   min={min}
                   max={max}
                   step={1}
-                  value={numValue ?? min}
-                  onChange={(e) => onChange(key, parseInt(e.target.value, 10))}
-                  className="w-full accent-accent-primary"
+                  onChange={(v) => onChange(key, v)}
+                  description={!compact ? param.description : undefined}
+                  showValue={true}
                 />
-                {param.description && !compact && (
-                  <p className="text-xs text-foreground-muted">{param.description}</p>
-                )}
               </div>
             );
           }
@@ -171,31 +157,18 @@ export function DynamicParamsEditor({
           );
         }
 
-        // Boolean parameter - render toggle
         if (param.type === 'boolean') {
           const boolValue = typeof value === 'boolean' ? value : Boolean(param.default);
 
           return (
-            <div key={key} className="flex items-center justify-between py-2">
-              <div>
-                <label className="label text-sm">{label}</label>
-                {param.description && !compact && (
-                  <p className="text-xs text-foreground-muted">{param.description}</p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => onChange(key, !boolValue)}
-                className={`relative w-11 h-6 rounded-full transition-colors ${
-                  boolValue ? 'bg-accent-primary' : 'bg-surface-3'
-                }`}
-              >
-                <span
-                  className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                    boolValue ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
+            <div key={key} className="py-2">
+              <Toggle
+                label={label}
+                description={param.description}
+                enabled={boolValue}
+                onChange={(enabled) => onChange(key, enabled)}
+                className="justify-between flex-row-reverse w-full gap-0"
+              />
             </div>
           );
         }
@@ -211,7 +184,7 @@ export function DynamicParamsEditor({
  * Accepts broader type to handle API responses
  */
 export function getDefaultParamValues(
-  extraParams: Record<string, { default?: unknown; [key: string]: unknown }> | undefined
+  extraParams: Record<string, { default?: unknown;[key: string]: unknown }> | undefined
 ): Record<string, unknown> {
   if (!extraParams) return {};
 

@@ -256,6 +256,22 @@ class StemSeparationService:
             job.completed_at = time.time()
             print(f"[StemSeparation] Job {job_id} completed successfully")
 
+            # Save to history
+            try:
+                from history_service import get_history_service
+                import librosa
+                duration = librosa.get_duration(filename=job.audio_path)
+                history_svc = get_history_service()
+                history_svc.save_stems_entry(
+                    input_audio_path=job.audio_path,
+                    output_stems=output_stems,
+                    provider="demucs",
+                    model=job.model,
+                    duration_seconds=duration,
+                )
+            except Exception as he:
+                print(f"[StemSeparation] Failed to save to history: {he}")
+
         except Exception as e:
             job.status = StemSeparationStatus.FAILED
             job.error = str(e)

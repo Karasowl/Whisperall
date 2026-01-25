@@ -2,14 +2,41 @@
 
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import TranslationProvider, TranslationProviderInfo
 from ..base import ProviderType, ModelVariant
+from core.api_provider import BaseAPIProvider, APIProviderConfig
 
 
-class ZhipuTranslationProvider(TranslationProvider):
+class ZhipuTranslationProvider(BaseAPIProvider, TranslationProvider):
     """Zhipu (GLM) translation using OpenAI-compatible API."""
+
+    CONFIG = APIProviderConfig(
+        provider_id="zhipu",
+        provider_name="Zhipu Translate",
+        api_key_name="zhipu",
+        base_url="https://open.bigmodel.cn/api/paas"
+    )
+
+    def __init__(self):
+        BaseAPIProvider.__init__(self)
+
+    def _create_client(self):
+        """Create client with configurable base URL."""
+        from settings_service import settings_service
+        from core.http_client import APIClient, APIClientConfig
+
+        base_url = settings_service.get(
+            "providers.translation.zhipu.base_url",
+            self._config.base_url
+        )
+
+        client_config = APIClientConfig(
+            base_url=base_url,
+            provider_name=self._config.provider_name,
+            timeout=self._config.timeout,
+            max_retries=self._config.max_retries
+        )
+        return APIClient(client_config, self._get_auth_header(self._api_key))
 
     @classmethod
     def get_info(cls) -> TranslationProviderInfo:
@@ -40,14 +67,6 @@ class ZhipuTranslationProvider(TranslationProvider):
     ) -> Tuple[str, Dict[str, Any]]:
         from settings_service import settings_service
 
-        key = settings_service.get_api_key("zhipu")
-        if not key:
-            raise RuntimeError("Zhipu (GLM) API key is not configured")
-
-        base_url = settings_service.get(
-            "providers.translation.zhipu.base_url",
-            "https://open.bigmodel.cn/api/paas",
-        )
         model_name = model or settings_service.get(
             "providers.translation.zhipu.model",
             "glm-4-plus",
@@ -69,15 +88,8 @@ class ZhipuTranslationProvider(TranslationProvider):
             "temperature": 0.1,
         }
 
-        resp = requests.post(
-            f"{base_url.rstrip('/')}/v1/chat/completions",
-            headers={"Authorization": f"Bearer {key}"},
-            json=payload,
-            timeout=120,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(f"Zhipu translation error: HTTP {resp.status_code}")
+        response = self.client.post("/v1/chat/completions", json=payload)
+        data = response.json()
 
-        data = resp.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return content.strip(), {"provider": "zhipu", "model": model_name}

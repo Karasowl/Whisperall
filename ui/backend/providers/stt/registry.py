@@ -40,6 +40,18 @@ def _register_providers():
     except ImportError:
         pass
 
+    try:
+        from .elevenlabs import ElevenLabsSTTProvider
+        _PROVIDERS["elevenlabs"] = ElevenLabsSTTProvider
+    except ImportError:
+        pass
+
+    try:
+        from .deepinfra import DeepInfraWhisperProvider
+        _PROVIDERS["deepinfra"] = DeepInfraWhisperProvider
+    except ImportError:
+        pass
+
 
 def _ensure_registered():
     """Ensure providers are registered"""

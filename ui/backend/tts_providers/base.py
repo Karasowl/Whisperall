@@ -46,6 +46,7 @@ class TTSProviderInfo:
     supported_languages: List[str]
     models: List[Any]  # List of ModelVariant dicts or strings (for backwards compat)
     default_model: str
+    provider_type: str = "local"  # "local" or "api"
     sample_rate: int = 24000
     requires_reference_text: bool = False  # For voice cloning
     min_reference_duration: float = 5.0    # Seconds
@@ -53,6 +54,7 @@ class TTSProviderInfo:
     vram_requirement_gb: float = 4.0       # Approximate VRAM needed
     supports_streaming: bool = False
     supports_emotion_tags: bool = False
+    supports_fast_mode: bool = False  # CFG can be disabled for faster generation
     preset_voices: List[VoiceInfo] = field(default_factory=list)
     extra_params: Dict[str, Any] = field(default_factory=dict)
 

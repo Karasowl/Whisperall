@@ -2,14 +2,41 @@
 
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import AIProvider, AIProviderInfo, build_prompt
 from ..base import ProviderType, ModelVariant
+from core.api_provider import BaseAPIProvider, APIProviderConfig
 
 
-class MoonshotProvider(AIProvider):
+class MoonshotProvider(BaseAPIProvider, AIProvider):
     """Moonshot (Kimi) models via OpenAI-compatible API."""
+
+    CONFIG = APIProviderConfig(
+        provider_id="moonshot",
+        provider_name="Moonshot",
+        api_key_name="moonshot",
+        base_url="https://api.moonshot.ai"
+    )
+
+    def __init__(self):
+        BaseAPIProvider.__init__(self)
+
+    def _create_client(self):
+        """Create client with configurable base URL."""
+        from settings_service import settings_service
+        from core.http_client import APIClient, APIClientConfig
+
+        base_url = settings_service.get(
+            "providers.ai_edit.moonshot.base_url",
+            self._config.base_url
+        )
+
+        client_config = APIClientConfig(
+            base_url=base_url,
+            provider_name=self._config.provider_name,
+            timeout=self._config.timeout,
+            max_retries=self._config.max_retries
+        )
+        return APIClient(client_config, self._get_auth_header(self._api_key))
 
     @classmethod
     def get_info(cls) -> AIProviderInfo:
@@ -39,14 +66,6 @@ class MoonshotProvider(AIProvider):
     ) -> Tuple[str, Dict[str, Any]]:
         from settings_service import settings_service
 
-        key = settings_service.get_api_key("moonshot")
-        if not key:
-            raise RuntimeError("Moonshot API key is not configured")
-
-        base_url = settings_service.get(
-            "providers.ai_edit.moonshot.base_url",
-            "https://api.moonshot.ai",
-        )
         model_name = model or settings_service.get(
             "providers.ai_edit.moonshot.model",
             "kimi-k2-0905",
@@ -61,16 +80,8 @@ class MoonshotProvider(AIProvider):
             "temperature": 0.2,
         }
 
-        resp = requests.post(
-            f"{base_url.rstrip('/')}/v1/chat/completions",
-            headers={"Authorization": f"Bearer {key}"},
-            json=payload,
-            timeout=120,
-        )
+        response = self.client.post("/v1/chat/completions", json=payload)
+        data = response.json()
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Moonshot error: HTTP {resp.status_code}")
-
-        data = resp.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return content.strip(), {"provider": "moonshot", "model": model_name}

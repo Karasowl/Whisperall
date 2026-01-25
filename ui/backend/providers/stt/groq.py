@@ -3,14 +3,23 @@
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
-import requests
-
 from .base import STTProvider, STTProviderInfo
 from ..base import ProviderType, ModelVariant
+from core.api_provider import BaseAPIProvider, APIProviderConfig
 
 
-class GroqWhisperProvider(STTProvider):
+class GroqWhisperProvider(BaseAPIProvider, STTProvider):
     """Groq's fast Whisper API for transcription"""
+
+    CONFIG = APIProviderConfig(
+        provider_id="groq",
+        provider_name="Groq Whisper",
+        api_key_name="groq",
+        base_url="https://api.groq.com"
+    )
+
+    def __init__(self):
+        BaseAPIProvider.__init__(self)
 
     @classmethod
     def get_info(cls) -> STTProviderInfo:
@@ -44,10 +53,6 @@ class GroqWhisperProvider(STTProvider):
     ) -> Tuple[str, Dict[str, Any]]:
         from settings_service import settings_service
 
-        key = settings_service.get_api_key("groq")
-        if not key:
-            raise RuntimeError("Groq API key is not configured")
-
         model_name = model or settings_service.get("providers.stt.groq.model", "whisper-large-v3")
 
         data = {"model": model_name}
@@ -57,18 +62,13 @@ class GroqWhisperProvider(STTProvider):
             data["prompt"] = prompt
 
         with audio_path.open("rb") as audio_file:
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/audio/transcriptions",
-                headers={"Authorization": f"Bearer {key}"},
+            response = self.client.post(
+                "/openai/v1/audio/transcriptions",
                 files={"file": audio_file},
-                data=data,
-                timeout=120
+                data=data
             )
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Groq STT error: HTTP {resp.status_code}")
-
-        result = resp.json()
+        result = response.json()
         return result.get("text", "").strip(), {
             "provider": "groq",
             "model": model_name

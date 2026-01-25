@@ -23,11 +23,32 @@ import {
   getTTSProviders,
   TTSProviderInfo,
   ensureProviderReady,
+  // New service providers
+  getMusicProviders,
+  MusicProviderInfo,
+  getSFXProviders,
+  SFXProviderInfo,
+  getVoiceChangerProviders,
+  VoiceChangerProvider,
+  getVoiceIsolatorProviders,
+  VoiceIsolatorProvider,
+  getDubbingProviders,
+  DubbingProvider,
 } from '@/lib/api';
 import { SelectMenu } from './SelectMenu';
 import { useDropdownPosition } from '@/lib/useDropdownPosition';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
+
+// Unified type for all provider info types
+type AnyProviderInfo =
+  | ServiceProviderInfo
+  | TTSProviderInfo
+  | MusicProviderInfo
+  | SFXProviderInfo
+  | VoiceChangerProvider
+  | VoiceIsolatorProvider
+  | DubbingProvider;
 
 interface UnifiedProviderSelectorProps {
   service: ServiceType;
@@ -37,7 +58,7 @@ interface UnifiedProviderSelectorProps {
   // Optional
   selectedModel?: string;
   onModelChange?: (modelId: string) => void;
-  onProviderInfoChange?: (info: ServiceProviderInfo | TTSProviderInfo | null) => void;
+  onProviderInfoChange?: (info: AnyProviderInfo | null) => void;
 
   // Display options
   variant?: 'dropdown' | 'cards';
@@ -79,7 +100,39 @@ const SERVICE_LABELS: Record<ServiceType, string> = {
   stt: 'Transcription Engine',
   ai_edit: 'AI Model',
   translation: 'Translation Engine',
+  music: 'Music Engine',
+  sfx: 'SFX Engine',
+  voice_changer: 'Voice Changer',
+  voice_isolator: 'Voice Isolator',
+  dubbing: 'Dubbing Engine',
 };
+
+const COMING_SOON_MUSIC_PROVIDERS: AnyProviderInfo[] = [
+  {
+    id: 'musicgen',
+    name: 'MusicGen',
+    description: 'Meta\'s high quality music generation model',
+    service: 'music',
+    type: 'local',
+    supported_languages: [],
+    models: [{ id: 'medium', name: 'Medium', size_gb: 4, vram_gb: 8 }],
+    is_available: false,
+    is_installed: false,
+    readiness: { ready: false, installed: false, missing_packages: [], missing_api_key: false, missing_model: true, missing_service: true },
+  } as any,
+  {
+    id: 'suno',
+    name: 'Suno AI',
+    description: 'Current state of the art song generation via API',
+    service: 'music',
+    type: 'api',
+    supported_languages: [],
+    models: [{ id: 'v3', name: 'V3' }],
+    is_available: false,
+    is_installed: false,
+    readiness: { ready: false, installed: false, missing_packages: [], missing_api_key: true, missing_model: false, missing_service: true },
+  } as any
+];
 
 export function UnifiedProviderSelector({
   service,
@@ -97,7 +150,7 @@ export function UnifiedProviderSelector({
   className,
   autoEnsureReady = true,
 }: UnifiedProviderSelectorProps) {
-  const [providers, setProviders] = useState<(ServiceProviderInfo | TTSProviderInfo)[]>([]);
+  const [providers, setProviders] = useState<AnyProviderInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -125,27 +178,58 @@ export function UnifiedProviderSelector({
     async function loadProviders() {
       setLoading(true);
       try {
-        let data: (ServiceProviderInfo | TTSProviderInfo)[];
+        let data: (ServiceProviderInfo | TTSProviderInfo | MusicProviderInfo | SFXProviderInfo | VoiceChangerProvider | VoiceIsolatorProvider | DubbingProvider)[];
 
-        if (service === 'tts') {
-          // For TTS, use getTTSProviders which returns more detailed info
-          data = await getTTSProviders();
-        } else {
-          data = await getServiceProviders(service);
+        // Load providers based on service type
+        switch (service) {
+          case 'tts':
+            data = await getTTSProviders();
+            break;
+          case 'music':
+            data = await getMusicProviders();
+            break;
+          case 'sfx':
+            data = await getSFXProviders();
+            break;
+          case 'voice_changer':
+            data = await getVoiceChangerProviders();
+            break;
+          case 'voice_isolator':
+            data = await getVoiceIsolatorProviders();
+            break;
+          case 'dubbing':
+            data = await getDubbingProviders();
+            break;
+          default:
+            data = await getServiceProviders(service as 'stt' | 'ai_edit' | 'translation');
         }
 
-        // Filter by language if specified
+        // Filter by language if specified (only for providers that support languages)
         if (filterLanguage) {
           const langBase = filterLanguage.split('-')[0];
-          data = data.filter(p =>
-            p.supported_languages?.some(l =>
+          data = data.filter(p => {
+            const langs = 'supported_languages' in p ? (p as any).supported_languages : null;
+            if (!langs) return true; // Don't filter out providers without language info
+            return langs.some((l: string) =>
               l === filterLanguage || l.startsWith(langBase) || langBase === l.split('-')[0]
-            )
-          );
+            );
+          });
         }
 
         if (allowedTypes && allowedTypes.length > 0) {
           data = data.filter(p => allowedTypes.includes(getProviderType(p)));
+        }
+
+        // Inject coming soon providers for music if not already present
+        if (service === 'music') {
+          const existingIds = new Set(data.map(p => p.id));
+          COMING_SOON_MUSIC_PROVIDERS.forEach(p => {
+            if (!existingIds.has(p.id)) {
+              // Mark as not implemented for visual badge
+              (p as any).is_implemented = false;
+              data.push(p);
+            }
+          });
         }
 
         setProviders(data);
@@ -199,8 +283,8 @@ export function UnifiedProviderSelector({
   const apiProviders = filteredProviders.filter(p => getProviderType(p) === 'api');
 
   // Helpers
-  function getProviderType(provider: ServiceProviderInfo | TTSProviderInfo): 'local' | 'api' {
-    if ('type' in provider) return provider.type;
+  function getProviderType(provider: AnyProviderInfo): 'local' | 'api' {
+    if ('type' in provider) return provider.type as 'local' | 'api';
     // For TTSProviderInfo, check if it's an API provider
     const apiProviderIds = [
       'openai-tts', 'elevenlabs', 'fishaudio', 'cartesia', 'playht',
@@ -209,25 +293,26 @@ export function UnifiedProviderSelector({
     return apiProviderIds.includes(provider.id) ? 'api' : 'local';
   }
 
-  function isProviderImplemented(provider: ServiceProviderInfo | TTSProviderInfo): boolean {
+  function isProviderImplemented(provider: AnyProviderInfo): boolean {
     if ('is_implemented' in provider) return (provider as any).is_implemented !== false;
     return true;
   }
 
-  function isProviderReady(provider: ServiceProviderInfo | TTSProviderInfo): boolean {
+  function isProviderReady(provider: AnyProviderInfo): boolean {
     // Not implemented = not ready
     if (!isProviderImplemented(provider)) return false;
     if ('readiness' in provider && (provider as any).readiness) {
       return (provider as any).readiness.ready;
     }
-    if ('is_available' in provider) return provider.is_available;
-    if ('is_ready' in provider) return provider.is_ready !== false;
+    if ('is_available' in provider) return (provider as any).is_available;
+    if ('is_ready' in provider) return (provider as any).is_ready !== false;
+    if ('ready' in provider) return (provider as any).ready;
     return true;
   }
 
-  function getProviderModels(provider: ServiceProviderInfo | TTSProviderInfo): ServiceProviderModelVariant[] {
-    if (!provider.models) return [];
-    return provider.models.map(m => {
+  function getProviderModels(provider: AnyProviderInfo): ServiceProviderModelVariant[] {
+    if (!('models' in provider) || !provider.models) return [];
+    return (provider.models as any[]).map(m => {
       if (typeof m === 'string') {
         return { id: m, name: m };
       }
@@ -235,19 +320,19 @@ export function UnifiedProviderSelector({
     });
   }
 
-  function getDefaultModel(provider: ServiceProviderInfo | TTSProviderInfo): string {
-    if ('default_model' in provider && provider.default_model) return provider.default_model;
+  function getDefaultModel(provider: AnyProviderInfo): string {
+    if ('default_model' in provider && provider.default_model) return provider.default_model as string;
     const models = getProviderModels(provider);
     return models.length > 0 ? models[0].id : '';
   }
 
-  function getVramGb(provider: ServiceProviderInfo | TTSProviderInfo): number {
-    if ('vram_gb' in provider) return provider.vram_gb;
+  function getVramGb(provider: AnyProviderInfo): number {
+    if ('vram_gb' in provider) return (provider as any).vram_gb;
     if ('vram_requirement_gb' in provider) return (provider as any).vram_requirement_gb;
     return 0;
   }
 
-  function getStatusBadge(provider: ServiceProviderInfo | TTSProviderInfo) {
+  function getStatusBadge(provider: AnyProviderInfo) {
     const implemented = isProviderImplemented(provider);
     const ready = isProviderReady(provider);
     const type = getProviderType(provider);
@@ -308,7 +393,7 @@ export function UnifiedProviderSelector({
       if (res?.install_started) {
         setTimeout(() => setRefreshTick((tick) => tick + 1), 3000);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, [autoEnsureReady, providers, selected, selectedModel, service, showModelSelector]);
 
   // Poll provider list while selected provider is not ready
@@ -356,6 +441,7 @@ export function UnifiedProviderSelector({
                       onSelect={() => onSelect(provider.id)}
                       statusBadge={getStatusBadge(provider)}
                       type="local"
+                      service={service}
                     />
                   ))}
                 </div>
@@ -380,6 +466,7 @@ export function UnifiedProviderSelector({
                       onSelect={() => onSelect(provider.id)}
                       statusBadge={getStatusBadge(provider)}
                       type="api"
+                      service={service}
                     />
                   ))}
                 </div>
@@ -456,6 +543,7 @@ export function UnifiedProviderSelector({
                   }}
                   statusBadge={getStatusBadge(provider)}
                   type="local"
+                  service={service}
                 />
               ))}
             </>
@@ -480,6 +568,7 @@ export function UnifiedProviderSelector({
                   }}
                   statusBadge={getStatusBadge(provider)}
                   type="api"
+                  service={service}
                 />
               ))}
             </>
@@ -559,8 +648,9 @@ function ProviderCard({
   onSelect,
   statusBadge,
   type,
+  service,
 }: {
-  provider: ServiceProviderInfo | TTSProviderInfo;
+  provider: AnyProviderInfo;
   isSelected: boolean;
   isReady: boolean;
   isImplemented: boolean;
@@ -568,6 +658,7 @@ function ProviderCard({
   onSelect: () => void;
   statusBadge: React.ReactNode;
   type: 'local' | 'api';
+  service: ServiceType;
 }) {
   const style = PROVIDER_STYLES[provider.id] || (type === 'api'
     ? { icon: Cloud, color: 'text-blue-400', gradient: 'from-blue-400 to-indigo-500' }
@@ -622,58 +713,72 @@ function ProviderCard({
 
       {/* Tags */}
       <div className="flex flex-wrap gap-1 mt-3">
-        {!isImplemented && (
+        {!isImplemented ? (
           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-500/20 text-slate-400 flex items-center gap-0.5">
             <AlertTriangle className="w-2.5 h-2.5" />
             Coming Soon
           </span>
-        )}
-        {isImplemented && !isReady && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-warning/20 text-warning flex items-center gap-0.5">
-            {type === 'api' ? (
-              <>
-                <Key className="w-2.5 h-2.5" />
-                Configure Key
-              </>
-            ) : (
-              <>
-                <Download className="w-2.5 h-2.5" />
-                Install Required
-              </>
+        ) : (
+          <>
+            {isImplemented && !isReady && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-warning/20 text-warning flex items-center gap-0.5">
+                {type === 'api' ? (
+                  <>
+                    <Key className="w-2.5 h-2.5" />
+                    Configure Key
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-2.5 h-2.5" />
+                    Install Required
+                  </>
+                )}
+              </span>
             )}
-          </span>
-        )}
-        {type === 'api' && (
-          <span className={cn(
-            'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
-            showAsSelected ? 'bg-white/20 text-white' : 'bg-blue-500/10 text-blue-500'
-          )}>
-            Cloud API
-          </span>
-        )}
-        {hasCloning && isImplemented && (
-          <span className={cn(
-            'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
-            showAsSelected ? 'bg-white/20 text-white' : 'bg-emerald-500/10 text-emerald-500'
-          )}>
-            Voice Clone
-          </span>
-        )}
-        {!hasCloning && type === 'local' && isImplemented && (
-          <span className={cn(
-            'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
-            showAsSelected ? 'bg-white/20 text-white' : 'bg-blue-500/10 text-blue-500'
-          )}>
-            Preset Voices
-          </span>
-        )}
-        {type === 'local' && vramGb > 0 && (
-          <span className={cn(
-            'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
-            showAsSelected ? 'bg-white/20 text-white' : 'bg-accent-primary/5 text-foreground-muted'
-          )}>
-            {vramGb}GB VRAM
-          </span>
+            {type === 'api' && (
+              <span className={cn(
+                'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                showAsSelected ? 'bg-white/20 text-white' : 'bg-blue-500/10 text-blue-500'
+              )}>
+                Cloud API
+              </span>
+            )}
+            {/* TTS SPECIFIC TAGS */}
+            {service === 'tts' && hasCloning && (
+              <span className={cn(
+                'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                showAsSelected ? 'bg-white/20 text-white' : 'bg-emerald-500/10 text-emerald-500'
+              )}>
+                Voice Clone
+              </span>
+            )}
+            {service === 'tts' && !hasCloning && type === 'local' && (
+              <span className={cn(
+                'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                showAsSelected ? 'bg-white/20 text-white' : 'bg-blue-500/10 text-blue-500'
+              )}>
+                Preset Voices
+              </span>
+            )}
+            {/* MUSIC SPECIFIC TAGS */}
+            {service === 'music' && (
+              <span className={cn(
+                'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                showAsSelected ? 'bg-white/20 text-white' : 'bg-purple-500/10 text-purple-500'
+              )}>
+                Music Gen
+              </span>
+            )}
+
+            {type === 'local' && vramGb > 0 && (
+              <span className={cn(
+                'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                showAsSelected ? 'bg-white/20 text-white' : 'bg-accent-primary/5 text-foreground-muted'
+              )}>
+                {vramGb}GB VRAM
+              </span>
+            )}
+          </>
         )}
       </div>
     </button>
@@ -689,14 +794,16 @@ function ProviderRow({
   onSelect,
   statusBadge,
   type,
+  service,
 }: {
-  provider: ServiceProviderInfo | TTSProviderInfo;
+  provider: AnyProviderInfo;
   isSelected: boolean;
   isReady: boolean;
   isImplemented: boolean;
   onSelect: () => void;
   statusBadge: React.ReactNode;
   type: 'local' | 'api';
+  service: ServiceType;
 }) {
   const isDisabled = !isImplemented || (!isReady && type === 'local');
 

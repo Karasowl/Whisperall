@@ -16,6 +16,10 @@ import datetime
 from pathlib import Path
 from typing import Callable, Optional, List, Dict, TypedDict, Literal, Any, Tuple
 
+# Diagnostics
+from diagnostics import log_function, error_context, log_info, log_error
+from diagnostics.error_codes import ErrorCode
+
 
 class DiarizationResult(TypedDict):
     """Result of diarization including method used."""
@@ -686,7 +690,8 @@ class DiarizationService:
             return self._pyannote_pipeline
 
         except Exception as e:
-            print(f"[Diarization] Failed to load pyannote: {e}")
+            log_error("diarization", "_get_pyannote_pipeline", f"Failed to load pyannote: {e}",
+                      error_code=ErrorCode.DIAR_MODEL_LOAD_FAILED, exception=e)
             self._pyannote_error = str(e)
             self._pyannote_available = False
             return None
@@ -776,6 +781,7 @@ class DiarizationService:
             self._voice_analyzer_device = device_pref
         return self._voice_analyzer
 
+    @log_function(module="diarization", error_code=ErrorCode.DIAR_DIARIZATION_FAILED)
     def diarize_segments(
         self,
         audio_path: Path,
@@ -801,42 +807,53 @@ class DiarizationService:
         Returns:
             DiarizationResult with segments, method used, and speaker count
         """
-        if not segments:
-            return {"segments": segments, "method": "pyannote", "num_speakers": 0}
+        with error_context(
+            audio_path=str(audio_path),
+            num_segments=len(segments),
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+            force_pyannote=force_pyannote,
+        ):
+            if not segments:
+                return {"segments": segments, "method": "pyannote", "num_speakers": 0}
 
-        self._apply_safety_settings()
-        self._check_thermal_guard("startup")
+            self._apply_safety_settings()
+            self._check_thermal_guard("startup")
 
-        if force_pyannote:
-            prefer_pyannote = True
+            if force_pyannote:
+                prefer_pyannote = True
 
-        # Try pyannote first if preferred
-        if prefer_pyannote:
-            pipeline = self._get_pyannote_pipeline()
-            if pipeline is not None:
-                return self._diarize_with_pyannote(
-                    audio_path,
-                    segments,
-                    min_speakers,
-                    max_speakers,
-                    progress_callback,
-                    force_pyannote=force_pyannote,
-                    cache_info=cache_info
+            # Try pyannote first if preferred
+            if prefer_pyannote:
+                pipeline = self._get_pyannote_pipeline()
+                if pipeline is not None:
+                    log_info("diarization", "diarize_segments", "Using pyannote for diarization")
+                    return self._diarize_with_pyannote(
+                        audio_path,
+                        segments,
+                        min_speakers,
+                        max_speakers,
+                        progress_callback,
+                        force_pyannote=force_pyannote,
+                        cache_info=cache_info
+                    )
+
+            # If pyannote required but not available, raise error
+            if force_pyannote:
+                detail = self._pyannote_error or (
+                    "Pyannote diarization is not available. "
+                    "Please configure your HuggingFace token and accept model terms. "
+                    "Go to Models page to verify setup."
                 )
+                log_error("diarization", "diarize_segments", detail,
+                          error_code=ErrorCode.DIAR_AUTH_REQUIRED)
+                raise RuntimeError(detail)
 
-        # If pyannote required but not available, raise error
-        if force_pyannote:
-            detail = self._pyannote_error or (
-                "Pyannote diarization is not available. "
-                "Please configure your HuggingFace token and accept model terms. "
-                "Go to Models page to verify setup."
+            # Fallback to clustering
+            log_info("diarization", "diarize_segments", "Using clustering fallback for diarization")
+            return self._diarize_with_clustering(
+                audio_path, segments, min_speakers, max_speakers, progress_callback, cache_info=cache_info
             )
-            raise RuntimeError(detail)
-
-        # Fallback to clustering
-        return self._diarize_with_clustering(
-            audio_path, segments, min_speakers, max_speakers, progress_callback, cache_info=cache_info
-        )
 
     def _diarize_with_pyannote(
         self,

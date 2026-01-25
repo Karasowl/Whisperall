@@ -18,10 +18,17 @@ import {
     X,
     ChevronRight,
     ChevronLeft,
-    ChevronDown
+    ChevronDown,
+    Wand2,
+    AudioWaveform,
+    Globe,
+    Volume2,
+    Music,
+    Radio,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getHotkeys } from '@/lib/api';
+import { DevDiagnostics } from './DevDiagnostics';
 
 const navItems = [
     { href: '/', label: 'Text to Speech', icon: MessageSquare, shortLabel: 'TTS' },
@@ -33,9 +40,15 @@ const navItems = [
 ];
 
 const moreToolsItems = [
+    { href: '/loopback', label: 'Live Transcription', icon: Radio },
     { href: '/ai-edit', label: 'AI Edit', icon: Sparkles },
     { href: '/translate', label: 'Translate', icon: Languages },
     { href: '/audiobook', label: 'Audiobook', icon: BookOpen },
+    { href: '/sfx', label: 'Sound Effects', icon: Volume2 },
+    { href: '/music', label: 'Music', icon: Music },
+    { href: '/voice-changer', label: 'Voice Changer', icon: Wand2 },
+    { href: '/voice-isolator', label: 'Voice Isolator', icon: AudioWaveform },
+    { href: '/dubbing', label: 'Auto Dubbing', icon: Globe },
 ];
 
 const secondaryItems = [
@@ -80,7 +93,6 @@ export function Sidebar() {
         const unsubscribe = window.electronAPI.onHotkey((action) => {
             window.__lastHotkey = action;
             if (action === 'open-tts') router.push('/');
-            if (action === 'dictate-toggle') router.push('/dictate');
             if (action === 'read-clipboard') router.push('/reader');
             if (action === 'ai-edit') router.push('/ai-edit');
             if (action === 'translate') router.push('/translate');
@@ -142,9 +154,11 @@ export function Sidebar() {
                 className={cn(
                     "fixed inset-y-0 left-0 z-50 bg-glass-surface backdrop-blur-lg border-r border-glass-border transition-all duration-300 ease-spring",
                     // Mobile: slide in/out
-                    mobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full lg:translate-x-0 w-0 lg:w-64",
+                    mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
+                    // Base width
+                    "w-64",
                     // Desktop collapsed state
-                    !mobileMenuOpen && collapsed && "lg:w-20"
+                    collapsed && "lg:w-20"
                 )}
             >
                 <div className="flex flex-col h-full">
@@ -240,7 +254,7 @@ export function Sidebar() {
                             </button>
 
                             {moreToolsOpen && (
-                                <div className="absolute left-0 top-full mt-2 w-full rounded-xl border border-glass-border bg-surface-base shadow-lg space-y-1 p-2 z-20">
+                                <div className="absolute left-0 bottom-full mb-2 w-full rounded-xl border border-glass-border bg-surface-base shadow-lg space-y-1 p-2 z-20">
                                     {moreToolsItems.map(({ href, label, icon: Icon }) => (
                                         <Link
                                             key={href}
@@ -286,6 +300,9 @@ export function Sidebar() {
                                 </Link>
                             );
                         })}
+
+                        {/* Dev Diagnostics - only shown when DEV_MODE=true */}
+                        <DevDiagnostics collapsed={collapsed} />
                     </div>
                 </div>
             </aside>

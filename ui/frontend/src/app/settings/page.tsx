@@ -13,6 +13,7 @@ import {
   Zap,
   Gauge,
   Settings2,
+  Mic,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -39,11 +40,13 @@ import { SelectMenu } from '@/components/SelectMenu';
 import { HotkeyRecorder } from '@/components/HotkeyRecorder';
 import { applyLanguage, applyTheme } from '@/lib/uiSettings';
 import { applyActionSoundConfig } from '@/lib/actionSounds';
+import { Toggle } from '@/components/Toggle';
 
 const settingsSections = [
   { id: 'performance', label: 'Performance', icon: Zap, description: 'GPU, device, and speed settings' },
   { id: 'api-keys', label: 'API Keys', icon: Key, description: 'Manage API keys for cloud services' },
   { id: 'models', label: 'Models', icon: HardDrive, description: 'Install or remove local models' },
+  { id: 'stt', label: 'Speech to Text', icon: Mic, description: 'Dictation and transcription settings' },
   { id: 'hotkeys', label: 'Hotkeys', icon: Keyboard, description: 'Customize global shortcuts' },
   { id: 'appearance', label: 'Appearance', icon: Palette, description: 'Theme and language' },
   { id: 'notifications', label: 'Notifications', icon: Bell, description: 'Alerts and tray behavior' },
@@ -75,6 +78,7 @@ const apiKeyProviders = [
 const hotkeyLabels: Record<string, string> = {
   dictate: 'Dictate (STT)',
   read_clipboard: 'Read Clipboard',
+  stt_paste: 'Paste Last Transcript',
   pause: 'Pause/Resume',
   stop: 'Stop',
   ai_edit: 'AI Edit',
@@ -87,6 +91,7 @@ const hotkeyLabels: Record<string, string> = {
 const defaultHotkeys: HotkeysSettings = {
   dictate: 'Alt+X',
   read_clipboard: 'Ctrl+Shift+R',
+  stt_paste: 'Alt+Shift+S',
   pause: 'Ctrl+Shift+P',
   stop: 'Ctrl+Shift+S',
   ai_edit: 'Ctrl+Shift+E',
@@ -416,6 +421,13 @@ export default function SettingsPage() {
             <ModelsSettings />
           )}
 
+          {activeSection === 'stt' && settings?.stt && (
+            <STTSettingsView
+              sttConfig={settings.stt}
+              onChange={handleSettingChange}
+            />
+          )}
+
           {activeSection === 'hotkeys' && (
             <HotkeysSettingsView
               hotkeys={hotkeys}
@@ -504,50 +516,24 @@ function PerformanceSettings({
           />
         </div>
 
-        <div className="glass-card p-4 flex items-center justify-between">
-          <div>
-            <span className="font-medium text-foreground">Fast Mode (Turbo)</span>
-            <p className="text-xs text-foreground-muted mt-1">
-              Optimizes inference for speed (fp16/int8). Slight quality loss.
-            </p>
-          </div>
-          <button
-            onClick={() => onChange('performance.fast_mode', !fastMode)}
-            className={cn(
-              'w-12 h-7 rounded-full transition-colors relative',
-              fastMode ? 'bg-accent-primary' : 'bg-surface-3'
-            )}
-          >
-            <div
-              className={cn(
-                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
-                fastMode ? 'translate-x-6' : 'translate-x-1'
-              )}
-            />
-          </button>
+        <div className="glass-card p-4">
+          <Toggle
+            label="Fast Mode (Turbo)"
+            description="Optimizes inference for speed (fp16/int8). Slight quality loss."
+            enabled={fastMode}
+            onChange={(val) => onChange('performance.fast_mode', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
         </div>
 
-        <div className="glass-card p-4 flex items-center justify-between">
-          <div>
-            <span className="font-medium text-foreground">Preload Models</span>
-            <p className="text-xs text-foreground-muted mt-1">
-              Load TTS models at startup for instant response. Uses more RAM.
-            </p>
-          </div>
-          <button
-            onClick={() => onChange('performance.preload_models', !preloadModels)}
-            className={cn(
-              'w-12 h-7 rounded-full transition-colors relative',
-              preloadModels ? 'bg-accent-primary' : 'bg-surface-3'
-            )}
-          >
-            <div
-              className={cn(
-                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
-                preloadModels ? 'translate-x-6' : 'translate-x-1'
-              )}
-            />
-          </button>
+        <div className="glass-card p-4">
+          <Toggle
+            label="Preload Models"
+            description="Load TTS models at startup for instant response. Uses more RAM."
+            enabled={preloadModels}
+            onChange={(val) => onChange('performance.preload_models', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
         </div>
       </div>
     </div>
@@ -821,90 +807,44 @@ function NotificationsSettings({
       </div>
 
       <div className="space-y-4">
-        <div className="glass-card p-4 flex items-center justify-between">
-          <div>
-            <span className="font-medium text-foreground">Show Notifications</span>
-            <p className="text-xs text-foreground-muted mt-0.5">System/OS notifications on completion</p>
-          </div>
-          <button
-            onClick={() => onChange('ui.show_notifications', !showNotifications)}
-            className={cn(
-              'w-12 h-7 rounded-full transition-colors relative',
-              showNotifications ? 'bg-accent-primary' : 'bg-surface-3'
-            )}
-          >
-            <div
-              className={cn(
-                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
-                showNotifications ? 'translate-x-6' : 'translate-x-1'
-              )}
-            />
-          </button>
+        <div className="glass-card p-4">
+          <Toggle
+            label="Show Notifications"
+            description="System/OS notifications on completion"
+            enabled={showNotifications}
+            onChange={(val) => onChange('ui.show_notifications', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
         </div>
 
-        <div className="glass-card p-4 flex items-center justify-between">
-          <div>
-            <span className="font-medium text-foreground">Minimize to Tray</span>
-            <p className="text-xs text-foreground-muted mt-0.5">Keep app running in background</p>
-          </div>
-          <button
-            onClick={() => onChange('ui.minimize_to_tray', !minimizeToTray)}
-            className={cn(
-              'w-12 h-7 rounded-full transition-colors relative',
-              minimizeToTray ? 'bg-accent-primary' : 'bg-surface-3'
-            )}
-          >
-            <div
-              className={cn(
-                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
-                minimizeToTray ? 'translate-x-6' : 'translate-x-1'
-              )}
-            />
-          </button>
+        <div className="glass-card p-4">
+          <Toggle
+            label="Minimize to Tray"
+            description="Keep app running in background"
+            enabled={minimizeToTray}
+            onChange={(val) => onChange('ui.minimize_to_tray', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
         </div>
-        <div className="glass-card p-4 flex items-center justify-between">
-          <div>
-            <span className="font-medium text-foreground">Action sound on start</span>
-            <p className="text-xs text-foreground-muted mt-0.5">
-              Play a short tone when recording or generation begins.
-            </p>
-          </div>
-          <button
-            onClick={() => onChange('ui.action_sounds.start', !startSoundEnabled)}
-            className={cn(
-              'w-12 h-7 rounded-full transition-colors relative',
-              startSoundEnabled ? 'bg-accent-primary' : 'bg-surface-3'
-            )}
-          >
-            <div
-              className={cn(
-                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
-                startSoundEnabled ? 'translate-x-6' : 'translate-x-1'
-              )}
-            />
-          </button>
+
+        <div className="glass-card p-4">
+          <Toggle
+            label="Action sound on start"
+            description="Play a short tone when recording or generation begins."
+            enabled={startSoundEnabled}
+            onChange={(val) => onChange('ui.action_sounds.start', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
         </div>
-        <div className="glass-card p-4 flex items-center justify-between">
-          <div>
-            <span className="font-medium text-foreground">Action sound on completion</span>
-            <p className="text-xs text-foreground-muted mt-0.5">
-              Play a short tone when the current action finishes.
-            </p>
-          </div>
-          <button
-            onClick={() => onChange('ui.action_sounds.complete', !completeSoundEnabled)}
-            className={cn(
-              'w-12 h-7 rounded-full transition-colors relative',
-              completeSoundEnabled ? 'bg-accent-primary' : 'bg-surface-3'
-            )}
-          >
-            <div
-              className={cn(
-                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
-                completeSoundEnabled ? 'translate-x-6' : 'translate-x-1'
-              )}
-            />
-          </button>
+
+        <div className="glass-card p-4">
+          <Toggle
+            label="Action sound on completion"
+            description="Play a short tone when the current action finishes."
+            enabled={completeSoundEnabled}
+            onChange={(val) => onChange('ui.action_sounds.complete', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
         </div>
       </div>
     </div>
@@ -930,46 +870,24 @@ function PrivacySettings({
       </div>
 
       <div className="space-y-4">
-        <div className="glass-card p-4 flex items-center justify-between">
-          <div>
-            <span className="font-medium text-foreground">Save Generation History</span>
-            <p className="text-xs text-foreground-muted mt-0.5">Keep logs of your generated audio</p>
-          </div>
-          <button
-            onClick={() => onChange('ui.save_history', !saveHistory)}
-            className={cn(
-              'w-12 h-7 rounded-full transition-colors relative',
-              saveHistory ? 'bg-accent-primary' : 'bg-surface-3'
-            )}
-          >
-            <div
-              className={cn(
-                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
-                saveHistory ? 'translate-x-6' : 'translate-x-1'
-              )}
-            />
-          </button>
+        <div className="glass-card p-4">
+          <Toggle
+            label="Save Generation History"
+            description="Keep logs of your generated audio"
+            enabled={saveHistory}
+            onChange={(val) => onChange('ui.save_history', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
         </div>
 
-        <div className="glass-card p-4 flex items-center justify-between">
-          <div>
-            <span className="font-medium text-foreground">Share Analytics</span>
-            <p className="text-xs text-foreground-muted mt-0.5">Help improve Chatterbox (Anonymous)</p>
-          </div>
-          <button
-            onClick={() => onChange('ui.analytics', !analytics)}
-            className={cn(
-              'w-12 h-7 rounded-full transition-colors relative',
-              analytics ? 'bg-accent-primary' : 'bg-surface-3'
-            )}
-          >
-            <div
-              className={cn(
-                'w-5 h-5 bg-white rounded-full absolute top-1 transition-transform',
-                analytics ? 'translate-x-6' : 'translate-x-1'
-              )}
-            />
-          </button>
+        <div className="glass-card p-4">
+          <Toggle
+            label="Share Analytics"
+            description="Help improve Chatterbox (Anonymous)"
+            enabled={analytics}
+            onChange={(val) => onChange('ui.analytics', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
         </div>
       </div>
     </div>
@@ -1006,6 +924,133 @@ function ModelsSettings() {
           <Settings2 className="w-4 h-4" />
           Manage Models
         </a>
+      </div>
+    </div>
+  );
+}
+
+function STTSettingsView({
+  sttConfig,
+  onChange,
+}: {
+  sttConfig: {
+    transcription_mode?: string;
+    hotkey_mode?: string;
+    auto_paste?: boolean;
+    overlay_enabled?: boolean;
+    overlay_always_on?: boolean;
+  };
+  onChange: (key: string, value: any) => void;
+}) {
+  const transcriptionMode = sttConfig.transcription_mode || 'final';
+  const hotkeyMode = sttConfig.hotkey_mode || 'toggle';
+  const autoPaste = sttConfig.auto_paste ?? false;
+  const overlayEnabled = sttConfig.overlay_enabled ?? true;
+  const overlayAlwaysOn = sttConfig.overlay_always_on ?? false;
+
+  const handleChange = (key: string, value: any) => {
+    onChange(`stt.${key}`, value);
+    // Notify Electron to reload STT settings
+    if (window.electronAPI?.reloadSttSettings) {
+      setTimeout(() => {
+        window.electronAPI?.reloadSttSettings?.();
+      }, 100);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Speech to Text</h2>
+          <p className="text-foreground-muted text-sm">Configure dictation and transcription behavior</p>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="glass-card p-4 flex items-center justify-between relative z-20">
+          <div>
+            <span className="font-medium text-foreground">Transcription Mode</span>
+            <p className="text-xs text-foreground-muted mt-1">
+              {transcriptionMode === 'live'
+                ? 'Live: Shows transcription in real-time while speaking (may be less accurate)'
+                : 'Final: Transcribes after you stop speaking (more accurate)'}
+            </p>
+          </div>
+          <SelectMenu
+            value={transcriptionMode}
+            options={[
+              { value: 'final', label: 'Final Only' },
+              { value: 'live', label: 'Live Preview' },
+            ]}
+            onChange={(val) => handleChange('transcription_mode', val)}
+            buttonClassName="w-40"
+          />
+        </div>
+
+        <div className="glass-card p-4 flex items-center justify-between relative z-10">
+          <div>
+            <span className="font-medium text-foreground">Hotkey Mode</span>
+            <p className="text-xs text-foreground-muted mt-1">
+              {hotkeyMode === 'hold'
+                ? 'Hold: Press hotkey to start, press again to stop'
+                : 'Toggle: Press hotkey once to start, press again to stop'}
+            </p>
+          </div>
+          <SelectMenu
+            value={hotkeyMode}
+            options={[
+              { value: 'toggle', label: 'Toggle' },
+              { value: 'hold', label: 'Press to Talk' },
+            ]}
+            onChange={(val) => handleChange('hotkey_mode', val)}
+            buttonClassName="w-40"
+          />
+        </div>
+
+        <div className="glass-card p-4">
+          <Toggle
+            label="Show Overlay"
+            description="Display a floating indicator showing recording status and audio level"
+            enabled={overlayEnabled}
+            onChange={(val) => handleChange('overlay_enabled', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
+        </div>
+
+        <div className="glass-card p-4">
+          <Toggle
+            label="Always Visible Overlay"
+            description="Keep the overlay visible on screen even when not recording"
+            enabled={overlayAlwaysOn}
+            onChange={(val) => handleChange('overlay_always_on', val)}
+            disabled={!overlayEnabled}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
+        </div>
+
+        <div className="glass-card p-4">
+          <Toggle
+            label="Auto-Paste Result"
+            description="Automatically paste transcription at cursor position when done"
+            enabled={autoPaste}
+            onChange={(val) => handleChange('auto_paste', val)}
+            className="justify-between flex-row-reverse w-full gap-0"
+          />
+        </div>
+
+        <div className="glass-card p-4 bg-accent-primary/5 border-accent-primary/20">
+          <div className="flex items-start gap-3">
+            <Mic className="w-5 h-5 text-accent-primary mt-0.5" />
+            <div>
+              <span className="font-medium text-foreground block mb-1">Quick Paste Hotkey</span>
+              <p className="text-xs text-foreground-muted">
+                Use the "Paste Last Transcript" hotkey (configured in Hotkeys section) to paste
+                your last transcription anywhere without affecting your clipboard.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

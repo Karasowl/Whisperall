@@ -63,6 +63,12 @@ def _register_providers():
     except ImportError:
         pass
 
+    try:
+        from .deepinfra import DeepInfraProvider
+        _PROVIDERS["deepinfra"] = DeepInfraProvider
+    except ImportError:
+        pass
+
 
 def _ensure_registered():
     """Ensure providers are registered"""
