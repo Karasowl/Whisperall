@@ -133,7 +133,7 @@ Estos son **features nuevos por implementar**, no "simulaciones".
 
 ---
 
-## Commits Realizados
+## Commits Realizados (11 total)
 
 1. `2d85f1b` - WIP: Estado actual antes de auditoría nocturna de Veritas
 2. `e1ddc84` - feat(widget): Implementar control de velocidad en Reader
@@ -144,6 +144,29 @@ Estos son **features nuevos por implementar**, no "simulaciones".
 7. `9ef7b33` - feat(electron): Añadir función para leer selección del sistema
 8. `df33292` - feat(settings): Añadir opción source en ReaderSettings
 9. `c8aa1c6` - feat: Añadir hotkey para leer selección (Ctrl+Shift+Alt+R)
+10. `ce790cc` - docs: Actualizar auditoría con resumen de commits
+11. `0f4cebf` - feat(settings): Añadir hotkey read_selection a la UI y backend
+
+## Resumen de Features Implementadas
+
+### Widget Overlay
+- ✅ Control de velocidad (1x, 1.25x, 1.5x, 2x, 2.5x, 3x, 4x)
+- ✅ Barra de progreso visual
+- ✅ Tooltips en todos los botones
+- ✅ Soporte para leer selección (además de clipboard)
+
+### Electron/Sistema
+- ✅ Función `readSystemSelection()` para leer texto seleccionado
+- ✅ Nuevo hotkey `read_selection` (Ctrl+Shift+Alt+R)
+- ✅ Opción "Reader (Selection)" en menú tray
+
+### Backend
+- ✅ Campo `source` en ReaderSettings (clipboard|selection)
+- ✅ Hotkey `read_selection` en HotkeysSettings
+
+### Frontend
+- ✅ Hotkey configurable desde Settings
+- ✅ TypeScript compila sin errores
 
 ---
 
