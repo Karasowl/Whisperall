@@ -10,7 +10,6 @@ import {
   ChevronUp,
   Sparkles,
   X,
-  Check,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -24,7 +23,6 @@ import {
 import { Slider } from '@/components/Slider';
 import { Toggle } from '@/components/Toggle';
 import {
-  getSFXProviders,
   uploadVideoForSFX,
   generateSFX,
   getSFXJobStatus,
@@ -35,6 +33,7 @@ import {
   SFXProviderInfo,
   SFXJob,
 } from '@/lib/api';
+import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
 
 const PROMPT_EXAMPLES = [
   'Footsteps on wooden floor',
@@ -49,9 +48,9 @@ const PROMPT_EXAMPLES = [
 
 export default function SFXPage() {
   // Providers
-  const [providers, setProviders] = useState<SFXProviderInfo[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('mmaudio');
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [currentProviderInfo, setCurrentProviderInfo] = useState<SFXProviderInfo | null>(null);
 
   // Upload state
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -84,37 +83,24 @@ export default function SFXPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const didLoadProviderRef = useRef(false);
 
-  // Load providers and saved selection
+  // Load saved provider selection
   useEffect(() => {
-    async function loadProvidersAndSelection() {
+    async function loadProviderSelection() {
       try {
-        const [data, selection] = await Promise.all([
-          getSFXProviders(),
-          getProviderSelection('sfx').catch(() => null),
-        ]);
-        setProviders(data);
-
+        const selection = await getProviderSelection('sfx');
         if (selection?.selected) {
           setSelectedProvider(selection.selected);
           if (selection.config?.model) {
             setSelectedModel(selection.config.model);
-          } else {
-            const provider = data.find((p) => p.id === selection.selected);
-            if (provider) {
-              setSelectedModel(provider.default_model);
-            }
           }
-        } else if (data.length > 0) {
-          setSelectedProvider(data[0].id);
-          setSelectedModel(data[0].default_model);
         }
       } catch (err: any) {
-        console.error('Failed to load SFX providers:', err);
+        console.error('Failed to load SFX provider selection:', err);
       } finally {
         didLoadProviderRef.current = true;
       }
     }
-    loadProvidersAndSelection();
+    loadProviderSelection();
   }, []);
 
   // Persist provider selection
@@ -149,8 +135,6 @@ export default function SFXPage() {
 
     return () => clearInterval(interval);
   }, [currentJob?.id, currentJob?.status]);
-
-  const currentProviderInfo = providers.find((p) => p.id === selectedProvider);
 
   const handleFileSelect = useCallback(async (file: File) => {
     setVideoFile(file);
@@ -361,71 +345,17 @@ export default function SFXPage() {
       main={
         <div className="space-y-6">
           {/* Provider Selection */}
-          <div className="glass-card p-6 space-y-4">
-            <label className="label flex items-center gap-2">
-              <Volume2 className="w-4 h-4" />
-              SFX Engine
-            </label>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {providers.map((provider) => (
-                <button
-                  key={provider.id}
-                  onClick={() => {
-                    setSelectedProvider(provider.id);
-                    setSelectedModel(provider.default_model);
-                  }}
-                  disabled={!provider.ready}
-                  className={cn(
-                    'p-4 rounded-xl border-2 text-left transition-all',
-                    selectedProvider === provider.id
-                      ? 'border-accent-primary bg-accent-primary/10'
-                      : 'border-glass-border hover:border-glass-border-hover bg-surface-1',
-                    !provider.ready && 'opacity-50 cursor-not-allowed'
-                  )}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-semibold flex items-center gap-2">
-                      {provider.name}
-                      {selectedProvider === provider.id && (
-                        <Check className="w-4 h-4 text-accent-primary" />
-                      )}
-                    </span>
-                    <span className="text-xs px-2 py-1 rounded-full bg-surface-2">
-                      {provider.vram_gb}GB VRAM
-                    </span>
-                  </div>
-                  <p className="text-sm text-foreground-muted">{provider.description}</p>
-                  {!provider.ready && (
-                    <p className="text-xs text-amber-400 mt-2">Not installed - pip install mmaudio</p>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {/* Model variant selector */}
-            {currentProviderInfo && currentProviderInfo.models.length > 1 && (
-              <div className="mt-4 pt-4 border-t border-glass-border">
-                <label className="label text-sm mb-2">Model Size</label>
-                <div className="flex gap-2 flex-wrap">
-                  {currentProviderInfo.models.map((model) => (
-                    <button
-                      key={model.id}
-                      onClick={() => setSelectedModel(model.id)}
-                      className={cn(
-                        'px-4 py-2 rounded-lg text-sm transition-all',
-                        selectedModel === model.id
-                          ? 'bg-accent-primary text-black font-medium'
-                          : 'bg-surface-2 hover:bg-surface-3'
-                      )}
-                    >
-                      {model.name} ({model.vram_gb}GB)
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <UnifiedProviderSelector
+            service="sfx"
+            selected={selectedProvider}
+            onSelect={setSelectedProvider}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
+            onProviderInfoChange={(info) => setCurrentProviderInfo(info as SFXProviderInfo | null)}
+            variant="cards"
+            showModelSelector
+            label="SFX Engine"
+          />
 
           {/* Video Upload */}
           {!videoFile ? (
