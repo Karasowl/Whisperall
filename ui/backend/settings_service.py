@@ -183,6 +183,7 @@ class ReaderSettings(BaseModel):
     voice: str = "af_sky"
     highlight_words: bool = True
     language: str = "en"  # Idioma seleccionado para TTS
+    source: str = "clipboard"  # "clipboard" | "selection" - de donde leer el texto
 
 
 class STTSettings(BaseModel):
