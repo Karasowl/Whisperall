@@ -136,6 +136,14 @@ Estos son **features nuevos por implementar**, no "simulaciones".
 ## Commits Realizados
 
 1. `2d85f1b` - WIP: Estado actual antes de auditoría nocturna de Veritas
+2. `e1ddc84` - feat(widget): Implementar control de velocidad en Reader
+3. `f9e9e89` - feat(widget): Añadir barra de progreso visual en Reader
+4. `f0f7e67` - feat(widget): Añadir tooltips a todos los botones
+5. `49d8b51` - docs: Plan detallado para expansión del widget
+6. `d31c969` - docs: Actualizar plan con alcance correcto
+7. `9ef7b33` - feat(electron): Añadir función para leer selección del sistema
+8. `df33292` - feat(settings): Añadir opción source en ReaderSettings
+9. `c8aa1c6` - feat: Añadir hotkey para leer selección (Ctrl+Shift+Alt+R)
 
 ---
 
