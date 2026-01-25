@@ -164,6 +164,7 @@ class HotkeysSettings(BaseModel):
     """Atajos de teclado globales"""
     dictate: str = "Alt+X"
     read_clipboard: str = "Ctrl+Shift+R"
+    read_selection: str = "Ctrl+Shift+Alt+R"
     stt_paste: str = "Alt+Shift+S"
     pause: str = "Ctrl+Shift+P"
     stop: str = "Ctrl+Shift+S"

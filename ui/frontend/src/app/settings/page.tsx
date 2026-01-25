@@ -78,6 +78,7 @@ const apiKeyProviders = [
 const hotkeyLabels: Record<string, string> = {
   dictate: 'Dictate (STT)',
   read_clipboard: 'Read Clipboard',
+  read_selection: 'Read Selection',
   stt_paste: 'Paste Last Transcript',
   pause: 'Pause/Resume',
   stop: 'Stop',
@@ -91,6 +92,7 @@ const hotkeyLabels: Record<string, string> = {
 const defaultHotkeys: HotkeysSettings = {
   dictate: 'Alt+X',
   read_clipboard: 'Ctrl+Shift+R',
+  read_selection: 'Ctrl+Shift+Alt+R',
   stt_paste: 'Alt+Shift+S',
   pause: 'Ctrl+Shift+P',
   stop: 'Ctrl+Shift+S',
