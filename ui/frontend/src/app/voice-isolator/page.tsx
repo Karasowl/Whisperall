@@ -6,10 +6,6 @@ import {
   Download,
   Volume2,
   VolumeX,
-  Cloud,
-  HardDrive,
-  Check,
-  AlertTriangle,
   Sparkles,
 } from 'lucide-react';
 import {
@@ -17,14 +13,12 @@ import {
   startVoiceIsolation,
   getVoiceIsolatorJob,
   getVoiceIsolatorDownloadUrl,
-  getVoiceIsolatorProviders,
   getProviderSelection,
   setProvider,
   VoiceIsolatorJob,
   VoiceIsolatorProvider,
 } from '@/lib/api';
-import { cn } from '@/lib/utils';
-import Link from 'next/link';
+import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
 import {
   ModuleShell,
   Dropzone,
@@ -36,9 +30,8 @@ import {
 
 export default function VoiceIsolatorPage() {
   // Provider state
-  const [providers, setProviders] = useState<VoiceIsolatorProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('elevenlabs');
-  const [loadingProviders, setLoadingProviders] = useState(true);
+  const [currentProvider, setCurrentProvider] = useState<VoiceIsolatorProvider | null>(null);
 
   // Upload state
   const [audioFile, setAudioFile] = useState<File | null>(null);
@@ -57,34 +50,21 @@ export default function VoiceIsolatorPage() {
   // Refs
   const didLoadProviderRef = useRef(false);
 
-  // Load providers and saved selection on mount
+  // Load saved provider selection on mount
   useEffect(() => {
-    async function loadProvidersAndSelection() {
+    async function loadProviderSelection() {
       try {
-        const [providerList, selection] = await Promise.all([
-          getVoiceIsolatorProviders(),
-          getProviderSelection('voice_isolator').catch(() => null),
-        ]);
-        setProviders(providerList);
-
-        // Use saved selection if available
+        const selection = await getProviderSelection('voice_isolator');
         if (selection?.selected) {
           setSelectedProvider(selection.selected);
-        } else {
-          // Select first ready provider by default
-          const readyProvider = providerList.find(p => p.ready);
-          if (readyProvider) {
-            setSelectedProvider(readyProvider.id);
-          }
         }
       } catch (err) {
-        console.error('Failed to load voice isolator providers:', err);
+        console.error('Failed to load voice isolator provider selection:', err);
       } finally {
-        setLoadingProviders(false);
         didLoadProviderRef.current = true;
       }
     }
-    loadProvidersAndSelection();
+    loadProviderSelection();
   }, []);
 
   // Persist provider selection
@@ -191,7 +171,6 @@ export default function VoiceIsolatorPage() {
     window.open(getVoiceIsolatorDownloadUrl(currentJob.id), '_blank');
   };
 
-  const currentProvider = providers.find(p => p.id === selectedProvider);
   const isReady = !!audioPath && !isUploading && !!currentProvider?.ready;
 
   return (
@@ -276,84 +255,15 @@ export default function VoiceIsolatorPage() {
       main={
         <div className="space-y-6">
           {/* Provider Selection */}
-          <div className="glass-card p-6 space-y-4">
-            <label className="label flex items-center gap-2">
-              <AudioWaveform className="w-4 h-4" />
-              Select Provider
-            </label>
-
-            {loadingProviders ? (
-              <div className="flex items-center gap-2 text-foreground-muted">
-                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                Loading providers...
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {providers.map((provider) => (
-                  <button
-                    key={provider.id}
-                    onClick={() => provider.ready && setSelectedProvider(provider.id)}
-                    disabled={!provider.ready}
-                    className={cn(
-                      'p-4 rounded-xl border-2 text-left transition-all',
-                      selectedProvider === provider.id
-                        ? 'border-accent-primary bg-accent-primary/10'
-                        : provider.ready
-                        ? 'border-border hover:border-border-hover'
-                        : 'border-border/50 opacity-60 cursor-not-allowed'
-                    )}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        {provider.type === 'api' ? (
-                          <Cloud className="w-5 h-5 text-accent-primary" />
-                        ) : (
-                          <HardDrive className="w-5 h-5 text-green-500" />
-                        )}
-                        <span className="font-medium">{provider.name}</span>
-                      </div>
-                      {provider.ready ? (
-                        <Check className="w-4 h-4 text-green-500" />
-                      ) : (
-                        <AlertTriangle className="w-4 h-4 text-warning" />
-                      )}
-                    </div>
-                    <p className="text-xs text-foreground-muted mb-2">{provider.description}</p>
-
-                    {/* Features */}
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {provider.features.map((feature, i) => (
-                        <span key={i} className="badge badge-primary text-xs">
-                          {feature}
-                        </span>
-                      ))}
-                    </div>
-
-                    {/* Quota/VRAM info */}
-                    <div className="text-xs text-foreground-muted">
-                      {provider.type === 'api' && provider.quota_minutes && (
-                        <span>{provider.quota_minutes} min/month</span>
-                      )}
-                      {provider.type === 'local' && provider.vram_gb && (
-                        <span>Requires {provider.vram_gb}GB VRAM</span>
-                      )}
-                    </div>
-
-                    {!provider.ready && provider.requires_api_key && (
-                      <Link href="/settings" className="text-xs text-accent-primary hover:underline mt-2 block">
-                        Configure API key
-                      </Link>
-                    )}
-                    {!provider.ready && provider.install_command && (
-                      <code className="text-xs text-foreground-muted bg-surface-2 px-2 py-1 rounded mt-2 block">
-                        {provider.install_command}
-                      </code>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <UnifiedProviderSelector
+            service="voice_isolator"
+            selected={selectedProvider}
+            onSelect={setSelectedProvider}
+            onProviderInfoChange={(info) => setCurrentProvider(info as VoiceIsolatorProvider | null)}
+            variant="cards"
+            showModelSelector={false}
+            label="Voice Isolator Engine"
+          />
 
           {/* Audio Upload */}
           {!audioFile ? (
