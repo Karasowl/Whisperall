@@ -773,7 +773,7 @@ function AppearanceSettings({
             value={language}
             options={[
               { value: 'en', label: 'English' },
-              { value: 'es', label: 'Español' },
+              { value: 'es', label: 'Spanish' },
             ]}
             onChange={(val) => onChange('ui.language', val)}
             buttonClassName="w-40"
