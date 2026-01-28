@@ -37,6 +37,7 @@ import {
   getHistoryFileDownloadUrl,
   api,
 } from '@/lib/api';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface HistoryEntryCardProps {
   entry: NewHistoryEntry;
@@ -82,6 +83,7 @@ export function HistoryEntryCard({
   const [showMenu, setShowMenu] = useState(false);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const moduleConfig = MODULE_CONFIG[entry.module] || MODULE_CONFIG['tts'];
 
@@ -172,9 +174,13 @@ export function HistoryEntryCard({
     }
   };
 
-  // Delete entry
-  const handleDelete = async () => {
-    if (!confirm('Delete this history entry?')) return;
+  // Delete entry - show confirmation modal
+  const handleDelete = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  // Confirm and execute deletion
+  const confirmDelete = async () => {
     setLoading(true);
     try {
       await deleteNewHistoryEntry(entry.id);
@@ -185,6 +191,7 @@ export function HistoryEntryCard({
       console.error('Failed to delete entry:', err);
     } finally {
       setLoading(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -468,6 +475,19 @@ export function HistoryEntryCard({
           <p className="text-xs text-error">{entry.error_message}</p>
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete History Entry"
+        description="Are you sure you want to delete this history entry? This action cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={confirmDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+        busy={loading}
+        variant="destructive"
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { ReactNode } from 'react';
+import { cn } from '@/lib/utils';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -11,6 +12,7 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
+  variant?: 'default' | 'destructive';
 }
 
 export function ConfirmDialog({
@@ -22,15 +24,23 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   busy = false,
+  variant = 'default',
 }: ConfirmDialogProps) {
   if (!open) return null;
+
+  const isDestructive = variant === 'destructive';
 
   return (
     <>
       <div className="modal-backdrop" onClick={onCancel} />
       <div className="modal space-y-4">
         <div>
-          <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
+          <h3 className={cn(
+            "text-lg font-semibold",
+            isDestructive ? "text-error" : "text-slate-100"
+          )}>
+            {title}
+          </h3>
           {description && (
             <div className="mt-2 text-sm text-slate-400">
               {description}
@@ -49,7 +59,14 @@ export function ConfirmDialog({
           <button className="btn btn-secondary" onClick={onCancel} disabled={busy}>
             {cancelLabel}
           </button>
-          <button className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+          <button
+            className={cn(
+              "btn",
+              isDestructive ? "btn-danger" : "btn-primary"
+            )}
+            onClick={onConfirm}
+            disabled={busy}
+          >
             {busy ? 'Working...' : confirmLabel}
           </button>
         </div>
