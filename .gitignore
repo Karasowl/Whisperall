@@ -20,6 +20,7 @@ dist/
 downloads/
 eggs/
 .eggs/
+!ui/frontend/src/lib/
 lib/
 lib64/
 parts/
