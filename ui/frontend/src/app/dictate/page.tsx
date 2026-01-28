@@ -564,7 +564,7 @@ export default function DictatePage() {
           setInstallOutput(null);
           try {
             const res = await installSttEngine();
-            const output = res.output || res.message || '';
+            const output = res.message || '';
             const normalized = output.toLowerCase();
             const success = normalized.includes('successfully installed') || normalized.includes('requirement already satisfied');
             setInstallOutput(output || 'Install complete.');
