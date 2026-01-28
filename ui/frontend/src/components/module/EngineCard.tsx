@@ -39,14 +39,19 @@ export function EngineCard({
       onClick={() => !isDisabled && onSelect(id)}
       disabled={isDisabled}
       className={cn(
-        'p-4 rounded-xl border-2 text-left transition-all w-full',
+        'p-4 rounded-xl border-2 text-left w-full',
+        'transition-all duration-150 ease-out',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background',
         selected
-          ? 'border-accent-primary bg-accent-primary/10'
-          : 'border-glass-border hover:border-glass-border-hover bg-surface-1',
+          ? 'border-accent-primary bg-accent-primary/10 shadow-[0_0_20px_-8px_var(--accent-primary)]'
+          : 'border-glass-border hover:border-glass-border-hover hover:bg-surface-2 bg-surface-1',
+        !isDisabled && !selected && 'hover:translate-y-[-1px] hover:shadow-md',
+        !isDisabled && 'active:scale-[0.99]',
         isDisabled && 'opacity-50 cursor-not-allowed',
         className
       )}
       aria-pressed={selected}
+      aria-disabled={isDisabled}
     >
       <div className="flex items-center justify-between mb-2">
         <span className="font-semibold flex items-center gap-2 text-foreground">

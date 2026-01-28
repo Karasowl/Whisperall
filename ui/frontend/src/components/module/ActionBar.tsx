@@ -36,18 +36,21 @@ export function ActionBar({
         onClick={primary.onClick}
         disabled={primary.disabled || loading}
         className={cn(
-          pulse && !loading ? 'btn-cta-pulse' : 'btn-cta'
+          pulse && !loading ? 'btn-cta-pulse' : 'btn-cta',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary focus-visible:ring-offset-2',
+          'active:scale-[0.98] transition-transform duration-100'
         )}
+        aria-busy={loading}
       >
         {loading ? (
           <>
             <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
-            {loadingText || 'Processing...'}
+            <span>{loadingText || 'Processing...'}</span>
           </>
         ) : (
           <>
             {PrimaryIcon && <PrimaryIcon className="w-5 h-5" aria-hidden="true" />}
-            {primary.label}
+            <span>{primary.label}</span>
           </>
         )}
       </button>
@@ -56,10 +59,14 @@ export function ActionBar({
         <button
           onClick={secondary.onClick}
           disabled={secondary.disabled || loading}
-          className="btn btn-secondary w-full justify-center"
+          className={cn(
+            'btn btn-secondary w-full justify-center',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary focus-visible:ring-offset-2',
+            'active:scale-[0.98] transition-transform duration-100'
+          )}
         >
           {SecondaryIcon && <SecondaryIcon className="w-4 h-4" aria-hidden="true" />}
-          {secondary.label}
+          <span>{secondary.label}</span>
         </button>
       )}
     </div>

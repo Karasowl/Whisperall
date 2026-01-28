@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { STTPasteManager } from "@/components/STTPasteManager";
 import { GlobalSttManager } from "@/components/GlobalSttManager";
 import { UISettingsInitializer } from "@/components/UISettingsInitializer";
+import { ToastProvider } from "@/components/Toast";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -30,6 +31,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} ${outfit.variable} bg-[var(--background)] text-[var(--foreground)] h-screen overflow-hidden antialiased selection:bg-accent-primary/30 selection:text-white`}>
+        <ToastProvider>
         <UISettingsInitializer />
         <STTPasteManager />
         <GlobalSttManager />
@@ -54,6 +56,7 @@ export default function RootLayout({
             </main>
           </div>
         </div>
+        </ToastProvider>
       </body>
     </html>
   );

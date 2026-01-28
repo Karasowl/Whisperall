@@ -44,6 +44,8 @@ import {
 import { cn } from '@/lib/utils';
 import HistoryFilters from '@/components/HistoryFilters';
 import HistoryEntryCard from '@/components/HistoryEntryCard';
+import { SkeletonHistoryEntry, SkeletonStatsGrid } from '@/components/Skeleton';
+import { useToast } from '@/components/Toast';
 
 type TabType = 'all' | 'tts' | 'transcriptions';
 type TranscriptionStatus = 'all' | 'completed' | 'paused' | 'interrupted' | 'error' | 'cancelled';
@@ -51,6 +53,7 @@ type SortOrder = 'newest' | 'oldest';
 
 export default function HistoryPage() {
   const router = useRouter();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<TabType>('all');
 
   // New unified history state
@@ -70,7 +73,7 @@ export default function HistoryPage() {
   const [transcriptionsLoading, setTranscriptionsLoading] = useState(true);
   const [transcriptionsTotal, setTranscriptionsTotal] = useState(0);
 
-  const [error, setError] = useState<string | null>(null);
+  // Error state removed - now using toast notifications
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
 
@@ -195,10 +198,12 @@ export default function HistoryPage() {
       setSelectionMode(false);
 
       if (result.failed_count > 0) {
-        setError(`Deleted ${result.deleted_count} entries. ${result.failed_count} failed.`);
+        toast.warning('Partial delete', `Deleted ${result.deleted_count} entries. ${result.failed_count} failed.`);
+      } else {
+        toast.success('Deleted', `${result.deleted_count} entries removed`);
       }
     } catch (err) {
-      setError('Bulk delete failed');
+      toast.error('Bulk delete failed', 'Please try again');
     } finally {
       setBulkDeleting(false);
     }
@@ -274,7 +279,7 @@ export default function HistoryPage() {
     audio.onended = () => setPlayingId(null);
     audio.onerror = () => {
       setPlayingId(null);
-      setError('Failed to play audio');
+      toast.error('Playback failed', 'Unable to play audio file');
     };
     audio.play();
     setAudioElement(audio);
@@ -286,8 +291,9 @@ export default function HistoryPage() {
     try {
       await deleteHistoryEntry(entry.id, true);
       await loadTtsHistory();
+      toast.success('Deleted', 'Entry removed');
     } catch {
-      setError('Delete failed');
+      toast.error('Delete failed', 'Could not remove entry');
     }
   };
 
@@ -296,8 +302,9 @@ export default function HistoryPage() {
     try {
       await deleteTranscriptionJob(job.job_id);
       await loadTranscriptionHistory();
+      toast.success('Deleted', 'Transcription removed');
     } catch {
-      setError('Delete failed');
+      toast.error('Delete failed', 'Could not remove transcription');
     }
   };
 
@@ -308,8 +315,9 @@ export default function HistoryPage() {
         try {
           await clearHistory(false);
           await loadTtsHistory();
+          toast.success('Cleared', 'History entries removed');
         } catch {
-          setError('Clear failed');
+          toast.error('Clear failed', 'Could not clear history');
         }
         return;
       }
@@ -317,9 +325,9 @@ export default function HistoryPage() {
       try {
         const result = await clearHistory(true);
         await loadTtsHistory();
-        alert(`History cleared. ${(result.freed_bytes / (1024 * 1024)).toFixed(2)} MB freed.`);
+        toast.success('History cleared', `${(result.freed_bytes / (1024 * 1024)).toFixed(2)} MB freed`);
       } catch {
-        setError('Clear failed');
+        toast.error('Clear failed', 'Could not clear history');
       }
     } else if (activeTab === 'transcriptions') {
       if (!confirm('Delete all transcriptions? This will also delete any temporary media files.')) return;
@@ -327,9 +335,9 @@ export default function HistoryPage() {
       try {
         const result = await clearAllTranscriptions();
         await loadTranscriptionHistory();
-        alert(`${result.deleted_count} transcriptions deleted. ${(result.freed_bytes / (1024 * 1024)).toFixed(2)} MB freed.`);
+        toast.success('Transcriptions cleared', `${result.deleted_count} deleted, ${(result.freed_bytes / (1024 * 1024)).toFixed(2)} MB freed`);
       } catch {
-        setError('Clear failed');
+        toast.error('Clear failed', 'Could not clear transcriptions');
       }
     }
   };
@@ -666,15 +674,18 @@ export default function HistoryPage() {
         </div>
       )}
 
-      {error && (
-        <div className="card p-4 border-error/30 bg-error/10 text-error flex items-center gap-2">
-          <AlertCircle className="w-5 h-5" />
-          {error}
+      {/* Loading State with Skeletons */}
+      {loading && activeTab === 'all' && (
+        <div className="space-y-4">
+          {!stats && <SkeletonStatsGrid />}
+          <SkeletonHistoryEntry />
+          <SkeletonHistoryEntry />
+          <SkeletonHistoryEntry />
+          <SkeletonHistoryEntry />
         </div>
       )}
-
-      {/* Loading State */}
-      {loading && (
+      
+      {loading && activeTab !== 'all' && (
         <div className="flex items-center justify-center min-h-[200px]">
           <RefreshCw className="w-8 h-8 animate-spin text-foreground-muted" />
         </div>
