@@ -134,8 +134,15 @@ export function Sidebar() {
             {/* Mobile Toggle & Top Bar (Visible only on small screens) */}
             <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-background/80 backdrop-blur-md border-b border-glass-border flex items-center justify-between px-4 z-50">
                 <div className="flex items-center gap-3">
-                    <button onClick={() => setMobileMenuOpen(true)} className="p-2 text-foreground">
-                        <Menu className="w-6 h-6" />
+                    <button 
+                        onClick={() => setMobileMenuOpen(true)} 
+                        className="p-2 text-foreground rounded-lg hover:bg-surface-2 transition-colors
+                                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary"
+                        aria-label="Open navigation menu"
+                        aria-expanded={mobileMenuOpen}
+                        aria-controls="mobile-sidebar"
+                    >
+                        <Menu className="w-6 h-6" aria-hidden="true" />
                     </button>
                     <span className="text-lg font-bold text-gradient-accent">Whisperall</span>
                 </div>
@@ -151,6 +158,9 @@ export function Sidebar() {
 
             {/* Sidebar Container */}
             <aside
+                id="mobile-sidebar"
+                role="navigation"
+                aria-label="Main navigation"
                 className={cn(
                     "fixed inset-y-0 left-0 z-50 bg-glass-surface backdrop-blur-lg border-r border-glass-border transition-all duration-300 ease-spring",
                     // Mobile: slide in/out
@@ -180,17 +190,22 @@ export function Sidebar() {
                         {/* Collapse Toggle (Desktop only) */}
                         <button
                             onClick={toggleCollapsed}
-                            className="hidden lg:flex p-1.5 rounded-lg hover:bg-surface-2 text-foreground-muted hover:text-foreground transition-colors"
+                            className="hidden lg:flex p-1.5 rounded-lg hover:bg-surface-2 text-foreground-muted hover:text-foreground transition-colors
+                                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary"
+                            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                            aria-expanded={!collapsed}
                         >
-                            {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+                            {collapsed ? <ChevronRight className="w-4 h-4" aria-hidden="true" /> : <ChevronLeft className="w-4 h-4" aria-hidden="true" />}
                         </button>
 
                         {/* Close Button (Mobile only) */}
                         <button
                             onClick={() => setMobileMenuOpen(false)}
-                            className="lg:hidden p-2 text-foreground"
+                            className="lg:hidden p-2 text-foreground rounded-lg hover:bg-surface-2 transition-colors
+                                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary"
+                            aria-label="Close navigation menu"
                         >
-                            <X className="w-5 h-5" />
+                            <X className="w-5 h-5" aria-hidden="true" />
                         </button>
                     </div>
 
@@ -205,14 +220,16 @@ export function Sidebar() {
                                     prefetch={false}
                                     className={cn(
                                         "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group relative",
+                                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary focus-visible:ring-inset",
                                         isActive
                                             ? "bg-accent-primary/10 text-accent-primary font-medium"
                                             : "text-foreground-secondary hover:text-foreground hover:bg-surface-2",
                                         collapsed && "justify-center px-2"
                                     )}
                                     title={collapsed ? label : undefined}
+                                    aria-current={isActive ? "page" : undefined}
                                 >
-                                    <Icon className={cn("w-5 h-5 shrink-0", isActive && "text-accent-primary")} />
+                                    <Icon className={cn("w-5 h-5 shrink-0", isActive && "text-accent-primary")} aria-hidden="true" />
                                     {!collapsed && <span className="truncate text-sm">{label}</span>}
 
                                     {/* Tooltip for collapsed state */}
