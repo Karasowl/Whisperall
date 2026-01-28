@@ -250,7 +250,7 @@ export default function TranscriptEditor({
         </h2>
         {(createdAt || (elapsedSeconds && elapsedSeconds > 0)) && (
           <p className="text-sm text-slate-400 mt-1 select-text cursor-text">
-            {createdAt && new Date(createdAt).toLocaleDateString("es-ES", {
+            {createdAt && new Date(createdAt).toLocaleDateString(undefined, {
               day: "numeric",
               month: "short",
               year: "numeric",
