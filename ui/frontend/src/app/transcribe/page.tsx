@@ -51,6 +51,7 @@ import PyannoteSetupWizard from "@/components/PyannoteSetupWizard";
 import { SelectMenu } from "@/components/SelectMenu";
 import { UnifiedProviderSelector } from "@/components/UnifiedProviderSelector";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/Toast";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -210,6 +211,7 @@ function isAbsolutePath(filePath: string): boolean {
 
 function TranscribePageContent() {
   const searchParams = useSearchParams();
+  const toast = useToast();
 
   // File state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -680,7 +682,9 @@ function TranscribePageContent() {
 
     if (rejectedFiles.length > 0) {
       console.log("[Dropzone] Rejection reasons:", rejectedFiles.map(r => r.errors));
-      setUploadError(`File rejected: ${rejectedFiles[0]?.errors?.[0]?.message || "Unknown error"}`);
+      const errorMsg = rejectedFiles[0]?.errors?.[0]?.message || "Unknown error";
+      setUploadError(`File rejected: ${errorMsg}`);
+      toast.error('File rejected', errorMsg);
       return;
     }
 
@@ -695,13 +699,16 @@ function TranscribePageContent() {
 
       // Check if file size is readable
       if (file.size === 0) {
-        setUploadError("Cannot read file size. Try dragging the file instead of clicking, or use a different browser.");
+        const msg = "Cannot read file size. Try dragging the file instead of clicking.";
+        setUploadError(msg);
+        toast.warning('File issue', msg);
         return;
       }
 
       // Max 4GB
       if (file.size > 4 * 1024 * 1024 * 1024) {
         setUploadError("File too large. Maximum size is 4GB.");
+        toast.error('File too large', 'Maximum file size is 4GB');
         return;
       }
       setSelectedFile(file);
@@ -779,6 +786,12 @@ function TranscribePageContent() {
             if (pollingRef.current) {
               clearInterval(pollingRef.current);
               pollingRef.current = null;
+            }
+            // Show toast notification
+            if (status.status === "completed") {
+              toast.success('Transcription complete', `${status.segments?.length || 0} segments processed`);
+            } else if (status.status === "error") {
+              toast.error('Transcription failed', status.error_message || 'An error occurred');
             }
           }
         } catch (error) {

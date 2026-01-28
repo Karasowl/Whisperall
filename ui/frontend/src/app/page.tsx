@@ -26,6 +26,7 @@ import {
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { playActionSound } from '@/lib/actionSounds';
+import { useToast } from '@/components/Toast';
 
 type SettingsState = {
   temperature: number;
@@ -51,6 +52,8 @@ const DEFAULT_SETTINGS: SettingsState = {
 const PROVIDER_USAGE_CAPABLE = ['elevenlabs'];
 
 export default function TTSPage() {
+  const toast = useToast();
+  
   // Data
   const [models, setModels] = useState<Model[]>([]);
   const [languages, setLanguages] = useState<Language[]>([]);
@@ -97,6 +100,7 @@ export default function TTSPage() {
         setVoices(voicesResponse.voices);
       } catch (err) {
         setError('Failed to connect to backend. Make sure the server is running.');
+        toast.error('Connection failed', 'Make sure the backend server is running');
       }
     }
     loadData();
@@ -150,7 +154,7 @@ export default function TTSPage() {
 
   const handleGenerate = async (preview = false) => {
     if (!text.trim()) {
-      setError('Please enter some text');
+      toast.warning('Missing text', 'Please enter some text to generate');
       return;
     }
 
@@ -158,7 +162,7 @@ export default function TTSPage() {
     setResult(null);
 
     if (selectedProvider === 'f5-tts' && !selectedVoiceId) {
-      setError('F5-TTS requires a reference voice sample. Select a saved voice before generating.');
+      toast.warning('Voice required', 'F5-TTS requires a reference voice sample');
       return;
     }
 
@@ -222,7 +226,13 @@ export default function TTSPage() {
         playActionSound('complete');
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Generation failed');
+      const errorMsg = err.response?.data?.detail || err.message || 'Generation failed';
+      setError(errorMsg);
+      toast.error('Generation failed', errorMsg, {
+        label: 'Try again',
+        onClick: () => handleGenerate(preview),
+      });
+      playActionSound('error');
     } finally {
       setIsLoading(false);
       setIsPreviewLoading(false);
