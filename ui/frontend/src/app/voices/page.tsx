@@ -29,6 +29,8 @@ import { getVoices, createVoice, deleteVoice, analyzeVoice, getAudioUrl, Voice }
 import { cn } from '@/lib/utils';
 import VoiceRecorder from '@/components/VoiceRecorder';
 import { AudioTrimmer } from '@/components/AudioTrimmer';
+import { useToast } from '@/components/Toast';
+import { SkeletonVoiceCard } from '@/components/Skeleton';
 
 type TabType = 'my-voices' | 'explore';
 type ViewType = 'grid' | 'list';
@@ -43,6 +45,7 @@ const VOICE_CATEGORIES = [
 ];
 
 export default function VoicesPage() {
+  const toast = useToast();
   const [voices, setVoices] = useState<Voice[]>([]);
   const [totalSizeMb, setTotalSizeMb] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -105,6 +108,7 @@ export default function VoicesPage() {
 
     if (!audioSource || !newVoiceName.trim()) {
       setError('Provide a name and audio');
+      toast.warning('Missing information', 'Provide a name and audio file');
       return;
     }
 
@@ -145,8 +149,11 @@ export default function VoicesPage() {
       setRecordedDuration(0);
       setInputMode('upload');
       setSaveStatus('');
+      toast.success('Voice saved', `"${voice.name}" added to your library`);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save voice');
+      const errorMsg = err.response?.data?.detail || 'Failed to save voice';
+      setError(errorMsg);
+      toast.error('Save failed', errorMsg);
     } finally {
       setIsSaving(false);
       setSaveStatus('');
@@ -159,13 +166,16 @@ export default function VoicesPage() {
   };
 
   const handleDeleteVoice = async (voiceId: string) => {
-    if (!confirm('Delete this voice?')) return;
+    const voice = voices.find(v => v.id === voiceId);
+    if (!confirm(`Delete "${voice?.name || 'this voice'}"?`)) return;
 
     try {
       await deleteVoice(voiceId);
       setVoices((prev) => prev.filter((v) => v.id !== voiceId));
+      toast.success('Voice deleted', `"${voice?.name}" removed from library`);
     } catch {
       setError('Failed to delete voice');
+      toast.error('Delete failed', 'Could not remove voice');
     }
   };
 
@@ -235,8 +245,24 @@ export default function VoicesPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[300px]">
-        <Loader2 className="w-8 h-8 animate-spin text-foreground-muted" />
+      <div className="space-y-6 animate-slide-up">
+        {/* Header skeleton */}
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <div className="h-8 w-48 bg-surface-2 rounded-lg animate-pulse" />
+            <div className="mt-2 h-4 w-64 bg-surface-2 rounded animate-pulse" />
+          </div>
+          <div className="h-10 w-32 bg-surface-2 rounded-xl animate-pulse" />
+        </div>
+        {/* Voice cards skeleton grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <SkeletonVoiceCard />
+          <SkeletonVoiceCard />
+          <SkeletonVoiceCard />
+          <SkeletonVoiceCard />
+          <SkeletonVoiceCard />
+          <SkeletonVoiceCard />
+        </div>
       </div>
     );
   }
