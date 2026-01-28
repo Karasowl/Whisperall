@@ -13,6 +13,7 @@ interface PresetVoiceSelectorProps {
   onSelect: (voiceId: string) => void;
   language?: string;
   className?: string;
+  compact?: boolean;
 }
 
 // Language display names
@@ -37,6 +38,7 @@ export function PresetVoiceSelector({
   onSelect,
   language,
   className,
+  compact = false,
 }: PresetVoiceSelectorProps) {
   const [allVoices, setAllVoices] = useState<TTSPresetVoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,6 +158,107 @@ export function PresetVoiceSelector({
     return groups;
   }, [filteredVoices]);
 
+  // Compact mode rendering
+  if (compact) {
+    if (loading) {
+      return (
+        <div className={cn('space-y-2', className)}>
+          <div className="h-10 bg-surface-2 rounded-lg animate-pulse" />
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className={cn('p-3 rounded-lg border border-red-500/30 bg-red-500/10', className)}>
+          <p className="text-red-300 text-xs">{error}</p>
+        </div>
+      );
+    }
+
+    const selectedVoice = allVoices.find(v => v.id === selected);
+
+    return (
+      <div className={cn('space-y-2', className)}>
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-muted" />
+          <input
+            type="text"
+            placeholder="Search voices..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 text-sm bg-surface-1 border border-glass-border rounded-lg focus:outline-none focus:border-accent-primary"
+          />
+        </div>
+
+        {/* Voice list - compact scrollable */}
+        <div className="max-h-[200px] overflow-y-auto space-y-1 custom-scrollbar">
+          {filteredVoices.slice(0, 50).map(voice => {
+            const isSelected = selected === voice.id;
+            const isPlaying = playingVoiceId === voice.id;
+
+            return (
+              <div
+                key={voice.id}
+                onClick={() => onSelect(voice.id)}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all text-sm',
+                  isSelected
+                    ? 'bg-accent-primary/10 text-foreground'
+                    : 'hover:bg-surface-2 text-foreground-secondary'
+                )}
+              >
+                {voice.sample_url && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      playVoice(voice);
+                    }}
+                    className={cn(
+                      'p-1.5 rounded-md transition-all flex-shrink-0',
+                      isPlaying
+                        ? 'bg-accent-primary text-background'
+                        : 'bg-surface-2 hover:bg-surface-3 text-foreground-muted'
+                    )}
+                  >
+                    {isPlaying ? (
+                      <Pause className="w-3 h-3" />
+                    ) : (
+                      <Play className="w-3 h-3" />
+                    )}
+                  </button>
+                )}
+                <div className={cn(
+                  'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0',
+                  voice.gender === 'female' ? 'bg-pink-500/20' : 'bg-blue-500/20'
+                )}>
+                  <User className={cn(
+                    'w-3 h-3',
+                    voice.gender === 'female' ? 'text-pink-400' : 'text-blue-400'
+                  )} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="truncate block">{voice.name}</span>
+                </div>
+                {isSelected && (
+                  <div className="w-2 h-2 rounded-full bg-accent-primary flex-shrink-0" />
+                )}
+              </div>
+            );
+          })}
+          
+          {filteredVoices.length === 0 && (
+            <div className="text-center py-4 text-foreground-muted text-sm">
+              No voices found
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Full mode rendering
   if (loading) {
     return (
       <div className={cn('space-y-4', className)}>

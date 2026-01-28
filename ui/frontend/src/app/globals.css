@@ -836,3 +836,413 @@ select option {
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
 }
+
+/* =====================================================
+   ENHANCED TRANSITIONS & INTERACTIONS
+   ===================================================== */
+
+/* Global focus-visible styles for accessibility */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Remove default focus for mouse users, keep for keyboard */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Button hover/focus improvements */
+button,
+[role="button"],
+.btn {
+  transition: 
+    background-color var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    color var(--duration-fast) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-normal) var(--ease-default),
+    opacity var(--duration-fast) var(--ease-default);
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not(:disabled),
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* Interactive elements subtle lift on hover */
+.interactive-lift {
+  transition: transform var(--duration-fast) var(--ease-spring),
+              box-shadow var(--duration-normal) var(--ease-default);
+}
+
+.interactive-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-glow);
+}
+
+.interactive-lift:active {
+  transform: translateY(0);
+}
+
+/* Smooth opacity transitions for disabled states */
+:disabled,
+[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transition: opacity var(--duration-fast) var(--ease-default);
+}
+
+/* =====================================================
+   ENHANCED FOCUS STATES (Accessibility)
+   ===================================================== */
+
+/* High-visibility focus ring for interactive elements */
+.focus-ring {
+  transition: box-shadow var(--duration-fast) var(--ease-default);
+}
+
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 
+    0 0 0 2px var(--background),
+    0 0 0 4px var(--accent-primary);
+}
+
+/* Focus within for container elements */
+.focus-within-ring:focus-within {
+  box-shadow: 
+    0 0 0 2px var(--background),
+    0 0 0 4px var(--accent-primary);
+}
+
+/* Skip link for keyboard navigation */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--accent-primary);
+  color: white;
+  padding: 0.5rem 1rem;
+  z-index: 1000;
+  transition: top var(--duration-fast) var(--ease-default);
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* =====================================================
+   LOADING & PROGRESS ANIMATIONS
+   ===================================================== */
+
+/* Skeleton pulse animation */
+@keyframes skeleton-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-skeleton {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Progress bar indeterminate animation */
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+    width: 50%;
+  }
+  50% {
+    width: 30%;
+  }
+  100% {
+    transform: translateX(300%);
+    width: 50%;
+  }
+}
+
+.animate-progress-indeterminate {
+  animation: progress-indeterminate 1.5s ease-in-out infinite;
+}
+
+/* Shimmer effect for loading states */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    var(--surface-3) 50%,
+    var(--surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Spin animation (already exists but ensure smooth) */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* =====================================================
+   TOAST ANIMATIONS
+   ===================================================== */
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right var(--duration-normal) var(--ease-spring);
+}
+
+@keyframes slide-out-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.animate-slide-out-right {
+  animation: slide-out-right var(--duration-fast) var(--ease-default);
+}
+
+/* =====================================================
+   CARD ENHANCEMENTS
+   ===================================================== */
+
+/* Card with subtle border glow on hover */
+.card-glow {
+  transition: 
+    border-color var(--duration-normal) var(--ease-default),
+    box-shadow var(--duration-normal) var(--ease-default),
+    transform var(--duration-fast) var(--ease-default);
+}
+
+.card-glow:hover {
+  border-color: var(--glass-border-hover);
+  box-shadow: 
+    var(--shadow-card),
+    0 0 20px -10px var(--accent-primary);
+}
+
+/* Selectable card (checkbox/radio pattern) */
+.card-selectable {
+  cursor: pointer;
+  transition: 
+    background-color var(--duration-fast) var(--ease-default),
+    border-color var(--duration-fast) var(--ease-default),
+    box-shadow var(--duration-normal) var(--ease-default);
+}
+
+.card-selectable:hover:not([aria-selected="true"]) {
+  background: var(--surface-1);
+  border-color: var(--glass-border-hover);
+}
+
+.card-selectable[aria-selected="true"] {
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.15) 0%, rgba(14, 165, 233, 0.05) 100%);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 20px -8px var(--accent-primary);
+}
+
+.card-selectable:focus-visible {
+  outline: none;
+  box-shadow: 
+    0 0 0 2px var(--background),
+    0 0 0 4px var(--accent-primary);
+}
+
+/* =====================================================
+   INPUT ENHANCEMENTS
+   ===================================================== */
+
+/* Input with icon */
+.input-with-icon {
+  position: relative;
+}
+
+.input-with-icon input {
+  padding-left: 2.75rem;
+}
+
+.input-with-icon .input-icon {
+  position: absolute;
+  left: 0.875rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--foreground-muted);
+  pointer-events: none;
+  transition: color var(--duration-fast) var(--ease-default);
+}
+
+.input-with-icon:focus-within .input-icon {
+  color: var(--accent-primary);
+}
+
+/* Character counter styles */
+.char-counter {
+  font-size: 0.75rem;
+  color: var(--foreground-muted);
+  transition: color var(--duration-fast) var(--ease-default);
+}
+
+.char-counter.warning {
+  color: var(--color-warning);
+}
+
+.char-counter.error {
+  color: var(--color-error);
+}
+
+/* =====================================================
+   BADGE ENHANCEMENTS
+   ===================================================== */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--surface-2);
+  color: var(--foreground-secondary);
+  border-radius: 9999px;
+  transition: 
+    background-color var(--duration-fast) var(--ease-default),
+    color var(--duration-fast) var(--ease-default);
+}
+
+.badge-success {
+  background: var(--color-success-muted);
+  color: var(--color-success);
+}
+
+.badge-warning {
+  background: var(--color-warning-muted);
+  color: var(--color-warning);
+}
+
+.badge-error {
+  background: var(--color-error-muted);
+  color: var(--color-error);
+}
+
+.badge-info {
+  background: var(--color-info-muted);
+  color: var(--color-info);
+}
+
+.badge-accent {
+  background: rgba(14, 165, 233, 0.15);
+  color: var(--accent-primary);
+}
+
+/* =====================================================
+   ICON BUTTON
+   ===================================================== */
+
+.btn-icon {
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--foreground-muted);
+  border: none;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--foreground);
+}
+
+.btn-icon:active:not(:disabled) {
+  background: var(--surface-3);
+}
+
+/* Ghost button */
+.btn-ghost {
+  background: transparent;
+  color: var(--foreground-muted);
+  border: none;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--color-error-muted);
+  color: var(--color-error);
+}
+
+/* =====================================================
+   RESPONSIVE SPACING UTILITIES
+   ===================================================== */
+
+.gap-responsive {
+  gap: var(--space-sm);
+}
+
+@media (min-width: 768px) {
+  .gap-responsive {
+    gap: var(--space-md);
+  }
+}
+
+@media (min-width: 1024px) {
+  .gap-responsive {
+    gap: var(--space-lg);
+  }
+}
+
+/* =====================================================
+   REDUCED MOTION
+   ===================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .animate-blob,
+  .animate-pulse,
+  .animate-spin,
+  .animate-shimmer {
+    animation: none;
+  }
+}

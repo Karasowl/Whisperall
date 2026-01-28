@@ -1,18 +1,15 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, Sparkles, Zap } from 'lucide-react';
+import { Loader2, Sparkles, Zap, ChevronDown, Cpu, Bolt } from 'lucide-react';
 import { StatusAlert } from '@/components/module';
-import { ModelSelector } from '@/components/ModelSelector';
-import { LanguageSelector } from '@/components/LanguageSelector';
-import { VoiceSelector } from '@/components/VoiceSelector';
-import { AdvancedSettings } from '@/components/AdvancedSettings';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { ProgressBar } from '@/components/ProgressBar';
-import { PresetSelector } from '@/components/PresetSelector';
-import { TurboTagsEditor } from '@/components/TurboTagsEditor';
+import { TTSSettingsPanel } from '@/components/TTSSettingsPanel';
+import { QuickStartChips } from '@/components/QuickStartChips';
 import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
 import { PresetVoiceSelector } from '@/components/PresetVoiceSelector';
+import { VoiceSelector } from '@/components/VoiceSelector';
 import {
   getModels,
   getLanguages,
@@ -24,11 +21,10 @@ import {
   Model,
   Language,
   Voice,
-  Preset,
   TTSProviderInfo,
   TTSProviderUsage,
 } from '@/lib/api';
-import { DeviceToggle } from '@/components/DeviceToggle';
+import { cn } from '@/lib/utils';
 import { playActionSound } from '@/lib/actionSounds';
 
 type SettingsState = {
@@ -40,6 +36,16 @@ type SettingsState = {
   speed: number;
   seed: number;
   [key: string]: number | string | boolean;
+};
+
+const DEFAULT_SETTINGS: SettingsState = {
+  temperature: 0.8,
+  exaggeration: 0.5,
+  cfg_weight: 0.5,
+  top_p: 0.95,
+  top_k: 1000,
+  speed: 1.0,
+  seed: 0,
 };
 
 const PROVIDER_USAGE_CAPABLE = ['elevenlabs'];
@@ -60,58 +66,10 @@ export default function TTSPage() {
   const [selectedPresetVoiceId, setSelectedPresetVoiceId] = useState<string | null>(null);
   const [voiceMode, setVoiceMode] = useState<'preset' | 'clone'>('preset');
   const [providerUsage, setProviderUsage] = useState<TTSProviderUsage | null>(null);
-  const [providerUsageError, setProviderUsageError] = useState<string | null>(null);
-  const [providerUsageLoading, setProviderUsageLoading] = useState(false);
-  const refreshProviderUsage = useCallback(
-    async (cancelToken?: { cancelled: boolean }) => {
-      if (!PROVIDER_USAGE_CAPABLE.includes(selectedProvider)) {
-        setProviderUsage(null);
-        setProviderUsageError(null);
-        setProviderUsageLoading(false);
-        return;
-      }
-
-      setProviderUsageLoading(true);
-      setProviderUsageError(null);
-
-      try {
-        const response = await getTTSProviderUsage(selectedProvider);
-        if (cancelToken?.cancelled) return;
-        if (response.usage) {
-          setProviderUsage(response);
-        } else {
-          setProviderUsage(null);
-        }
-      } catch (err: unknown) {
-        if (cancelToken?.cancelled) return;
-        const message =
-          err && typeof err === 'object' && 'response' in err
-            ? (err as any).response?.data?.detail || (err as any).message
-            : err instanceof Error
-              ? err.message
-              : 'Failed to load usage info';
-        setProviderUsageError(message || 'Failed to load usage info');
-        setProviderUsage(null);
-      } finally {
-        if (!cancelToken?.cancelled) {
-          setProviderUsageLoading(false);
-        }
-      }
-    },
-    [selectedProvider]
-  );
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [outputFormat, setOutputFormat] = useState('wav');
 
-  const [settings, setSettings] = useState<SettingsState>({
-    temperature: 0.8,
-    exaggeration: 0.5,
-    cfg_weight: 0.5,
-    top_p: 0.95,
-    top_k: 1000,
-    speed: 1.0,
-    seed: 0,
-  });
+  const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
 
   // Device settings
   const [device, setDevice] = useState<'auto' | 'cuda' | 'cpu'>('auto');
@@ -144,32 +102,9 @@ export default function TTSPage() {
     loadData();
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + Enter to generate
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        e.preventDefault();
-        if (!isLoading && text.trim() && !missingReferenceVoice) {
-          handleGenerate(false);
-        }
-      }
-      // Ctrl/Cmd + Shift + Enter for quick preview
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
-        e.preventDefault();
-        if (!isLoading && !isPreviewLoading && text.trim() && !missingReferenceVoice) {
-          handleGenerate(true);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [text, isLoading, isPreviewLoading, missingReferenceVoice]);
-
   // Update selected model when provider changes
   useEffect(() => {
-    if (providerInfo) {
+    if (providerInfo?.default_model) {
       setSelectedModel(providerInfo.default_model);
     }
   }, [providerInfo?.id]);
@@ -193,21 +128,6 @@ export default function TTSPage() {
     setVoiceMode('preset');
   }, [providerInfo?.id, selectedProvider]);
 
-  useEffect(() => {
-    if (!PROVIDER_USAGE_CAPABLE.includes(selectedProvider)) {
-      setProviderUsage(null);
-      setProviderUsageError(null);
-      setProviderUsageLoading(false);
-      return;
-    }
-
-    const cancelToken = { cancelled: false };
-    void refreshProviderUsage(cancelToken);
-    return () => {
-      cancelToken.cancelled = true;
-    };
-  }, [selectedProvider, refreshProviderUsage]);
-
   const hasPresetVoices = providerInfo?.voice_cloning === 'none' ||
     (providerInfo?.preset_voices?.length ?? 0) > 0 ||
     ['openai-tts', 'elevenlabs', 'fishaudio', 'cartesia', 'playht', 'siliconflow', 'minimax', 'zyphra', 'narilabs', 'kokoro', 'dia'].includes(selectedProvider);
@@ -223,22 +143,9 @@ export default function TTSPage() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleApplyPreset = (preset: Preset) => {
-    // Apply preset values
-    setSelectedModel(preset.model);
-    if (preset.language) {
-      setSelectedLanguage(preset.language);
-    }
-    if (preset.voice_id) {
-      setSelectedVoiceId(preset.voice_id);
-    }
-    setSettings((prev) => ({
-      ...prev,
-      temperature: preset.temperature,
-      exaggeration: preset.exaggeration,
-      cfg_weight: preset.cfg_weight,
-      speed: preset.speed,
-    }));
+  const handleResetSettings = () => {
+    setSettings(DEFAULT_SETTINGS);
+    setFastMode(false);
   };
 
   const handleGenerate = async (preview = false) => {
@@ -263,10 +170,7 @@ export default function TTSPage() {
     }
 
     try {
-      // If user uploaded a file, we need to save it as a voice first
       let voiceId = selectedVoiceId;
-
-      // TODO: Handle uploaded file - for now just use selected voice
 
       const extraParams = providerInfo?.extra_params
         ? Object.keys(providerInfo.extra_params).reduce<Record<string, unknown>>((acc, paramKey) => {
@@ -316,9 +220,6 @@ export default function TTSPage() {
           filename: res.filename,
         });
         playActionSound('complete');
-        if (PROVIDER_USAGE_CAPABLE.includes(selectedProvider)) {
-          void refreshProviderUsage();
-        }
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Generation failed');
@@ -330,266 +231,238 @@ export default function TTSPage() {
 
   const charCount = text.length;
   const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
-  const formatNumber = (value?: number | null) =>
-    value != null ? new Intl.NumberFormat().format(value) : '—';
 
-  const formatDateFromUnix = (value?: number | null) => {
-    if (!value) return '—';
-    return new Date(value * 1000).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
-
-  const getCharacterLabel = (usage?: TTSProviderUsage['usage']) => {
-    if (!usage) return '—';
-    const { character_count, character_limit } = usage;
-    if (typeof character_count === 'number' && typeof character_limit === 'number') {
-      return `${formatNumber(character_count)} / ${formatNumber(character_limit)}`;
+  // Get selected voice name for display
+  const getSelectedVoiceName = () => {
+    if (usesPresetVoice && selectedPresetVoiceId) {
+      const preset = providerInfo?.preset_voices?.find(v => v.id === selectedPresetVoiceId);
+      return preset?.name || selectedPresetVoiceId;
     }
-    if (typeof character_count === 'number') {
-      return formatNumber(character_count);
+    if (selectedVoiceId) {
+      const voice = voices.find(v => v.id === selectedVoiceId);
+      return voice?.name || 'Selected Voice';
     }
-    if (typeof character_limit === 'number') {
-      return formatNumber(character_limit);
-    }
-    return '—';
-  };
-
-  const getVoiceSlotLabel = (usage?: TTSProviderUsage['usage']) => {
-    if (!usage) return '—';
-    const { voice_slots_used, voice_limit } = usage;
-    if (typeof voice_slots_used === 'number' && typeof voice_limit === 'number') {
-      return `${formatNumber(voice_slots_used)} / ${formatNumber(voice_limit)}`;
-    }
-    if (typeof voice_slots_used === 'number') {
-      return formatNumber(voice_slots_used);
-    }
-    if (typeof voice_limit === 'number') {
-      return formatNumber(voice_limit);
-    }
-    return '—';
+    return 'Select a voice';
   };
 
   return (
-    <div className="space-y-8 animate-slide-up">
-      {/* Header */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <h1 className="module-title">Text to Speech</h1>
-          <DeviceToggle
-            value={device}
-            onChange={setDevice}
-            showFastMode
-            fastMode={fastMode}
-            onFastModeChange={setFastMode}
-          />
-        </div>
-        <p className="module-description">
-          Convert text to natural-sounding speech with voice cloning
-        </p>
-      </div>
-
-      {/* Error Alert */}
-      {error && (
-        <StatusAlert
-          variant="error"
-          message={error}
-          dismissible
-          onDismiss={() => setError(null)}
-        />
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left column - Main controls */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* TTS Provider selector (unified: local + API) */}
-          <div className="card p-6">
-            <UnifiedProviderSelector
-              service="tts"
-              selected={selectedProvider}
-              onSelect={setSelectedProvider}
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
-              onProviderInfoChange={(info) => setProviderInfo(info as TTSProviderInfo | null)}
-              variant="dropdown"
-              showModelSelector
-            />
-            {PROVIDER_USAGE_CAPABLE.includes(selectedProvider) && (
-              <div className="mt-4 space-y-2">
-                <div className="flex items-center justify-between text-xs uppercase tracking-wider text-slate-400">
-                  <span>Provider Usage</span>
-                  {providerUsageLoading && (
-                    <span className="flex items-center gap-1 text-[10px]">
-                      <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                      <span>Refreshing</span>
-                    </span>
-                  )}
-                </div>
-
-                {providerUsage?.usage ? (
-                  <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-3 text-white/90">
-                    <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-emerald-200">
-                      <span>{providerUsage.provider.toUpperCase()}</span>
-                      <span className="text-[10px] text-emerald-300">
-                        {providerUsage.usage.currency?.toUpperCase() || '—'}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-emerald-200">Tier</p>
-                        <p className="font-semibold text-white">
-                          {providerUsage.usage.tier || '—'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-emerald-200">Status</p>
-                        <p className="font-semibold text-white">
-                          {providerUsage.usage.status || '—'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-emerald-200">Characters</p>
-                        <p className="font-semibold text-white">
-                          {getCharacterLabel(providerUsage.usage)}
-                        </p>
-                        {providerUsage.usage.characters_remaining != null && (
-                          <p className="text-[10px] text-emerald-200">
-                            Remaining {formatNumber(providerUsage.usage.characters_remaining)}
-                          </p>
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-emerald-200">Next reset</p>
-                        <p className="font-semibold text-white">
-                          {formatDateFromUnix(providerUsage.usage.next_character_count_reset_unix)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-emerald-200">Voice slots</p>
-                        <p className="font-semibold text-white">
-                          {getVoiceSlotLabel(providerUsage.usage)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-emerald-200">Billing</p>
-                        <p className="font-semibold text-white">
-                          {providerUsage.usage.billing_period || '—'}
-                        </p>
-                        {providerUsage.usage.character_refresh_period && (
-                          <p className="text-[10px] text-emerald-200">
-                            {providerUsage.usage.character_refresh_period}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : providerUsageError ? (
-                  <p className="text-xs text-amber-300">{providerUsageError}</p>
-                ) : (
-                  !providerUsageLoading && (
-                    <p className="text-xs text-slate-400">
-                      Usage details appear once ElevenLabs syncs your subscription.
-                    </p>
-                  )
+    <div className="h-full flex flex-col lg:flex-row gap-0 animate-slide-up">
+      {/* Main Content Area - Text Input */}
+      <div className="flex-1 flex flex-col min-h-0 lg:border-r lg:border-glass-border">
+        {/* Header */}
+        <div className="p-6 pb-4 border-b border-glass-border">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <h1 className="text-2xl font-bold text-gradient">Text to Speech</h1>
+            
+            {/* Device selector - compact */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 text-xs text-foreground-muted">
+                <Cpu className="w-3.5 h-3.5" />
+                <select
+                  value={device}
+                  onChange={(e) => setDevice(e.target.value as 'auto' | 'cuda' | 'cpu')}
+                  className="bg-transparent border-none text-xs cursor-pointer focus:outline-none"
+                >
+                  <option value="auto">Auto</option>
+                  <option value="cuda">GPU</option>
+                  <option value="cpu">CPU</option>
+                </select>
+              </div>
+              
+              <button
+                onClick={() => setFastMode(!fastMode)}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors",
+                  fastMode
+                    ? "bg-accent-primary/20 text-accent-primary"
+                    : "text-foreground-muted hover:text-foreground"
                 )}
-              </div>
-            )}
+                title="Fast mode"
+              >
+                <Bolt className="w-3.5 h-3.5" />
+                Fast
+              </button>
+            </div>
           </div>
+        </div>
 
-          {/* Language selector - hidden for single-language providers or language-specific models */}
-          {(() => {
-            const supportedLangs = providerInfo?.supported_languages || [];
-            const modelImpliesLang = /spanish|espanol|es[-_]|[-_]es/i.test(selectedModel);
-            const hideLanguageSelector = supportedLangs.length <= 1 || modelImpliesLang;
-
-            if (hideLanguageSelector) return null;
-
-            return (
-              <div className="card p-6 space-y-4">
-                <LanguageSelector
-                  languages={languages.filter(l => supportedLangs.includes(l.code))}
-                  selected={selectedLanguage}
-                  onSelect={setSelectedLanguage}
-                  disabled={selectedProvider === 'chatterbox' && selectedModel !== 'multilingual'}
-                />
-              </div>
-            );
-          })()}
-
-          {/* Preset selector */}
-          <div className="card p-6">
-            <PresetSelector
-              currentSettings={{
-                model: selectedModel,
-                language: selectedLanguage,
-                temperature: settings.temperature,
-                exaggeration: settings.exaggeration,
-                cfg_weight: settings.cfg_weight,
-                speed: settings.speed,
-                voice_id: selectedVoiceId || undefined,
-              }}
-              onApplyPreset={handleApplyPreset}
+        {/* Error Alert */}
+        {error && (
+          <div className="px-6 pt-4">
+            <StatusAlert
+              variant="error"
+              message={error}
+              dismissible
+              onDismiss={() => setError(null)}
             />
           </div>
+        )}
 
-          {/* Text input */}
-          <div className="card p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <label className="label">Text Input</label>
-              {providerUsage?.usage?.character_limit && (
-                <span className={`text-xs ${charCount > (providerUsage.usage.characters_remaining || providerUsage.usage.character_limit) ? 'text-error' : 'text-foreground-muted'}`}>
-                  {formatNumber(providerUsage.usage.characters_remaining || (providerUsage.usage.character_limit - (providerUsage.usage.character_count || 0)))} chars remaining
-                </span>
-              )}
-            </div>
+        {/* Text Area */}
+        <div className="flex-1 p-6 flex flex-col min-h-0">
+          <div className="relative flex-1">
             <textarea
               ref={textareaRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Enter the text you want to convert to speech..."
-              rows={8}
-              className="input textarea min-h-[200px]"
+              placeholder="Start typing here or paste any text you want to turn into lifelike speech..."
+              className="w-full h-full min-h-[300px] lg:min-h-0 bg-transparent border-none resize-none text-lg leading-relaxed placeholder:text-foreground-muted focus:outline-none custom-scrollbar"
             />
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-foreground-muted">
-              <div className="flex items-center gap-3">
-                <span>{formatNumber(charCount)} chars</span>
-                <span className="text-foreground-muted/50">•</span>
-                <span>{formatNumber(wordCount)} words</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="badge badge-primary">~{Math.ceil(wordCount / 150)} min</span>
-                {charCount > 5000 && (
-                  <span className="badge bg-warning/20 text-warning border border-warning/30">Long text</span>
-                )}
-              </div>
-            </div>
           </div>
 
-          {/* Turbo Tags Editor */}
-          {selectedModel === 'turbo' && (
-            <div className="card p-6">
-              <TurboTagsEditor
-                text={text}
-                onTextChange={setText}
-                textareaRef={textareaRef}
+          {/* Character count */}
+          <div className="flex items-center justify-between pt-4 text-sm text-foreground-muted border-t border-glass-border/50">
+            <span>{charCount} characters · {wordCount} words</span>
+            <span className="text-xs">~{Math.ceil(wordCount / 150)} min audio</span>
+          </div>
+        </div>
+
+        {/* Quick Start Chips - only show when text is empty */}
+        {!text && (
+          <div className="px-6 pb-6">
+            <QuickStartChips onSelect={setText} />
+          </div>
+        )}
+
+        {/* Progress & Result */}
+        {(isLoading || result) && (
+          <div className="px-6 pb-6 space-y-4">
+            {isLoading && (
+              <ProgressBar
+                progress={progress}
+                status="Generating audio..."
+                details="Processing text chunks"
               />
+            )}
+
+            {result && (
+              <div className="animate-fade-in">
+                <AudioPlayer src={result.url} filename={result.filename} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Right Sidebar - Settings Panel */}
+      <div className="w-full lg:w-[340px] xl:w-[380px] flex-shrink-0 flex flex-col bg-surface-base/50 lg:bg-transparent">
+        {/* Provider & Voice Selection */}
+        <div className="p-4 space-y-4 border-b border-glass-border">
+          {/* Provider/Model Selector - Compact */}
+          <UnifiedProviderSelector
+            service="tts"
+            selected={selectedProvider}
+            onSelect={setSelectedProvider}
+            selectedModel={selectedModel}
+            onModelChange={setSelectedModel}
+            onProviderInfoChange={(info) => setProviderInfo(info as TTSProviderInfo | null)}
+            variant="dropdown"
+            showModelSelector
+          />
+
+          {/* Voice Selector - Compact Card */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Voice</label>
+            
+            {/* Voice Mode Toggle (if both modes available) */}
+            {hasPresetVoices && hasVoiceCloning && (
+              <div className="flex gap-1 p-1 bg-surface-1 rounded-lg mb-2">
+                <button
+                  onClick={() => {
+                    setVoiceMode('preset');
+                    setSelectedVoiceId(null);
+                  }}
+                  className={cn(
+                    "flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                    voiceMode === 'preset'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-foreground-muted hover:text-foreground"
+                  )}
+                >
+                  Preset
+                </button>
+                <button
+                  onClick={() => {
+                    setVoiceMode('clone');
+                    setSelectedPresetVoiceId(null);
+                  }}
+                  className={cn(
+                    "flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                    voiceMode === 'clone'
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-foreground-muted hover:text-foreground"
+                  )}
+                >
+                  Clone
+                </button>
+              </div>
+            )}
+
+            {/* Voice Selector Content */}
+            {usesPresetVoice ? (
+              <PresetVoiceSelector
+                providerId={selectedProvider}
+                selected={selectedPresetVoiceId}
+                onSelect={(id) => {
+                  setSelectedPresetVoiceId(id);
+                  setSelectedVoiceId(null);
+                }}
+                language={selectedLanguage}
+                compact
+              />
+            ) : (
+              <VoiceSelector
+                voices={voices}
+                selectedVoiceId={selectedVoiceId}
+                onSelectVoice={(id) => {
+                  setSelectedVoiceId(id);
+                  setSelectedPresetVoiceId(null);
+                }}
+                onUploadVoice={setUploadedFile}
+                uploadedFile={uploadedFile}
+                compact
+              />
+            )}
+          </div>
+
+          {missingReferenceVoice && (
+            <div className="text-xs text-amber-400 bg-amber-400/10 rounded-lg px-3 py-2">
+              F5-TTS needs a reference voice sample for cloning
             </div>
           )}
+        </div>
 
-          {/* Output format */}
-          <div className="card p-6 space-y-4">
-            <label className="label">Output Format</label>
-            <div className="flex gap-3">
+        {/* Settings Panel with Tabs */}
+        <div className="flex-1 min-h-0 flex flex-col">
+          <TTSSettingsPanel
+            settings={settings}
+            onChange={handleSettingChange}
+            providerInfo={providerInfo}
+            fastMode={fastMode}
+            onFastModeChange={setFastMode}
+            onResetValues={handleResetSettings}
+            modelSupportsExaggeration={currentModel?.supports_exaggeration ?? true}
+            modelSupportsCfg={currentModel?.supports_cfg ?? true}
+            className="flex-1"
+          />
+        </div>
+
+        {/* Output Format & Generate Buttons - Sticky bottom */}
+        <div className="p-4 border-t border-glass-border space-y-3 bg-surface-base/80 backdrop-blur-sm">
+          {/* Output Format */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-foreground-muted">Format:</span>
+            <div className="flex gap-1">
               {['wav', 'mp3', 'flac'].map((format) => (
                 <button
                   key={format}
                   onClick={() => setOutputFormat(format)}
-                  className={`px-6 py-3 rounded-lg font-medium transition-all ${outputFormat === format
-                      ? 'btn-primary text-black' // Use the new btn-primary class which handles the gradient
-                      : 'card hover:bg-surface-2 text-foreground-muted hover:text-foreground'
-                    }`}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium rounded transition-colors",
+                    outputFormat === format
+                      ? "bg-foreground text-background"
+                      : "text-foreground-muted hover:text-foreground"
+                  )}
                 >
                   {format.toUpperCase()}
                 </button>
@@ -597,169 +470,42 @@ export default function TTSPage() {
             </div>
           </div>
 
-          {/* Advanced settings */}
-          <div className="card p-6">
-            <AdvancedSettings
-              settings={settings}
-              onChange={handleSettingChange}
-              modelSupportsExaggeration={currentModel?.supports_exaggeration ?? true}
-              modelSupportsCfg={currentModel?.supports_cfg ?? true}
-              extraParams={providerInfo?.extra_params}
-              dynamicOnly={selectedProvider !== 'chatterbox'}
-            />
-          </div>
-
-          {/* Progress bar */}
-          {isLoading && (
-            <div className="card p-6">
-              <ProgressBar
-                progress={progress}
-                status="Generating audio..."
-                details="Processing text chunks"
-              />
-            </div>
-          )}
-
-          {/* Result */}
-          {result && (
-            <div className="card p-6 animate-fade-in">
-              <AudioPlayer src={result.url} filename={result.filename} />
-            </div>
-          )}
-        </div>
-
-        {/* Right column - Voice selection */}
-        <div className="space-y-6">
-          <div className="card p-6 sticky top-24">
-            {/* Voice selection - show PresetVoiceSelector for providers with preset voices, VoiceSelector for cloning */}
-            {(() => {
-              // For API providers and providers with preset voices only
-              if (hasPresetVoices && !hasVoiceCloning) {
-                return (
-                  <PresetVoiceSelector
-                    providerId={selectedProvider}
-                    selected={selectedPresetVoiceId}
-                    onSelect={setSelectedPresetVoiceId}
-                    language={selectedLanguage}
-                  />
-                );
-              }
-
-              // For providers that support both preset voices AND voice cloning
-              if (hasPresetVoices && hasVoiceCloning) {
-                return (
-                  <div className="space-y-4">
-                    <div className="flex gap-2 mb-2">
-                      <button
-                        onClick={() => {
-                          setVoiceMode('preset');
-                          setSelectedVoiceId(null);
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${voiceMode === 'preset' ? 'bg-gradient-to-r from-emerald-400 to-amber-400 text-white' : 'glass glass-hover text-slate-400'}`}
-                      >
-                        Preset Voices
-                      </button>
-                      <button
-                        onClick={() => {
-                          setVoiceMode('clone');
-                          setSelectedPresetVoiceId(null);
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${voiceMode === 'clone' ? 'bg-gradient-to-r from-emerald-400 to-amber-400 text-white' : 'glass glass-hover text-slate-400'}`}
-                      >
-                        Clone Voice
-                      </button>
-                    </div>
-                    {voiceMode === 'preset' ? (
-                      <PresetVoiceSelector
-                        providerId={selectedProvider}
-                        selected={selectedPresetVoiceId}
-                        onSelect={(id) => {
-                          setSelectedPresetVoiceId(id);
-                          setSelectedVoiceId(null);
-                        }}
-                        language={selectedLanguage}
-                      />
-                    ) : (
-                      <VoiceSelector
-                        voices={voices}
-                        selectedVoiceId={selectedVoiceId}
-                        onSelectVoice={(id) => {
-                          setSelectedVoiceId(id);
-                          setSelectedPresetVoiceId(null);
-                        }}
-                        onUploadVoice={setUploadedFile}
-                        uploadedFile={uploadedFile}
-                      />
-                    )}
-                  </div>
-                );
-              }
-
-              // Default: only voice cloning
-              return (
-                <VoiceSelector
-                  voices={voices}
-                  selectedVoiceId={selectedVoiceId}
-                  onSelectVoice={setSelectedVoiceId}
-                  onUploadVoice={setUploadedFile}
-                  uploadedFile={uploadedFile}
-                />
-              );
-            })()}
-
-            {missingReferenceVoice && (
-              <div className="mt-3 text-xs text-amber-300">
-                F5-TTS needs a saved reference voice sample for cloning; please select one above.
-              </div>
+          {/* Action Buttons */}
+          <button
+            onClick={() => handleGenerate(false)}
+            disabled={isLoading || !text.trim() || missingReferenceVoice}
+            className="btn btn-primary w-full py-3"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-5 h-5 fill-current" />
+                Generate Audio
+              </>
             )}
+          </button>
 
-            {/* Action buttons */}
-            <div className="mt-6 space-y-3">
-              <button
-                onClick={() => handleGenerate(false)}
-                disabled={isLoading || !text.trim() || missingReferenceVoice}
-                className="btn btn-primary w-full py-4 text-base animate-pulse-glow group relative"
-                title="Ctrl+Enter"
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-5 h-5 fill-current" />
-                    Generate Audio
-                    <kbd className="hidden sm:inline-flex ml-2 px-1.5 py-0.5 text-[10px] font-mono bg-black/20 rounded opacity-60 group-hover:opacity-100">
-                      ⌘↵
-                    </kbd>
-                  </>
-                )}
-              </button>
-
-              <button
-                onClick={() => handleGenerate(true)}
-                disabled={isPreviewLoading || isLoading || !text.trim() || missingReferenceVoice}
-                className="btn btn-secondary w-full py-4 text-base group"
-                title="Ctrl+Shift+Enter"
-              >
-                {isPreviewLoading ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Loading preview...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-5 h-5 fill-current" />
-                    Quick Preview
-                    <kbd className="hidden sm:inline-flex ml-2 px-1.5 py-0.5 text-[10px] font-mono bg-black/10 rounded opacity-60 group-hover:opacity-100">
-                      ⌘⇧↵
-                    </kbd>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
+          <button
+            onClick={() => handleGenerate(true)}
+            disabled={isPreviewLoading || isLoading || !text.trim() || missingReferenceVoice}
+            className="btn btn-secondary w-full py-2.5 text-sm"
+          >
+            {isPreviewLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading...
+              </>
+            ) : (
+              <>
+                <Zap className="w-4 h-4" />
+                Quick Preview
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>

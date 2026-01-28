@@ -27,6 +27,36 @@ export interface TTSProviderInfo extends ServiceProviderInfo {
   voices?: Voice[];
   supportsCloning?: boolean;
   supportsStreaming?: boolean;
+  // Extended properties for detailed TTS providers
+  default_model?: string;
+  voice_cloning?: 'none' | 'optional' | 'required';
+  preset_voices?: TTSPresetVoice[];
+  supported_languages?: string[];
+  extra_params?: Record<string, {
+    type: string;
+    label?: string;
+    description?: string;
+    default?: number | string | boolean;
+    min?: number;
+    max?: number;
+  }>;
+}
+
+export interface TTSProviderUsage {
+  provider: string;
+  usage: {
+    tier?: string;
+    status?: string;
+    character_count?: number;
+    character_limit?: number;
+    characters_remaining?: number;
+    next_character_count_reset_unix?: number;
+    voice_slots_used?: number;
+    voice_limit?: number;
+    billing_period?: string;
+    character_refresh_period?: string;
+    currency?: string;
+  };
 }
 
 export interface MusicProviderInfo extends ServiceProviderInfo {
@@ -45,8 +75,10 @@ export interface TTSPresetVoice {
   name: string;
   provider: string;
   previewUrl?: string;
+  sample_url?: string;
   language?: string;
   gender?: string;
+  description?: string;
 }
 
 export interface Voice {
@@ -58,6 +90,17 @@ export interface Voice {
   previewUrl?: string;
   isCustom?: boolean;
   samplePath?: string;
+  // Extended properties for voice library
+  tags: string[];
+  filename?: string;
+  size_mb?: number;
+  sample_url?: string;
+  analysis?: {
+    description?: string;
+    pitch_category?: string;
+    energy_category?: string;
+    tempo_category?: string;
+  };
 }
 
 export interface Model {
@@ -66,6 +109,9 @@ export interface Model {
   provider: string;
   type: ServiceType;
   description?: string;
+  // Extended TTS model properties
+  supports_exaggeration?: boolean;
+  supports_cfg?: boolean;
 }
 
 export interface Language {
@@ -165,41 +211,129 @@ export async function getTTSProvider(providerId: string): Promise<TTSProviderInf
   return fetchApi<TTSProviderInfo>(`/api/tts/providers/${providerId}`);
 }
 
-export async function getTTSProviderVoices(providerId: string): Promise<TTSPresetVoice[]> {
-  const provider = await getTTSProvider(providerId);
-  return (provider.voices || []).map(v => ({
-    id: v.id,
-    name: v.name,
-    provider: providerId,
-    previewUrl: v.previewUrl,
-    language: v.language,
-    gender: v.gender,
-  }));
+export async function getTTSProviderVoices(providerId: string, language?: string): Promise<TTSPresetVoice[]> {
+  try {
+    // Try dedicated voices endpoint first
+    const endpoint = language 
+      ? `/api/tts/providers/${providerId}/voices?language=${language}`
+      : `/api/tts/providers/${providerId}/voices`;
+    return await fetchApi<TTSPresetVoice[]>(endpoint);
+  } catch {
+    // Fallback to provider info
+    const provider = await getTTSProvider(providerId);
+    const voices = (provider.voices || provider.preset_voices || []).map(v => ({
+      id: v.id,
+      name: v.name,
+      provider: providerId,
+      previewUrl: v.previewUrl,
+      sample_url: v.previewUrl || v.sample_url,
+      language: v.language,
+      gender: v.gender,
+      description: v.description,
+    }));
+    
+    if (language) {
+      return voices.filter(v => !v.language || v.language.startsWith(language.split('-')[0]));
+    }
+    return voices;
+  }
 }
 
 // Voices
-export async function getVoices(): Promise<Voice[]> {
-  return fetchApi<Voice[]>('/api/voices');
+export interface VoicesResponse {
+  voices: Voice[];
+  total_size_mb: number;
 }
 
-export async function createVoice(voice: Partial<Voice>): Promise<Voice> {
-  return fetchApi<Voice>('/api/voices', {
+export async function getVoices(): Promise<VoicesResponse> {
+  try {
+    return await fetchApi<VoicesResponse>('/api/voices');
+  } catch {
+    // Fallback for backends that return array directly
+    const voices = await fetchApi<Voice[]>('/api/voices');
+    return { voices, total_size_mb: 0 };
+  }
+}
+
+export async function createVoice(name: string, tags: string, audioFile: File): Promise<Voice> {
+  const formData = new FormData();
+  formData.append('name', name);
+  formData.append('tags', tags);
+  formData.append('audio', audioFile);
+  
+  const response = await fetch(`${API_BASE}/api/voices`, {
     method: 'POST',
-    body: JSON.stringify(voice),
+    body: formData,
   });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || `Failed to create voice: ${response.status}`);
+  }
+  
+  return response.json();
 }
 
 export async function deleteVoice(voiceId: string): Promise<void> {
   await fetchApi(`/api/voices/${voiceId}`, { method: 'DELETE' });
 }
 
-export async function analyzeVoice(voiceId: string): Promise<Record<string, unknown>> {
-  return fetchApi<Record<string, unknown>>(`/api/voices/${voiceId}/analyze`);
+export async function analyzeVoice(voiceId: string): Promise<{ analysis: Voice['analysis'] }> {
+  return fetchApi<{ analysis: Voice['analysis'] }>(`/api/voices/${voiceId}/analyze`);
 }
 
 export function getAudioUrl(path: string): string {
   if (path.startsWith('http')) return path;
+  // Handle both /api/audio/path and direct paths
+  if (path.startsWith('/')) {
+    return `${API_BASE}${path}`;
+  }
   return `${API_BASE}/api/audio/${encodeURIComponent(path)}`;
+}
+
+// TTS Generation
+export interface TTSGenerateRequest {
+  text: string;
+  provider?: string;
+  model?: string;
+  language?: string;
+  voice_id?: string;
+  preset_voice_id?: string;
+  temperature?: number;
+  exaggeration?: number;
+  cfg_weight?: number;
+  top_p?: number;
+  top_k?: number;
+  speed?: number;
+  seed?: number;
+  output_format?: string;
+  device?: string;
+  fast_mode?: boolean;
+  extra_params?: Record<string, unknown>;
+}
+
+export interface TTSGenerateResponse {
+  output_url: string;
+  filename: string;
+  duration?: number;
+}
+
+export async function generate(request: TTSGenerateRequest): Promise<TTSGenerateResponse> {
+  return fetchApi<TTSGenerateResponse>('/api/tts/generate', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function generatePreview(request: TTSGenerateRequest): Promise<TTSGenerateResponse> {
+  return fetchApi<TTSGenerateResponse>('/api/tts/preview', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function getTTSProviderUsage(providerId: string): Promise<TTSProviderUsage> {
+  return fetchApi<TTSProviderUsage>(`/api/tts/providers/${providerId}/usage`);
 }
 
 // Models
