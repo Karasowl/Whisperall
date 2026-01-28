@@ -144,6 +144,29 @@ export default function TTSPage() {
     loadData();
   }, []);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + Enter to generate
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (!isLoading && text.trim() && !missingReferenceVoice) {
+          handleGenerate(false);
+        }
+      }
+      // Ctrl/Cmd + Shift + Enter for quick preview
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        if (!isLoading && !isPreviewLoading && text.trim() && !missingReferenceVoice) {
+          handleGenerate(true);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [text, isLoading, isPreviewLoading, missingReferenceVoice]);
+
   // Update selected model when provider changes
   useEffect(() => {
     if (providerInfo) {
@@ -513,7 +536,14 @@ export default function TTSPage() {
 
           {/* Text input */}
           <div className="card p-6 space-y-4">
-            <label className="label">Text Input</label>
+            <div className="flex items-center justify-between">
+              <label className="label">Text Input</label>
+              {providerUsage?.usage?.character_limit && (
+                <span className={`text-xs ${charCount > (providerUsage.usage.characters_remaining || providerUsage.usage.character_limit) ? 'text-error' : 'text-foreground-muted'}`}>
+                  {formatNumber(providerUsage.usage.characters_remaining || (providerUsage.usage.character_limit - (providerUsage.usage.character_count || 0)))} chars remaining
+                </span>
+              )}
+            </div>
             <textarea
               ref={textareaRef}
               value={text}
@@ -522,9 +552,18 @@ export default function TTSPage() {
               rows={8}
               className="input textarea min-h-[200px]"
             />
-            <div className="flex justify-between text-sm text-foreground-muted">
-              <span>{charCount} characters, {wordCount} words</span>
-              <span className="badge badge-primary">~{Math.ceil(wordCount / 150)} min audio</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-foreground-muted">
+              <div className="flex items-center gap-3">
+                <span>{formatNumber(charCount)} chars</span>
+                <span className="text-foreground-muted/50">•</span>
+                <span>{formatNumber(wordCount)} words</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="badge badge-primary">~{Math.ceil(wordCount / 150)} min</span>
+                {charCount > 5000 && (
+                  <span className="badge bg-warning/20 text-warning border border-warning/30">Long text</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -679,7 +718,8 @@ export default function TTSPage() {
               <button
                 onClick={() => handleGenerate(false)}
                 disabled={isLoading || !text.trim() || missingReferenceVoice}
-                className="btn btn-primary w-full py-4 text-base animate-pulse-glow"
+                className="btn btn-primary w-full py-4 text-base animate-pulse-glow group relative"
+                title="Ctrl+Enter"
               >
                 {isLoading ? (
                   <>
@@ -690,6 +730,9 @@ export default function TTSPage() {
                   <>
                     <Sparkles className="w-5 h-5 fill-current" />
                     Generate Audio
+                    <kbd className="hidden sm:inline-flex ml-2 px-1.5 py-0.5 text-[10px] font-mono bg-black/20 rounded opacity-60 group-hover:opacity-100">
+                      ⌘↵
+                    </kbd>
                   </>
                 )}
               </button>
@@ -697,7 +740,8 @@ export default function TTSPage() {
               <button
                 onClick={() => handleGenerate(true)}
                 disabled={isPreviewLoading || isLoading || !text.trim() || missingReferenceVoice}
-                className="btn btn-secondary w-full py-4 text-base"
+                className="btn btn-secondary w-full py-4 text-base group"
+                title="Ctrl+Shift+Enter"
               >
                 {isPreviewLoading ? (
                   <>
@@ -708,6 +752,9 @@ export default function TTSPage() {
                   <>
                     <Zap className="w-5 h-5 fill-current" />
                     Quick Preview
+                    <kbd className="hidden sm:inline-flex ml-2 px-1.5 py-0.5 text-[10px] font-mono bg-black/10 rounded opacity-60 group-hover:opacity-100">
+                      ⌘⇧↵
+                    </kbd>
                   </>
                 )}
               </button>

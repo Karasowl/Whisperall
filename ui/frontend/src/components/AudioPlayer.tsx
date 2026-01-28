@@ -1,13 +1,16 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Download, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, Download, Volume2, VolumeX, Gauge } from 'lucide-react';
 import { formatDuration } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 interface AudioPlayerProps {
   src: string;
   filename: string;
 }
+
+const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
 export function AudioPlayer({ src, filename }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -15,6 +18,8 @@ export function AudioPlayer({ src, filename }: AudioPlayerProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -58,6 +63,13 @@ export function AudioPlayer({ src, filename }: AudioPlayerProps) {
     const vol = parseFloat(e.target.value);
     audioRef.current.volume = vol;
     setVolume(vol);
+  };
+
+  const handleSpeedChange = (speed: number) => {
+    if (!audioRef.current) return;
+    audioRef.current.playbackRate = speed;
+    setPlaybackSpeed(speed);
+    setShowSpeedMenu(false);
   };
 
   const handleDownload = () => {
@@ -143,6 +155,48 @@ export function AudioPlayer({ src, filename }: AudioPlayerProps) {
               className="absolute inset-0 w-full opacity-0 cursor-pointer"
             />
           </div>
+        </div>
+
+        {/* Speed Control */}
+        <div className="relative">
+          <button
+            onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors text-sm font-medium",
+              playbackSpeed !== 1
+                ? "bg-accent-primary/10 text-accent-primary"
+                : "hover:bg-white/10 text-foreground-muted"
+            )}
+            title="Playback speed"
+          >
+            <Gauge className="w-4 h-4" />
+            <span>{playbackSpeed}x</span>
+          </button>
+          
+          {showSpeedMenu && (
+            <>
+              <div 
+                className="fixed inset-0 z-40" 
+                onClick={() => setShowSpeedMenu(false)} 
+              />
+              <div className="absolute bottom-full mb-2 right-0 z-50 bg-surface-base border border-glass-border rounded-xl shadow-lg p-1 min-w-[80px]">
+                {SPEED_OPTIONS.map((speed) => (
+                  <button
+                    key={speed}
+                    onClick={() => handleSpeedChange(speed)}
+                    className={cn(
+                      "w-full px-3 py-1.5 text-sm rounded-lg transition-colors text-left",
+                      playbackSpeed === speed
+                        ? "bg-accent-primary/10 text-accent-primary font-medium"
+                        : "hover:bg-surface-2 text-foreground"
+                    )}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Download */}
