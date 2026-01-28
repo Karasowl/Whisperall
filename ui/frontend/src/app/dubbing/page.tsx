@@ -84,10 +84,10 @@ export default function DubbingPage() {
         if (selection?.selected) {
           setSelectedProvider(selection.selected);
           if (selection.config?.source_language) {
-            setSourceLanguage(selection.config.source_language);
+            setSourceLanguage(String(selection.config.source_language));
           }
           if (selection.config?.target_language) {
-            setTargetLanguage(selection.config.target_language);
+            setTargetLanguage(String(selection.config.target_language));
           }
         } else {
           // Select first ready provider by default
