@@ -22,6 +22,7 @@ import {
   ActionBar,
   AudioOutputPanel,
 } from '@/components/module';
+import { useToast } from '@/components/Toast';
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
@@ -39,6 +40,8 @@ const LANGUAGE_LABELS: Record<string, string> = {
 };
 
 export default function ReaderPage() {
+  const toast = useToast();
+  
   // Text input
   const [text, setText] = useState('');
 
@@ -99,7 +102,9 @@ export default function ReaderPage() {
           filename: res.filename,
         });
       } catch (err: any) {
-        setError(err.response?.data?.detail || err.message || 'Failed to synthesize audio');
+        const errorMsg = err.response?.data?.detail || err.message || 'Failed to synthesize audio';
+        setError(errorMsg);
+        toast.error('Synthesis failed', errorMsg);
       } finally {
         setIsLoading(false);
       }
@@ -117,9 +122,11 @@ export default function ReaderPage() {
         await handleSpeak(clip);
       }
     } catch (err: any) {
-      setError(err.message || 'Clipboard access failed');
+      const errorMsg = err.message || 'Clipboard access failed';
+      setError(errorMsg);
+      toast.error('Clipboard error', errorMsg);
     }
-  }, [handleSpeak]);
+  }, [handleSpeak, toast]);
 
   // === EFFECTS ===
 

@@ -41,6 +41,7 @@ import { HotkeyRecorder } from '@/components/HotkeyRecorder';
 import { applyLanguage, applyTheme } from '@/lib/uiSettings';
 import { applyActionSoundConfig } from '@/lib/actionSounds';
 import { Toggle } from '@/components/Toggle';
+import { useToast } from '@/components/Toast';
 
 const settingsSections = [
   { id: 'performance', label: 'Performance', icon: Zap, description: 'GPU, device, and speed settings' },
@@ -108,6 +109,7 @@ function formatLoadError(err: any) {
 }
 
 export default function SettingsPage() {
+  const toast = useToast();
   const [activeSection, setActiveSection] = useState('performance');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -229,8 +231,10 @@ export default function SettingsPage() {
       const fresh = await getApiKeys();
       setApiKeysState(fresh.api_keys || {});
       setApiKeyDrafts((prev) => ({ ...prev, [provider]: '' }));
+      toast.success('API key saved', `${provider} key updated successfully`);
     } catch (err: any) {
       setApiKeyStatus((prev) => ({ ...prev, [provider]: err.message || 'Save failed' }));
+      toast.error('Save failed', err.message || 'Could not save API key');
     }
   };
 
@@ -242,8 +246,14 @@ export default function SettingsPage() {
         ...prev,
         [provider]: result.valid ? 'Valid' : result.error || 'Invalid',
       }));
+      if (result.valid) {
+        toast.success('API key valid', `${provider} key verified successfully`);
+      } else {
+        toast.warning('Invalid key', result.error || 'API key verification failed');
+      }
     } catch (err: any) {
       setApiKeyStatus((prev) => ({ ...prev, [provider]: err.message || 'Test failed' }));
+      toast.error('Test failed', err.message || 'Could not verify API key');
     }
   };
 
@@ -256,8 +266,10 @@ export default function SettingsPage() {
       if (window.electronAPI?.updateHotkeys) {
         window.electronAPI.updateHotkeys({ [action]: value });
       }
+      toast.success('Hotkey saved', `${hotkeyLabels[action] || action} updated`);
     } catch (err: any) {
       setError(err.message || 'Failed to update hotkey');
+      toast.error('Save failed', err.message || 'Could not update hotkey');
     }
   };
 
