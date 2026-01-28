@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, RefObject } from "react";
+import { useState, useEffect, useRef, useCallback, RefObject, useMemo } from "react";
 import {
   Search,
   Download,
@@ -12,6 +12,8 @@ import {
   Clock,
   Save,
   RefreshCw,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import { TranscriptSegment, DiarizationMethod } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -78,10 +80,62 @@ export default function TranscriptEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [hoveredSegmentId, setHoveredSegmentId] = useState<string | null>(null);
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const segmentRefs = useRef<Map<string, HTMLSpanElement>>(new Map());
+
+  // Find all matching segments for search
+  const matchingSegmentIds = useMemo(() => {
+    if (!searchQuery.trim() || !segments?.length) return [];
+    const query = searchQuery.toLowerCase();
+    return segments
+      .filter(seg => seg.text.toLowerCase().includes(query))
+      .map(seg => seg.id);
+  }, [searchQuery, segments]);
+
+  // Reset match index when search changes
+  useEffect(() => {
+    setCurrentMatchIndex(0);
+  }, [searchQuery]);
+
+  // Auto-scroll to current match
+  useEffect(() => {
+    if (matchingSegmentIds.length > 0 && currentMatchIndex < matchingSegmentIds.length) {
+      const currentMatchId = matchingSegmentIds[currentMatchIndex];
+      const element = segmentRefs.current.get(currentMatchId);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [currentMatchIndex, matchingSegmentIds]);
+
+  // Navigate between search results
+  const goToNextMatch = useCallback(() => {
+    if (matchingSegmentIds.length === 0) return;
+    setCurrentMatchIndex(prev => (prev + 1) % matchingSegmentIds.length);
+  }, [matchingSegmentIds.length]);
+
+  const goToPrevMatch = useCallback(() => {
+    if (matchingSegmentIds.length === 0) return;
+    setCurrentMatchIndex(prev => (prev - 1 + matchingSegmentIds.length) % matchingSegmentIds.length);
+  }, [matchingSegmentIds.length]);
+
+  // Handle keyboard navigation in search
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        goToPrevMatch();
+      } else {
+        goToNextMatch();
+      }
+    } else if (e.key === 'Escape') {
+      setSearchQuery('');
+    }
+  }, [goToNextMatch, goToPrevMatch]);
 
   // Track audio time
   useEffect(() => {
@@ -248,16 +302,46 @@ export default function TranscriptEditor({
             </label>
           )}
 
-          {/* Search */}
-          <div className="relative flex-1 min-w-[150px] max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search..."
-              className="input w-full pl-9 py-1.5 text-sm"
-            />
+          {/* Search with navigation */}
+          <div className="relative flex items-center gap-1 flex-1 min-w-[150px] max-w-sm">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Search... (Enter: next, Shift+Enter: prev)"
+                className="input w-full pl-9 pr-16 py-1.5 text-sm"
+              />
+              {/* Match counter */}
+              {searchQuery && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+                  {matchingSegmentIds.length > 0
+                    ? `${currentMatchIndex + 1}/${matchingSegmentIds.length}`
+                    : "0/0"}
+                </span>
+              )}
+            </div>
+            {/* Navigation buttons */}
+            {searchQuery && matchingSegmentIds.length > 0 && (
+              <div className="flex items-center">
+                <button
+                  onClick={goToPrevMatch}
+                  className="p-1.5 hover:bg-white/10 rounded transition-colors"
+                  title="Previous match (Shift+Enter)"
+                >
+                  <ChevronUp className="w-4 h-4 text-slate-400" />
+                </button>
+                <button
+                  onClick={goToNextMatch}
+                  className="p-1.5 hover:bg-white/10 rounded transition-colors"
+                  title="Next match (Enter)"
+                >
+                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Actions */}
@@ -339,8 +423,9 @@ export default function TranscriptEditor({
                   {group.segments.map((seg, segIndex) => {
                     const isActive = seg.id === activeSegmentId;
                     const isHovered = seg.id === hoveredSegmentId;
-                    const matchesSearch = searchQuery &&
-                      seg.text.toLowerCase().includes(searchQuery.toLowerCase());
+                    const matchIndex = matchingSegmentIds.indexOf(seg.id);
+                    const matchesSearch = matchIndex !== -1;
+                    const isCurrentMatch = matchesSearch && matchIndex === currentMatchIndex;
 
                     return (
                       <span key={seg.id}>
@@ -356,11 +441,16 @@ export default function TranscriptEditor({
 
                         {/* Text with hover highlight */}
                         <span
+                          ref={(el) => {
+                            if (el) segmentRefs.current.set(seg.id, el);
+                            else segmentRefs.current.delete(seg.id);
+                          }}
                           className={cn(
                             "cursor-pointer transition-all duration-150 rounded px-0.5 -mx-0.5",
                             isActive && "bg-emerald-500/20 text-emerald-200",
                             isHovered && !isActive && "bg-white/10",
-                            matchesSearch && "bg-yellow-500/30 text-yellow-200"
+                            matchesSearch && !isCurrentMatch && "bg-yellow-500/20 text-yellow-200",
+                            isCurrentMatch && "bg-orange-500/40 text-orange-100 ring-2 ring-orange-400/50"
                           )}
                           onMouseEnter={() => setHoveredSegmentId(seg.id)}
                           onMouseLeave={() => setHoveredSegmentId(null)}
