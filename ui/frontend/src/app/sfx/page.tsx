@@ -100,13 +100,15 @@ export default function SFXPage() {
             setSelectedModel(selection.config.model);
           } else {
             const provider = data.find((p) => p.id === selection.selected);
-            if (provider) {
+            if (provider && provider.default_model) {
               setSelectedModel(provider.default_model);
             }
           }
         } else if (data.length > 0) {
           setSelectedProvider(data[0].id);
-          setSelectedModel(data[0].default_model);
+          if (data[0].default_model) {
+            setSelectedModel(data[0].default_model);
+          }
         }
       } catch (err: any) {
         console.error('Failed to load SFX providers:', err);
@@ -373,7 +375,9 @@ export default function SFXPage() {
                   key={provider.id}
                   onClick={() => {
                     setSelectedProvider(provider.id);
-                    setSelectedModel(provider.default_model);
+                    if (provider.default_model) {
+                      setSelectedModel(provider.default_model);
+                    }
                   }}
                   disabled={!provider.ready}
                   className={cn(
@@ -404,7 +408,7 @@ export default function SFXPage() {
             </div>
 
             {/* Model variant selector */}
-            {currentProviderInfo && currentProviderInfo.models.length > 1 && (
+            {currentProviderInfo && currentProviderInfo.models && currentProviderInfo.models.length > 1 && (
               <div className="mt-4 pt-4 border-t border-glass-border">
                 <label className="label text-sm mb-2">Model Size</label>
                 <div className="flex gap-2 flex-wrap">
@@ -582,9 +586,9 @@ export default function SFXPage() {
                 { label: 'Engine', value: currentProviderInfo.name },
                 {
                   label: 'Max Video',
-                  value: `${Math.floor(currentProviderInfo.max_video_duration_seconds / 60)} min`,
+                  value: `${Math.floor((currentProviderInfo.max_video_duration_seconds ?? 0) / 60)} min`,
                 },
-                { label: 'VRAM Required', value: `${currentProviderInfo.vram_gb}GB` },
+                { label: 'VRAM Required', value: `${currentProviderInfo.vram_gb ?? 0}GB` },
               ]
               : undefined
           }

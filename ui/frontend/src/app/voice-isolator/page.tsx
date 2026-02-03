@@ -103,7 +103,7 @@ export default function VoiceIsolatorPage() {
 
     const interval = setInterval(async () => {
       try {
-        const status = await getVoiceIsolatorJob(currentJob.id);
+        const status = await getVoiceIsolatorJob(currentJob.job_id);
         setCurrentJob(status);
 
         if (status.status === 'completed' || status.status === 'failed') {
@@ -118,7 +118,7 @@ export default function VoiceIsolatorPage() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [currentJob?.id, currentJob?.status]);
+  }, [currentJob?.job_id, currentJob?.status]);
 
   const handleFileSelect = useCallback(async (file: File) => {
     if (!file.type.startsWith('audio/')) {
@@ -177,7 +177,7 @@ export default function VoiceIsolatorPage() {
     setCurrentJob(null);
 
     try {
-      const { job_id } = await startVoiceIsolation(audioPath, selectedProvider);
+      const { job_id } = await startVoiceIsolation({ input_path: audioPath, provider: selectedProvider });
       const initialStatus = await getVoiceIsolatorJob(job_id);
       setCurrentJob(initialStatus);
     } catch (err: any) {
@@ -187,8 +187,8 @@ export default function VoiceIsolatorPage() {
   };
 
   const handleDownload = () => {
-    if (!currentJob?.id) return;
-    window.open(getVoiceIsolatorDownloadUrl(currentJob.id), '_blank');
+    if (!currentJob?.job_id) return;
+    window.open(getVoiceIsolatorDownloadUrl(currentJob.job_id, 'vocals'), '_blank');
   };
 
   const currentProvider = providers.find(p => p.id === selectedProvider);
@@ -238,7 +238,7 @@ export default function VoiceIsolatorPage() {
               </div>
               <p className="text-xs text-foreground-muted">{currentProvider.description}</p>
               <div className="flex flex-wrap gap-1">
-                {currentProvider.features.map((feature, i) => (
+                {currentProvider.features?.map((feature, i) => (
                   <span key={i} className="badge badge-primary text-xs">
                     {feature}
                   </span>
@@ -322,7 +322,7 @@ export default function VoiceIsolatorPage() {
 
                     {/* Features */}
                     <div className="flex flex-wrap gap-1 mb-2">
-                      {provider.features.map((feature, i) => (
+                      {provider.features?.map((feature, i) => (
                         <span key={i} className="badge badge-primary text-xs">
                           {feature}
                         </span>
@@ -426,7 +426,7 @@ export default function VoiceIsolatorPage() {
                     </span>
                   </div>
                   <audio
-                    src={getVoiceIsolatorDownloadUrl(currentJob.id)}
+                    src={getVoiceIsolatorDownloadUrl(currentJob.job_id, 'vocals')}
                     controls
                     className="w-full"
                   />

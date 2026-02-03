@@ -266,7 +266,7 @@ export function PresetVoiceSelector({
           <Volume2 className="w-4 h-4" />
           Select Voice
         </label>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           {[1, 2, 3, 4, 5, 6].map(i => (
             <div key={i} className="glass p-3 rounded-lg animate-pulse h-16" />
           ))}
@@ -358,7 +358,7 @@ export function PresetVoiceSelector({
             <h4 className="text-xs font-medium text-slate-400 mb-2 sticky top-0 bg-background/80 backdrop-blur-sm py-1">
               {LANGUAGE_NAMES[lang] || lang}
             </h4>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2">
               {voices.map(voice => {
                 const isSelected = selected === voice.id;
                 const isFemale = voice.gender === 'female';

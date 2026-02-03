@@ -55,6 +55,22 @@ class STTService:
 
         return self._normalize_model_id(model)
 
+    def _pick_best_local_model(self) -> str:
+        preferred = [
+            "faster-whisper-large-v3",
+            "faster-distil-whisper-large-v3",
+            "faster-whisper-medium",
+            "faster-whisper-small",
+            "faster-whisper-base",
+            "faster-whisper-tiny",
+        ]
+        installed = set(settings_service.settings.models_installed or [])
+        for model_id in preferred:
+            if model_id in installed:
+                return self._normalize_model_id(model_id)
+        # Fall back to user-selected model if none installed list is present
+        return self._resolve_local_model("faster-whisper")
+
     def _load_local_model(self, model_name: str, device: str):
         # Ensure model name is normalized (safety check)
         model_name = self._normalize_model_id(model_name)
@@ -87,7 +103,13 @@ class STTService:
             initial_prompt=prompt or None
         )
         text = " ".join(seg.text.strip() for seg in segments if seg.text)
-        return text.strip(), {"language": info.language, "duration": info.duration, "model": model_name}
+        return text.strip(), {
+            "provider": "faster-whisper",
+            "language": info.language,
+            "duration": info.duration,
+            "model": model_name,
+            "device": device
+        }
 
     def _transcribe_openai(self, audio_path: Path, language: str) -> Tuple[str, dict]:
         key = settings_service.get_api_key("openai")
@@ -171,9 +193,65 @@ class STTService:
             raise RuntimeError("ElevenLabs API key is not configured")
 
         model = settings_service.get("providers.stt.elevenlabs.model", "scribe_v2")
+        
+        # Log original file info
+        file_size = audio_path.stat().st_size
+        print(f"[ElevenLabs] Original audio file: {audio_path.name}, size: {file_size} bytes")
+        
+        # Check audio duration with ffprobe
+        try:
+            import subprocess
+            probe_result = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)],
+                capture_output=True,
+                timeout=10
+            )
+            duration = float(probe_result.stdout.decode().strip() or 0)
+            print(f"[ElevenLabs] Audio duration: {duration:.2f} seconds")
+            if duration < 0.5:
+                print(f"[ElevenLabs] WARNING: Audio is very short ({duration:.2f}s) - microphone may not be working!")
+        except Exception as e:
+            print(f"[ElevenLabs] Could not check duration: {e}")
+        
+        # Convert webm to wav (PCM) for maximum compatibility/robustness
+        converted_path = None
+        audio_to_send = audio_path
+        
+        # Always convert webm/ogg to ensure clean headers and PCM format
+        if audio_path.suffix.lower() in [".webm", ".ogg"]:
+            import subprocess
+            converted_path = audio_path.with_suffix(".wav")
+            try:
+                # Force conversion to WAV PCM 16-bit Mono 44.1kHz
+                # This fixes "sound of spray" (raw interpretation of compressed data) issues
+                cmd = [
+                    "ffmpeg", "-y", 
+                    "-i", str(audio_path), 
+                    "-acodec", "pcm_s16le", 
+                    "-ac", "1", 
+                    "-ar", "44100", 
+                    str(converted_path)
+                ]
+                print(f"[ElevenLabs] Running conversion: {' '.join(cmd)}")
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    timeout=60
+                )
+                if result.returncode == 0 and converted_path.exists():
+                    audio_to_send = converted_path
+                    new_size = converted_path.stat().st_size
+                    print(f"[ElevenLabs] Converted to WAV: {new_size} bytes")
+                    if new_size < 1000:
+                        print("[ElevenLabs] WARNING: Converted file is suspiciously small!")
+                else:
+                    print(f"[ElevenLabs] FFmpeg conversion failed: {result.stderr.decode()}")
+            except Exception as e:
+                print(f"[ElevenLabs] Conversion error (using original): {e}")
 
         # Prepare multipart form data
-        files = {"file": audio_path.open("rb")}
+        files = {"file": audio_to_send.open("rb")}
         data = {"model_id": model}
 
         # Add language if specified (ISO-639-1 code)
@@ -181,8 +259,11 @@ class STTService:
             data["language_code"] = language
 
         try:
+            url = "https://api.elevenlabs.io/v1/speech-to-text"
+            print(f"[ElevenLabs] Requesting STT: URL={url}, Model={model}, File={audio_to_send.name}")
+            
             resp = requests.post(
-                "https://api.elevenlabs.io/v1/speech-to-text",
+                url,
                 headers={"xi-api-key": key},
                 files=files,
                 data=data,
@@ -190,6 +271,12 @@ class STTService:
             )
         finally:
             files["file"].close()
+            # Clean up converted file
+            if converted_path and converted_path.exists():
+                try:
+                    converted_path.unlink()
+                except:
+                    pass
 
         if resp.status_code != 200:
             error_detail = ""
@@ -200,7 +287,12 @@ class STTService:
             raise RuntimeError(f"ElevenLabs STT error: HTTP {resp.status_code} - {error_detail}")
 
         result = resp.json()
+        print(f"[ElevenLabs] Full API response: {result}")
         text = result.get("text", "").strip()
+        
+        if not text:
+            print(f"[ElevenLabs] WARNING: Empty transcription returned!")
+            
         detected_language = result.get("language_code", language)
 
         return text, {
@@ -215,18 +307,49 @@ class STTService:
         provider = settings_service.get_selected_provider("stt")
 
         with error_context(provider=provider, language=language):
-            if provider.startswith("faster-whisper"):
-                return self._transcribe_local(audio_path, language, prompt)
-            if provider == "openai":
-                return self._transcribe_openai(audio_path, language)
-            if provider == "groq":
-                return self._transcribe_groq(audio_path, language, prompt)
-            if provider == "deepgram":
-                return self._transcribe_deepgram(audio_path, language)
-            if provider == "elevenlabs":
-                return self._transcribe_elevenlabs(audio_path, language)
+            try:
+                if provider.startswith("faster-whisper"):
+                    return self._transcribe_local(audio_path, language, prompt)
+                if provider == "openai":
+                    return self._transcribe_openai(audio_path, language)
+                if provider == "groq":
+                    return self._transcribe_groq(audio_path, language, prompt)
+                if provider == "deepgram":
+                    return self._transcribe_deepgram(audio_path, language)
+                if provider == "elevenlabs":
+                    return self._transcribe_elevenlabs(audio_path, language)
 
-            raise RuntimeError(f"STT provider not supported: {provider}")
+                raise RuntimeError(f"STT provider not supported: {provider}")
+            except Exception as exc:
+                # Fallback to local when ElevenLabs is out of credits/quota.
+                if provider == "elevenlabs":
+                    msg = str(exc).lower()
+                    if "credits" in msg or "quota" in msg:
+                        print("[STT] ElevenLabs quota/credits error. Falling back to local faster-whisper.")
+                        # Prefer best available local model when falling back
+                        best_model = self._pick_best_local_model()
+                        device = self._detect_device(settings_service.get("providers.stt.faster_whisper.device", "auto"))
+                        model = self._load_local_model(best_model, device=device)
+                        lang = None if language == "auto" else language
+                        audio_str = str(audio_path).replace("\\", "/")
+                        segments, info = model.transcribe(
+                            audio_str,
+                            language=lang,
+                            vad_filter=True,
+                            initial_prompt=prompt or None
+                        )
+                        text = " ".join(seg.text.strip() for seg in segments if seg.text).strip()
+                        meta = {
+                            "provider": "faster-whisper",
+                            "language": info.language,
+                            "duration": info.duration,
+                            "model": best_model,
+                            "device": device,
+                            "fallback_from": "elevenlabs"
+                        }
+                        meta = dict(meta or {})
+                        return text, meta
+                raise
 
 
 _service: Optional[STTService] = None

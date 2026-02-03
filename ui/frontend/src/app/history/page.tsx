@@ -361,7 +361,7 @@ export default function HistoryPage() {
     });
   };
 
-  const formatDuration = (seconds: number) => {
+  const formatDuration = (seconds: number | undefined) => {
     if (!seconds) return '--:--';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -371,7 +371,8 @@ export default function HistoryPage() {
   const formatBillingValue = (value?: number | null) =>
     value != null ? new Intl.NumberFormat().format(value) : null;
 
-  const formatBytes = (bytes: number) => {
+  const formatBytes = (bytes: number | undefined) => {
+    if (bytes === undefined) return '0 B';
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -547,7 +548,7 @@ export default function HistoryPage() {
                 <FileText className="w-5 h-5 text-blue-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{stats.total_characters.toLocaleString()}</p>
+                <p className="text-2xl font-bold">{(stats.total_characters ?? 0).toLocaleString()}</p>
                 <p className="text-xs text-foreground-muted">Characters</p>
               </div>
             </div>
@@ -866,23 +867,23 @@ export default function HistoryPage() {
                       )}>
                         {job.status}
                       </span>
-                      {(job.status === 'interrupted' || job.status === 'paused') && job.segments?.length > 0 && (
+                      {(job.status === 'interrupted' || job.status === 'paused') && job.segments?.length && job.segments.length > 0 && (
                         <span className="badge bg-blue-500/10 text-blue-300">
                           {job.segments.length} segments saved
                         </span>
                       )}
-                      {(job.status === 'interrupted' || job.status === 'paused') && job.progress > 0 && (
+                      {(job.status === 'interrupted' || job.status === 'paused') && (job.progress ?? 0) > 0 && (
                         <span className="badge bg-blue-500/10 text-blue-300">
-                          {job.progress.toFixed(0)}% done
+                          {(job.progress ?? 0).toFixed(0)}% done
                         </span>
                       )}
-                      {job.speakers_detected > 0 && (
+                      {(job.speakers_detected ?? 0) > 0 && (
                         <span className="badge flex items-center gap-1">
                           <Users className="w-3 h-3" />
                           {job.speakers_detected} speakers
                         </span>
                       )}
-                      {job.total_duration > 0 && (
+                      {(job.total_duration ?? 0) > 0 && (
                         <span className="badge">
                           {formatDuration(job.total_duration)}
                         </span>

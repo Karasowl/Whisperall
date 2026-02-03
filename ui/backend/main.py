@@ -2337,7 +2337,9 @@ async def stt_stop(
     temp_path = TEMP_DIR / f"stt_{session_id}_{uuid.uuid4().hex}{suffix}"
     with open(temp_path, "wb") as f:
         f.write(content)
-
+    
+    print(f"[STT] Received audio file size: {len(content)} bytes")
+    
     stt_service = get_stt_service()
     audio_duration = None
     try:
@@ -2345,10 +2347,12 @@ async def stt_stop(
         # Get audio duration for history
         try:
             import librosa
-            audio_duration = librosa.get_duration(filename=str(temp_path))
+            audio_duration = librosa.get_duration(path=str(temp_path))
         except Exception:
             pass
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         detail = f"STT transcription failed: {exc}"
         raise HTTPException(400, detail) from exc
 
@@ -2359,6 +2363,29 @@ async def stt_stop(
         enable_fillers=stt_cfg.filler_removal,
     )
     formatted_text = formatter.format_text(raw_text, list_dictionary_entries(), list_snippet_entries())
+
+    provider_id = settings_service.get_selected_provider("stt") or "unknown"
+    model_id = None
+    if isinstance(meta, dict):
+        provider_id = meta.get("provider") or provider_id
+        model_id = meta.get("model")
+    else:
+        meta = {}
+
+    if not model_id:
+        model_id = settings_service.get(f"providers.stt.{provider_id.replace('-', '_')}.model", None)
+
+    billing_bucket = "provider_billed"
+    if provider_id in ("faster-whisper", "local"):
+        billing_bucket = "local_free"
+    elif provider_id == "elevenlabs":
+        billing_bucket = "elevenlabs_stt_api_hours"
+
+    meta.setdefault("provider", provider_id)
+    if model_id:
+        meta.setdefault("model", model_id)
+    meta.setdefault("billing_bucket", billing_bucket)
+    print(f"[STT] Provider={provider_id} Model={model_id} Billing={billing_bucket}")
 
     stt_sessions.pop(session_id, None)
 
@@ -2462,6 +2489,28 @@ async def stt_finalize(session_id: str = Form(...)):
     raw_text = (session.get("partial_text") or "").strip()
     meta = session.get("meta") if isinstance(session.get("meta"), dict) else {}
     language = session.get("language", "auto")
+    provider_id = settings_service.get_selected_provider("stt") or "unknown"
+    model_id = None
+    if isinstance(meta, dict):
+        provider_id = meta.get("provider") or provider_id
+        model_id = meta.get("model")
+    else:
+        meta = {}
+
+    if not model_id:
+        model_id = settings_service.get(f"providers.stt.{provider_id.replace('-', '_')}.model", None)
+
+    billing_bucket = "provider_billed"
+    if provider_id in ("faster-whisper", "local"):
+        billing_bucket = "local_free"
+    elif provider_id == "elevenlabs":
+        billing_bucket = "elevenlabs_stt_api_hours"
+
+    meta.setdefault("provider", provider_id)
+    if model_id:
+        meta.setdefault("model", model_id)
+    meta.setdefault("billing_bucket", billing_bucket)
+    print(f"[STT] Finalize Provider={provider_id} Model={model_id} Billing={billing_bucket}")
 
     stt_cfg = settings_service.settings.stt
     formatter = SmartFormatter(
@@ -6830,6 +6879,55 @@ async def list_history(
     }
 
 
+@app.get("/api/history/v2")
+async def list_history_v2(
+    module: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    status: Optional[str] = None,
+    favorite: Optional[bool] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List history entries (v2 alias)"""
+    return await list_history(
+        module=module,
+        provider=provider,
+        model=model,
+        status=status,
+        favorite=favorite,
+        from_date=from_date,
+        to_date=to_date,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/api/history/modules")
+async def get_history_modules():
+    """Get list of available history modules for filtering"""
+    return {
+        "modules": [
+            {"id": "tts", "name": "Text to Speech", "icon": "Mic"},
+            {"id": "stt", "name": "Speech to Text", "icon": "FileAudio"},
+            {"id": "transcribe", "name": "Transcription", "icon": "FileText"},
+            {"id": "voice-changer", "name": "Voice Changer", "icon": "MessageSquare"},
+            {"id": "voice-isolator", "name": "Voice Isolator", "icon": "Volume2"},
+            {"id": "dubbing", "name": "Dubbing", "icon": "Languages"},
+            {"id": "music", "name": "Music Gen", "icon": "Music"},
+            {"id": "sfx", "name": "Sound Effects", "icon": "Speaker"},
+            {"id": "stems", "name": "Stem Separation", "icon": "Layers"},
+            {"id": "ai-edit", "name": "AI Edit", "icon": "Wand2"},
+            {"id": "translate", "name": "Translation", "icon": "Languages"},
+            {"id": "reader", "name": "Reader", "icon": "BookOpen"},
+        ]
+    }
+
+
 @app.get("/api/history/stats")
 async def get_history_stats(
     from_date: Optional[str] = None,
@@ -7597,5 +7695,7 @@ if __name__ == "__main__":
     # We bind to 0.0.0.0 to:
     # 1. Allow access from other devices (remote control)
     # 2. Trigger the OS "Allow Network Access" (Firewall) prompt on first run
-    print("[Startup] Binding to 0.0.0.0 to allow network access (Public/Private networks)")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    host = os.getenv("WHISPERALL_BIND_HOST", "0.0.0.0")
+    port = int(os.getenv("WHISPERALL_BACKEND_PORT", os.getenv("BACKEND_PORT", "8080")))
+    print(f"[Startup] Binding to {host}:{port} to allow network access (Public/Private networks)")
+    uvicorn.run(app, host=host, port=port)

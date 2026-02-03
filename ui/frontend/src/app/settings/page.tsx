@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
   type HotkeysSettings,
-  type ModelInfo,
+  type Model,
   type SystemCapabilities,
   type ProviderCatalogEntry,
   getAllSettings,
@@ -120,9 +120,9 @@ export default function SettingsPage() {
   const [hotkeyDrafts, setHotkeyDrafts] = useState<HotkeysSettings>(defaultHotkeys);
   const [apiKeyDrafts, setApiKeyDrafts] = useState<Record<string, string>>({});
   const [apiKeyStatus, setApiKeyStatus] = useState<Record<string, string>>({});
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [models, setModels] = useState<Model[]>([]);
   const [modelBusy, setModelBusy] = useState<Record<string, string>>({});
-  const [confirmModel, setConfirmModel] = useState<ModelInfo | null>(null);
+  const [confirmModel, setConfirmModel] = useState<Model | null>(null);
   const [appMeta, setAppMeta] = useState<{ version?: string; build_time?: string } | null>(null);
   const [capabilities, setCapabilities] = useState<SystemCapabilities | null>(null);
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogEntry[]>([]);
@@ -146,8 +146,12 @@ export default function SettingsPage() {
       if (results[0].status === 'fulfilled') {
         setSettings(results[0].value);
         if (results[0].value?.ui) {
-          applyTheme(results[0].value.ui.theme);
-          applyLanguage(results[0].value.ui.language);
+          if (results[0].value.ui.theme) {
+            applyTheme(results[0].value.ui.theme);
+          }
+          if (results[0].value.ui.language) {
+            applyLanguage(results[0].value.ui.language);
+          }
           if (window.electronAPI?.updateTraySettings) {
             window.electronAPI.updateTraySettings({
               minimizeToTray: results[0].value.ui.minimize_to_tray,
@@ -951,6 +955,7 @@ function STTSettingsView({
     auto_paste?: boolean;
     overlay_enabled?: boolean;
     overlay_always_on?: boolean;
+    input_device_id?: string;
   };
   onChange: (key: string, value: any) => void;
 }) {
@@ -980,6 +985,12 @@ function STTSettingsView({
       </div>
 
       <div className="space-y-4">
+        {/* Audio Input Selector */}
+        <AudioInputSelector
+          value={sttConfig.input_device_id}
+          onChange={(val) => handleChange('input_device_id', val)}
+        />
+
         <div className="glass-card p-4 flex items-center justify-between relative z-20">
           <div>
             <span className="font-medium text-foreground">Transcription Mode</span>
@@ -1063,6 +1074,172 @@ function STTSettingsView({
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AudioInputSelector({
+  value,
+  onChange,
+}: {
+  value?: string;
+  onChange: (deviceId: string) => void;
+}) {
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [volume, setVolume] = useState(0);
+  const [isTesting, setIsTesting] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const analyserRef = useState<AnalyserNode | null>(null); // Hack to keep ref in state for simple disposal logic if needed
+  const animationRef = useState<number | null>(null);
+
+  // Load devices
+  const loadDevices = async (forcePermission = false) => {
+    try {
+      if (forcePermission) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+      }
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devs.filter(d => d.kind === 'audioinput');
+      setDevices(audioInputs);
+      setPermissionError(null);
+    } catch (err: any) {
+      console.error("Failed to list devices", err);
+      if (forcePermission) setPermissionError("Microphone access denied. Please allow access.");
+    }
+  };
+
+  useEffect(() => {
+    loadDevices(false);
+    navigator.mediaDevices.addEventListener('devicechange', () => loadDevices(false));
+    return () => navigator.mediaDevices.removeEventListener('devicechange', () => loadDevices(false));
+  }, []);
+
+  // Audio visualizer logic
+  const toggleTest = async () => {
+    if (isTesting) {
+      setIsTesting(false);
+      setVolume(0);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: value ? { exact: value } : undefined
+        }
+      });
+
+      setIsTesting(true);
+
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const analyser = audioContext.createAnalyser();
+      const microphone = audioContext.createMediaStreamSource(stream);
+      const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
+
+      analyser.smoothingTimeConstant = 0.8;
+      analyser.fftSize = 1024;
+
+      microphone.connect(analyser);
+      analyser.connect(javascriptNode);
+      javascriptNode.connect(audioContext.destination);
+
+      const runLoop = () => {
+        if (!isTesting) { // Check if we should stop. This is tricky inside closure, relying on cleanup function instead.
+          // Actually script processor is deprecated but easiest for volume meter.
+          // Let's use requestAnimationFrame with analyser.getByteFrequencyData
+        }
+      };
+
+      javascriptNode.onaudioprocess = () => {
+        // Safe check? In React hooks this is messy.
+        // Let's simplify: just update volume state
+        const array = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(array);
+        let values = 0;
+        const length = array.length;
+        for (let i = 0; i < length; i++) {
+          values += array[i];
+        }
+        const average = values / length;
+        setVolume(Math.min(100, average * 1.5)); // Scale up a bit
+      };
+
+      // Store cleanup function
+      (window as any).__stopAudioTest = () => {
+        stream.getTracks().forEach(t => t.stop());
+        javascriptNode.disconnect();
+        analyser.disconnect();
+        microphone.disconnect();
+        audioContext.close();
+      };
+
+    } catch (err) {
+      console.error("Failed to start audio test", err);
+      setIsTesting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isTesting && (window as any).__stopAudioTest) {
+      (window as any).__stopAudioTest();
+      (window as any).__stopAudioTest = null;
+    }
+    return () => {
+      if ((window as any).__stopAudioTest) {
+        (window as any).__stopAudioTest();
+      }
+    };
+  }, [isTesting]);
+
+  return (
+    <div className="glass-card p-4 space-y-3 relative z-30">
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="font-medium text-foreground">Microphone Input</span>
+          <p className="text-xs text-foreground-muted mt-1">Select the device to use for dictation</p>
+        </div>
+        {permissionError && <span className="text-xs text-error">{permissionError}</span>}
+      </div>
+
+      <div className="flex gap-2 items-center">
+        <SelectMenu
+          value={value || 'default'}
+          options={[
+            { value: 'default', label: 'Default System Device' },
+            ...devices.map(d => ({ value: d.deviceId, label: d.label || `Device ${d.deviceId.slice(0, 4)}...` }))
+          ]}
+          onChange={onChange}
+          buttonClassName="flex-1"
+        />
+        <button
+          onClick={() => loadDevices(true)}
+          className="btn btn-secondary px-3 shrink-0"
+          title="Refresh device list"
+        >
+          ↻
+        </button>
+        <button
+          onClick={toggleTest}
+          className={cn(
+            "btn px-3 w-24 shrink-0 transition-all",
+            isTesting ? "btn-danger" : "btn-secondary"
+          )}
+        >
+          {isTesting ? "Stop" : "Test"}
+        </button>
+      </div>
+
+      {/* Volume Meter */}
+      <div className="h-2 bg-surface-2 rounded-full overflow-hidden mt-2 relative">
+        <div
+          className={cn(
+            "absolute top-0 left-0 h-full transition-all duration-75 ease-out",
+            volume > 80 ? "bg-red-500" : volume > 50 ? "bg-amber-400" : "bg-emerald-400"
+          )}
+          style={{ width: `${isTesting ? volume : 0}%` }}
+        />
       </div>
     </div>
   );

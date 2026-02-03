@@ -162,7 +162,7 @@ def sanitize_stack_trace(stack_trace: str, max_lines: int = 20) -> str:
         # Remove full paths, keep only filename
         line = re.sub(r'File "[^"]*[/\\]([^"]+)"', r'File "\1"', line)
         # Remove user directory paths
-        line = re.sub(r'C:\\Users\\[^\\]+\\', 'C:\\Users\\<user>\\', line)
+        line = re.sub(r'C:\\Users\\[^\\]+\\', r'C:\\Users\\<user>\\', line)
         line = re.sub(r'/home/[^/]+/', '/home/<user>/', line)
         # Remove memory addresses
         line = re.sub(r'0x[0-9a-fA-F]+', '0x<addr>', line)

@@ -95,7 +95,7 @@ const PROVIDER_STYLES: Record<string, { icon: typeof Cpu; color: string; gradien
   'narilabs': { icon: Cloud, color: 'text-sky-400', gradient: 'from-sky-400 to-cyan-500' },
 };
 
-const SERVICE_LABELS: Record<ServiceType, string> = {
+const SERVICE_LABELS: Partial<Record<ServiceType, string>> = {
   tts: 'Voice Engine',
   stt: 'Transcription Engine',
   ai_edit: 'AI Model',
@@ -156,9 +156,14 @@ export function UnifiedProviderSelector({
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshTick, setRefreshTick] = useState(0);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const lastEnsureRef = useRef<string | null>(null);
-  const dropdownStyle = useDropdownPosition(isOpen, buttonRef);
+  const { position: dropdownStyle } = useDropdownPosition({
+    triggerRef: buttonRef,
+    dropdownRef,
+    isOpen,
+  });
   const allowedTypesKey = useMemo(
     () => (allowedTypes ? [...allowedTypes].sort().join('|') : ''),
     [allowedTypes]
@@ -284,13 +289,7 @@ export function UnifiedProviderSelector({
 
   // Helpers
   function getProviderType(provider: AnyProviderInfo): 'local' | 'api' {
-    if ('type' in provider) return provider.type as 'local' | 'api';
-    // For TTSProviderInfo, check if it's an API provider
-    const apiProviderIds = [
-      'openai-tts', 'elevenlabs', 'fishaudio', 'cartesia', 'playht',
-      'siliconflow', 'minimax', 'zyphra', 'narilabs'
-    ];
-    return apiProviderIds.includes(provider.id) ? 'api' : 'local';
+    return provider.type === 'api' ? 'api' : 'local';
   }
 
   function isProviderImplemented(provider: AnyProviderInfo): boolean {
@@ -381,8 +380,10 @@ export function UnifiedProviderSelector({
   // Auto-install/ensure provider readiness when selection/model changes
   useEffect(() => {
     if (!autoEnsureReady) return;
+    if (!['tts', 'stt', 'ai_edit', 'translation'].includes(service)) return;
     const info = providers.find(p => p.id === selected);
     if (!info) return;
+    if (!isProviderImplemented(info)) return;
 
     const modelId = showModelSelector ? selectedModel : undefined;
     const key = `${info.id}:${modelId || ''}`;
@@ -412,7 +413,7 @@ export function UnifiedProviderSelector({
       <div className={cn('space-y-4', className)}>
         <label className="label flex items-center gap-2">
           <Cpu className="w-4 h-4" />
-          {label || SERVICE_LABELS[service]}
+          {label || SERVICE_LABELS[service] || 'Service'}
         </label>
 
         {loading ? (
@@ -497,7 +498,8 @@ export function UnifiedProviderSelector({
     <>
       <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
       <div
-        className="z-50 card shadow-xl flex flex-col"
+        ref={dropdownRef}
+        className="fixed z-50 card shadow-xl flex flex-col"
         style={{ ...dropdownStyle, maxHeight: '400px' }}
       >
         {/* Search input */}
@@ -581,7 +583,7 @@ export function UnifiedProviderSelector({
   return (
     <div className={cn('space-y-4', className)}>
       <div className="space-y-2">
-        <label className="label">{label || SERVICE_LABELS[service]}</label>
+        <label className="label">{label || SERVICE_LABELS[service] || 'Service'}</label>
         <button
           ref={buttonRef}
           type="button"

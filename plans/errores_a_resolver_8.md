@@ -124,6 +124,6 @@ Usuario puede pausar, cambiar velocidad, cambiar voz
 
 ## Pendiente
 - [ ] Validar persistencia de "Ultimo Modulo" (se guarda en `widget-overlay.json`).
-- [ ] Conectar STT Real (actualmente es simulado/UI).
+- [x] Conectar STT Real (fixed 'stuck' state and timeouts).
 - [ ] Integrar Backend real para Transcribe (actualmente simulado).
 - [ ] Pulir estilos visuales segun feedback.

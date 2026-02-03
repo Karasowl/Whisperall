@@ -38,6 +38,7 @@ import {
   DiarizationStatus,
   EngineStatus,
   TranscriptionEngine,
+  TranscriptionEngineId,
   DiarizationMode,
   ServiceProviderInfo,
   getProviderSelection,
@@ -53,7 +54,9 @@ import { UnifiedProviderSelector } from "@/components/UnifiedProviderSelector";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined" ? window.location.origin : "http://localhost:8080");
 
 const LANGUAGE_OPTIONS = [
   { value: "auto", label: "Auto-detect" },
@@ -220,7 +223,7 @@ function TranscribePageContent() {
   // Settings
   const [language, setLanguage] = useState("auto");
   const [whisperModel, setWhisperModel] = useState("base");
-  const [engine, setEngine] = useState<TranscriptionEngine>("fast");
+  const [engine, setEngine] = useState<TranscriptionEngineId>("fast");
   const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null);
   const [enableDiarization, setEnableDiarization] = useState(true);
   const [diarizationMode, setDiarizationMode] = useState<DiarizationMode>("auto");
@@ -353,6 +356,7 @@ function TranscribePageContent() {
       : currentJob?.diarization_method === "none"
       ? "None"
       : null;
+  const progressValue = typeof currentJob?.progress === "number" ? currentJob.progress : null;
 
   const canRediarize = diarizationMode !== "pyannote" || canUsePyannote;
   const rediarizeLabel =
@@ -737,7 +741,7 @@ function TranscribePageContent() {
       pollingRef.current = setInterval(async () => {
         try {
           let status;
-          const url = `http://localhost:8000/api/transcribe/status/${currentJob.job_id}`;
+          const url = `${API_BASE}/api/transcribe/status/${currentJob.job_id}`;
 
           // Use IPC in Electron - renderer networking is broken after large uploads
           if (window.electronAPI?.netFetch) {
@@ -843,7 +847,7 @@ function TranscribePageContent() {
           console.log(`[Upload] Fallback poll attempt ${i + 1}...`);
 
           // Use native fetch instead of axios - axios is broken in Electron after large uploads
-          const response = await fetch("http://localhost:8000/api/transcribe/history");
+          const response = await fetch(`${API_BASE}/api/transcribe/history`);
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
           }
@@ -1326,13 +1330,13 @@ function TranscribePageContent() {
                 </button>
                 <button
                   onClick={() => setEngine("accurate")}
-                  disabled={!engineStatus?.engines.accurate.available}
+                  disabled={!engineStatus?.engines?.accurate?.available}
                   className={cn(
                     "flex-1 px-3 py-2 rounded-lg text-sm transition-colors text-left",
                     engine === "accurate"
                       ? "bg-purple-500/20 border border-purple-500/50 text-purple-400"
                       : "bg-white/5 border border-white/10 text-slate-400 hover:border-white/20",
-                    !engineStatus?.engines.accurate.available && "opacity-50 cursor-not-allowed"
+                    !engineStatus?.engines?.accurate?.available && "opacity-50 cursor-not-allowed"
                   )}
                 >
                   <div className="font-medium">Accurate</div>
@@ -1344,7 +1348,7 @@ function TranscribePageContent() {
                   Uses WhisperX for precise word alignment and per-word speaker detection
                 </p>
               )}
-              {!engineStatus?.engines.accurate.available && (
+              {!engineStatus?.engines?.accurate?.available && (
                 <p className="text-xs text-slate-400/60">
                   WhisperX not available. Visit the Models page for installation options.
                 </p>
@@ -1578,9 +1582,13 @@ function TranscribePageContent() {
                   {etaSeconds !== null && etaSeconds > 0 && currentJob?.status !== "cancelled" && (
                     <span className="text-emerald-400">{formatEta(etaSeconds)}</span>
                   )}
-                  {currentJob?.total_duration > 0 && (
-                    <span>{formatDuration(currentJob.total_duration)}</span>
-                  )}
+                  {(() => {
+                    const totalDuration = currentJob?.total_duration;
+                    if (typeof totalDuration === "number" && totalDuration > 0) {
+                      return <span>{formatDuration(totalDuration)}</span>;
+                    }
+                    return null;
+                  })()}
                 </span>
               </div>
 
@@ -1630,24 +1638,24 @@ function TranscribePageContent() {
               {/* Processing steps indicator */}
               <div className="flex justify-center gap-1.5 pt-1">
                 <div className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 ${
-                  currentJob?.progress >= 2 && currentJob?.progress < 10 ? "bg-emerald-500/30 text-emerald-300" :
-                  currentJob?.progress >= 10 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
+                  progressValue !== null && progressValue >= 2 && progressValue < 10 ? "bg-emerald-500/30 text-emerald-300" :
+                  progressValue !== null && progressValue >= 10 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
                 }`}>
-                  {currentJob?.progress >= 2 && currentJob?.progress < 10 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                  {progressValue !== null && progressValue >= 2 && progressValue < 10 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
                   Extract
                 </div>
                 <div className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 ${
-                  currentJob?.progress >= 10 && currentJob?.progress < 80 ? "bg-emerald-500/30 text-emerald-300" :
-                  currentJob?.progress >= 80 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
+                  progressValue !== null && progressValue >= 10 && progressValue < 80 ? "bg-emerald-500/30 text-emerald-300" :
+                  progressValue !== null && progressValue >= 80 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
                 }`}>
-                  {currentJob?.progress >= 10 && currentJob?.progress < 80 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                  {progressValue !== null && progressValue >= 10 && progressValue < 80 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
                   Transcribe
                 </div>
                 <div className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 ${
-                  currentJob?.progress >= 80 && currentJob?.progress < 95 ? "bg-emerald-500/30 text-emerald-300" :
-                  currentJob?.progress >= 95 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
+                  progressValue !== null && progressValue >= 80 && progressValue < 95 ? "bg-emerald-500/30 text-emerald-300" :
+                  progressValue !== null && progressValue >= 95 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
                 }`}>
-                  {currentJob?.progress >= 80 && currentJob?.progress < 95 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                  {progressValue !== null && progressValue >= 80 && progressValue < 95 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
                   Speakers
                 </div>
               </div>
@@ -1760,7 +1768,7 @@ function TranscribePageContent() {
                   )}
 
                   {/* Encrypted/pending indicator - separate element, not selectable */}
-                  {currentJob?.status === "transcribing" && currentJob?.progress < 80 && (
+                  {currentJob?.status === "transcribing" && progressValue !== null && progressValue < 80 && (
                     <div className="select-none pointer-events-none">
                       <div className="inline-flex items-center gap-1 text-emerald-400/60 animate-pulse">
                         <Loader2 className="w-3 h-3 animate-spin" />
@@ -1792,9 +1800,12 @@ function TranscribePageContent() {
                   <p className="text-amber-300 font-medium">Transcription Interrupted</p>
                   <p className="text-sm text-amber-300/70 mt-1">
                     This transcription was interrupted at {currentJob.progress?.toFixed(0) || 0}%.
-                    {currentJob.segments?.length > 0
-                      ? ` ${currentJob.segments.length} segments were saved and can be viewed below.`
-                      : " No segments were saved."}
+                    {(() => {
+                      const savedSegments = currentJob?.segments?.length ?? 0;
+                      return savedSegments > 0
+                        ? ` ${savedSegments} segments were saved and can be viewed below.`
+                        : " No segments were saved.";
+                    })()}
                   </p>
                   <button
                     onClick={handleReset}
@@ -1985,7 +1996,7 @@ function TranscribePageContent() {
 
           {/* Transcript Editor */}
           <TranscriptEditor
-            segments={currentJob.segments}
+            segments={currentJob.segments ?? []}
             speakersDetected={effectiveSpeakersDetected}
             diarizationMethod={currentJob.diarization_method}
             canRediarize={canRediarize}

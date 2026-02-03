@@ -115,9 +115,11 @@ export function ProviderSelector({
   const supportsLanguage = (provider: TTSProviderInfo | MusicProviderInfo) => {
     // If provider doesn't have supported_languages (e.g. MusicProvider), assume true or handle differently
     if (!('supported_languages' in provider)) return true;
+    const languages = provider.supported_languages || [];
+    if (languages.length === 0) return true;
 
     const langBase = selectedLanguage.split('-')[0];
-    return provider.supported_languages.some(l =>
+    return languages.some(l =>
       l === selectedLanguage || l.startsWith(langBase) || langBase === l.split('-')[0]
     );
   };
@@ -243,7 +245,7 @@ export function ProviderSelector({
                     'text-xs mt-0.5 line-clamp-2',
                     showAsSelected ? 'text-white/80' : 'text-foreground-secondary'
                   )}>
-                    {provider.description.split('.')[0]}
+                    {provider.description?.split('.')[0] || ''}
                   </p>
                 </div>
               </div>

@@ -93,7 +93,7 @@ export default function VoiceChangerPage() {
           } else {
             const provider = data.find((p) => p.id === selection.selected);
             if (provider) {
-              setSelectedModel(provider.default_model);
+              setSelectedModel(provider.default_model || provider.models?.[0]?.id || '');
             }
           }
           if (selection.config?.voice_id) {
@@ -102,7 +102,7 @@ export default function VoiceChangerPage() {
         } else if (data.length > 0) {
           const readyProvider = data.find((p) => p.ready) || data[0];
           setSelectedProvider(readyProvider.id);
-          setSelectedModel(readyProvider.default_model);
+          setSelectedModel(readyProvider.default_model || readyProvider.models?.[0]?.id || '');
         }
       } catch (err: any) {
         console.error('Failed to load providers:', err);
@@ -155,7 +155,7 @@ export default function VoiceChangerPage() {
 
     const interval = setInterval(async () => {
       try {
-        const status = await getVoiceChangerJob(currentJob.id);
+        const status = await getVoiceChangerJob(currentJob.job_id);
         setCurrentJob(status);
 
         if (status.status === 'completed' || status.status === 'failed') {
@@ -170,9 +170,10 @@ export default function VoiceChangerPage() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [currentJob?.id, currentJob?.status]);
+  }, [currentJob?.job_id, currentJob?.status]);
 
   const currentProviderInfo = providers.find((p) => p.id === selectedProvider);
+  const providerModels = currentProviderInfo?.models ?? [];
   const filteredVoices = voices.filter((v) =>
     v.name.toLowerCase().includes(voiceSearch.toLowerCase())
   );
@@ -232,8 +233,8 @@ export default function VoiceChangerPage() {
   };
 
   const handleDownload = () => {
-    if (!currentJob?.id) return;
-    window.open(getVoiceChangerDownloadUrl(currentJob.id), '_blank');
+    if (!currentJob?.job_id) return;
+    window.open(getVoiceChangerDownloadUrl(currentJob.job_id), '_blank');
   };
 
   const togglePlayback = () => {
@@ -413,7 +414,7 @@ export default function VoiceChangerPage() {
                     key={provider.id}
                     onClick={() => {
                       setSelectedProvider(provider.id);
-                      setSelectedModel(provider.default_model);
+                      setSelectedModel(provider.default_model || provider.models?.[0]?.id || '');
                     }}
                     disabled={!provider.ready}
                     className={cn(
@@ -451,11 +452,11 @@ export default function VoiceChangerPage() {
             )}
 
             {/* Model variant selector */}
-            {currentProviderInfo && currentProviderInfo.models.length > 1 && (
+            {providerModels.length > 1 && (
               <div className="mt-4 pt-4 border-t border-glass-border">
                 <label className="label text-sm mb-2">Model</label>
                 <div className="flex gap-2 flex-wrap">
-                  {currentProviderInfo.models.map((model) => (
+                  {providerModels.map((model) => (
                     <button
                       key={model.id}
                       onClick={() => setSelectedModel(model.id)}
@@ -472,7 +473,7 @@ export default function VoiceChangerPage() {
                   ))}
                 </div>
                 <p className="text-xs text-foreground-muted mt-2">
-                  {currentProviderInfo.models.find((m) => m.id === selectedModel)?.description}
+                  {providerModels.find((m) => m.id === selectedModel)?.description}
                 </p>
               </div>
             )}
@@ -507,7 +508,7 @@ export default function VoiceChangerPage() {
               <div className="bg-surface-1 rounded-lg p-4">
                 <audio
                   ref={audioRef}
-                  src={getVoiceChangerDownloadUrl(currentJob.id)}
+                  src={getVoiceChangerDownloadUrl(currentJob.job_id)}
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
                   onEnded={() => setIsPlaying(false)}
@@ -557,7 +558,7 @@ export default function VoiceChangerPage() {
                 { label: 'Provider', value: currentProviderInfo.name },
                 {
                   label: 'Model',
-                  value: currentProviderInfo.models.find((m) => m.id === selectedModel)?.name || selectedModel,
+                  value: providerModels.find((m) => m.id === selectedModel)?.name || selectedModel,
                 },
                 ...(currentProviderInfo.quota_minutes
                   ? [{ label: 'Quota', value: `${currentProviderInfo.quota_minutes} min/month` }]

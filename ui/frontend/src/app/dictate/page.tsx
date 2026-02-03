@@ -53,6 +53,7 @@ export default function DictatePage() {
   const [transcript, setTranscript] = useState('');
   const [rawTranscript, setRawTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [lastMeta, setLastMeta] = useState<Record<string, any> | null>(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installOutput, setInstallOutput] = useState<string | null>(null);
@@ -410,6 +411,7 @@ export default function DictatePage() {
 
           setTranscript(result.text);
           setRawTranscript(result.raw_text);
+          setLastMeta(result.meta || null);
           setLastSttTranscript(result.text);
 
           // Notify main process about the transcript
@@ -421,9 +423,9 @@ export default function DictatePage() {
           } else {
             insertTextAtCursor(result.text);
           }
-        } catch (err: any) {
-          handleSttError(err, 'Transcription failed');
-        } finally {
+    } catch (err: any) {
+      handleSttError(err, 'Transcription failed');
+    } finally {
           setIsTranscribing(false);
           setSessionId(null);
           playActionSound('complete');
@@ -525,6 +527,22 @@ export default function DictatePage() {
   // === COMPUTED ===
   const isProcessing = isPreparing || isTranscribing;
   const hasTranscript = transcript.trim().length > 0;
+  const providerLabel = providerInfo?.name || provider;
+  const providerModelLabel =
+    (lastMeta?.model as string | undefined) ||
+    providerConfig?.model ||
+    providerModel ||
+    providerInfo?.default_model ||
+    '';
+  const billingBucket = (lastMeta?.billing_bucket as string | undefined) || '';
+  const billingLabel =
+    billingBucket === 'elevenlabs_stt_api_hours'
+      ? 'STT API hours'
+      : billingBucket === 'local_free'
+      ? 'Local (free)'
+      : billingBucket
+      ? billingBucket.replace(/_/g, ' ')
+      : '';
 
   // === RENDER ===
   return (
@@ -623,6 +641,11 @@ export default function DictatePage() {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
               />
+            </div>
+            <div className="text-xs text-foreground-muted">
+              Provider: <span className="text-foreground">{providerLabel}</span>
+              {providerModelLabel ? ` • Model: ${providerModelLabel}` : ''}
+              {billingLabel ? ` • Billing: ${billingLabel}` : ''}
             </div>
 
             {/* Recording status */}

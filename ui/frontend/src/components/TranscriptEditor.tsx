@@ -40,6 +40,14 @@ function formatTimestamp(seconds: number): string {
   return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
 
+function getSegmentStart(seg: TranscriptSegment): number {
+  return seg.start_time ?? seg.start ?? 0;
+}
+
+function getSegmentEnd(seg: TranscriptSegment): number {
+  return seg.end_time ?? seg.end ?? 0;
+}
+
 interface TranscriptEditorProps {
   segments: TranscriptSegment[];
   speakersDetected: number;
@@ -154,7 +162,7 @@ export default function TranscriptEditor({
   useEffect(() => {
     if (!segments?.length) return;
     const active = segments.find(
-      (seg) => currentTime >= seg.start_time && currentTime < seg.end_time
+      (seg) => currentTime >= getSegmentStart(seg) && currentTime < getSegmentEnd(seg)
     );
     if (active) {
       setActiveSegmentId(active.id);
@@ -185,7 +193,7 @@ export default function TranscriptEditor({
         line += `[${seg.speaker}] `;
       }
       if (showTimestamps) {
-        line += `[${formatTimestamp(seg.start_time)}] `;
+        line += `[${formatTimestamp(getSegmentStart(seg))}] `;
       }
       line += seg.text;
       return line;
@@ -433,9 +441,9 @@ export default function TranscriptEditor({
                         {showTimestamps && (
                           <span
                             className="text-xs text-slate-400 font-mono mr-1 cursor-pointer hover:text-emerald-400"
-                            onClick={() => handleSeek(seg.start_time)}
+                            onClick={() => handleSeek(getSegmentStart(seg))}
                           >
-                            [{formatTimestamp(seg.start_time)}]
+                            [{formatTimestamp(getSegmentStart(seg))}]
                           </span>
                         )}
 
@@ -454,7 +462,7 @@ export default function TranscriptEditor({
                           )}
                           onMouseEnter={() => setHoveredSegmentId(seg.id)}
                           onMouseLeave={() => setHoveredSegmentId(null)}
-                          onClick={() => handleSeek(seg.start_time)}
+                          onClick={() => handleSeek(getSegmentStart(seg))}
                         >
                           {seg.text}
                         </span>

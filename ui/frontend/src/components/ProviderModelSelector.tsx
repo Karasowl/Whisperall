@@ -27,8 +27,9 @@ export function ProviderModelSelector({
   // Normalize models to always be TTSModelVariant format
   const models = useMemo(() => {
     if (!providerInfo) return [];
+    const rawModels = providerInfo.models || [];
 
-    return providerInfo.models.map((model): TTSModelVariant => {
+    return rawModels.map((model): TTSModelVariant => {
       if (typeof model === 'string') {
         // Legacy string format - create basic variant
         return {
@@ -83,6 +84,8 @@ export function ProviderModelSelector({
       <div className="grid grid-cols-1 gap-2">
         {models.map((model) => {
           const isSelected = selectedModel === model.id;
+          const sizeGb = model.size_gb ?? model.vram_gb ?? providerInfo?.vram_gb ?? 0;
+          const vramGb = model.vram_gb ?? providerInfo?.vram_gb ?? sizeGb;
 
           return (
             <button
@@ -113,11 +116,11 @@ export function ProviderModelSelector({
               <div className="flex items-center gap-3 text-xs text-foreground-muted">
                 <span className="flex items-center gap-1">
                   <HardDrive className="w-3 h-3" />
-                  {model.size_gb >= 1 ? `${model.size_gb}GB` : `${Math.round(model.size_gb * 1000)}MB`}
+                  {sizeGb >= 1 ? `${sizeGb}GB` : `${Math.round(sizeGb * 1000)}MB`}
                 </span>
                 <span className="flex items-center gap-1">
                   <Zap className="w-3 h-3" />
-                  {model.vram_gb}GB VRAM
+                  {vramGb}GB VRAM
                 </span>
               </div>
             </button>

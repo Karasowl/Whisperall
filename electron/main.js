@@ -4,7 +4,7 @@ if (!app) {
   console.error('Electron main process not available. Run via "npm start" in the electron folder or ChatterboxUI.bat.');
   process.exit(1);
 }
-const { BrowserWindow, dialog, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, shell } = electron;
+const { BrowserWindow, dialog, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, shell, session } = electron;
 const path = require('path');
 const fs = require('fs');
 const { spawn, execSync } = require('child_process');
@@ -23,7 +23,10 @@ let mainWindow;
 let backendProcess;
 let tray;
 let isQuitting = false;
-const BACKEND_PORT = 8000;
+const DEFAULT_BACKEND_PORT = 8080;
+const envPort = parseInt(process.env.WHISPERALL_BACKEND_PORT || process.env.BACKEND_PORT || '', 10);
+const BACKEND_PORT = Number.isFinite(envPort) ? envPort : DEFAULT_BACKEND_PORT;
+process.env.WHISPERALL_BACKEND_PORT = String(BACKEND_PORT);
 let traySettings = {
   minimizeToTray: true,
   showNotifications: true,
@@ -95,6 +98,34 @@ const killPortProcess = () => {
 const isDev = !app.isPackaged;
 
 app.commandLine.appendSwitch('disable-http-cache');
+
+const configureMediaPermissions = () => {
+  try {
+    const defaultSession = session.defaultSession;
+    if (!defaultSession) return;
+
+    defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+      if (permission === 'media') {
+        const mediaTypes = details?.mediaTypes || [];
+        if (mediaTypes.includes('audio')) {
+          callback(true);
+          return;
+        }
+      }
+      callback(false);
+    });
+
+    defaultSession.setPermissionCheckHandler((webContents, permission, origin, details) => {
+      if (permission === 'media') {
+        const mediaTypes = details?.mediaTypes || [];
+        return mediaTypes.includes('audio');
+      }
+      return false;
+    });
+  } catch (err) {
+    console.warn('[Permissions] Failed to configure media permissions:', err.message);
+  }
+};
 
 // Paths
 const getBackendPath = () => {
@@ -682,6 +713,10 @@ const createWindow = async () => {
 };
 
 // App lifecycle
+app.whenReady().then(() => {
+  configureMediaPermissions();
+});
+
 app.whenReady().then(async () => {
   await createWindow();
   // Pre-create widget overlay for instant hotkey response

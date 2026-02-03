@@ -128,11 +128,11 @@ export default function LoopbackPage() {
           || devicesRes.devices.find(d => d.is_default)
           || devicesRes.devices[0];
         if (defaultDevice) {
-          setSelectedDevice(defaultDevice.index);
+          setSelectedDevice(defaultDevice.index ?? null);
         }
 
         // Don't show error initially - auto-install will happen when user clicks Start
-        if (!statusRes.available && statusRes.message.includes('failed')) {
+        if (!statusRes.available && statusRes.message?.includes('failed')) {
           setError(statusRes.message);
         }
       } catch (err) {
@@ -372,7 +372,7 @@ export default function LoopbackPage() {
   };
 
   const deviceOptions = devices.map(d => ({
-    value: d.index.toString(),
+    value: (d.index ?? 0).toString(),
     label: `${d.name}${d.is_loopback ? ' (Loopback)' : ''}${d.is_default ? ' - Default' : ''}`,
   }));
 

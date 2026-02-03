@@ -36,14 +36,20 @@ export function SelectMenu({
 }: SelectMenuProps) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const dropdownStyle = useDropdownPosition(open && !disabled, buttonRef);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const { position: dropdownStyle } = useDropdownPosition({
+    triggerRef: buttonRef,
+    dropdownRef,
+    isOpen: open && !disabled,
+  });
   const selected = options.find((opt) => opt.value === value);
   const portalRoot = typeof document !== 'undefined' ? document.body : null;
   const dropdown = open && !disabled ? (
     <>
       <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
       <div
-        className="z-50 dropdown-content max-h-80 overflow-y-auto animate-fade-in custom-scrollbar"
+        ref={dropdownRef}
+        className="fixed z-50 dropdown-content max-h-80 overflow-y-auto animate-fade-in custom-scrollbar"
         style={dropdownStyle}
       >
         {options.map((option) => (

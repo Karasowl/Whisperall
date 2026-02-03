@@ -1,7 +1,8 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // Backend URL - centralized configuration
-const BACKEND_URL = 'http://127.0.0.1:8000';
+const backendPort = process.env.WHISPERALL_BACKEND_PORT || process.env.BACKEND_PORT || '8080';
+const BACKEND_URL = `http://127.0.0.1:${backendPort}`;
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,

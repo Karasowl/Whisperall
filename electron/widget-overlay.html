@@ -36,7 +36,7 @@
       width: 100%;
       height: 100%;
       background: transparent !important;
-      overflow: visible;
+      overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     }
 
@@ -294,6 +294,12 @@
       gap: 6px;
     }
 
+    .provider-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-left: 6px;
+    }
+
     .undo-btn {
       font-size: 12px;
       color: var(--text-muted);
@@ -361,6 +367,7 @@
             <div class="wave-bar"></div>
           </div>
           <span id="rec-duration">0:00</span>
+          <span id="stt-provider-recording" class="provider-label"></span>
           <button class="stop-btn icon-btn" id="btn-stop-rec">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
               <rect x="6" y="6" width="12" height="12" rx="2"></rect>
@@ -378,6 +385,7 @@
             </svg>
             Transcribing...
           </div>
+          <span id="stt-provider-transcribing" class="provider-label"></span>
         </div>
 
         <!-- COMPLETE -->
@@ -660,60 +668,33 @@
         stopMicVisualizer();
       }
 
-      // --- AUDIO VISUALIZER ---
-      let audioCtx = null;
-      let analyser = null;
-      let micStream = null;
-      let visualizerFrame = null;
+      // --- AUDIO VISUALIZER (driven by main process levels) ---
+      let isVisualizing = false;
+      const bars = document.querySelectorAll('.wave-bar');
 
-      async function startMicVisualizer() {
-        try {
-          // Request simple audio stream
-          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 64; // Low res is fine for 5 bars
-          const source = audioCtx.createMediaStreamSource(micStream);
-          source.connect(analyser);
+      function applyAudioLevel(level) {
+        if (!isVisualizing) return;
+        const clamped = Math.max(0, Math.min(1, level || 0));
+        bars.forEach((bar, i) => {
+          const variance = 0.2 * (i / bars.length);
+          const scale = 0.6 + clamped * (2.2 - variance);
+          bar.style.transform = `scaleY(${scale})`;
+        });
+      }
 
-          const bars = document.querySelectorAll('.wave-bar');
-          bars.forEach(b => b.classList.add('active-mic'));
+      if (api?.onAudioLevel) {
+        api.onAudioLevel((level) => {
+          applyAudioLevel(level);
+        });
+      }
 
-          const update = () => {
-            if (!analyser) return;
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(dataArray);
-
-            // We have 5 bars. Let's sample the data array.
-            // dataArray length is 32 (fftSize/2).
-            // We want to skip low bass (index 0-2) maybe?
-            const step = Math.floor(dataArray.length / 5);
-
-            bars.forEach((bar, i) => {
-              const val = dataArray[i * step + 2] || 0; // +2 to skip DC offset
-              const scale = 0.5 + (val / 255) * 2.5; // Scale from 0.5 to 3.0
-              bar.style.transform = `scaleY(${scale})`;
-            });
-
-            visualizerFrame = requestAnimationFrame(update);
-          };
-
-          update();
-        } catch (err) {
-          console.error('Visualizer error:', err);
-        }
+      function startMicVisualizer() {
+        isVisualizing = true;
+        bars.forEach(b => b.classList.add('active-mic'));
       }
 
       function stopMicVisualizer() {
-        if (visualizerFrame) cancelAnimationFrame(visualizerFrame);
-        if (micStream) micStream.getTracks().forEach(t => t.stop());
-        if (audioCtx) audioCtx.close();
-
-        micStream = null;
-        audioCtx = null;
-        analyser = null;
-
-        const bars = document.querySelectorAll('.wave-bar');
+        isVisualizing = false;
         bars.forEach(b => {
           b.classList.remove('active-mic');
           b.style.transform = 'scaleY(1)';
@@ -745,7 +726,10 @@
       let currentAudio = null;
       let isPaused = false;
       let navVolume = 1.0; // 0.0 to 1.0
-      const BACKEND_URL = api?.backendUrl || 'http://127.0.0.1:8000';
+      const fallbackOrigin = window.location.origin && window.location.origin.startsWith('http')
+        ? window.location.origin
+        : 'http://127.0.0.1:8080';
+      const BACKEND_URL = api?.backendUrl || fallbackOrigin;
 
       async function handleReadClipboard() {
         try {
@@ -870,6 +854,38 @@
         btn.innerHTML = iconHtml;
       }
 
+      async function updateSttProviderLabel() {
+        try {
+          const response = await api.netFetch(`${BACKEND_URL}/api/settings/providers/stt`, {
+            method: 'GET',
+          });
+          if (!response.ok) return;
+          const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+          const providerId = data?.selected || 'unknown';
+          const config = data?.config || {};
+          const model = config?.model || '';
+          const providerNames = {
+            'elevenlabs': 'ElevenLabs',
+            'openai': 'OpenAI',
+            'groq': 'Groq',
+            'deepgram': 'Deepgram',
+            'deepinfra': 'DeepInfra',
+            'faster-whisper': 'Local Whisper',
+          };
+          const providerName = providerNames[providerId] || providerId;
+          let billing = '';
+          if (providerId === 'elevenlabs') billing = 'STT API hours';
+          else if (providerId === 'faster-whisper') billing = 'Local (free)';
+          const label = `STT: ${providerName}${model ? ` • ${model}` : ''}${billing ? ` • ${billing}` : ''}`;
+          const recEl = document.getElementById('stt-provider-recording');
+          const transEl = document.getElementById('stt-provider-transcribing');
+          if (recEl) recEl.textContent = label;
+          if (transEl) transEl.textContent = label;
+        } catch (err) {
+          // Ignore label update failures
+        }
+      }
+
       // --- PROCESS HOTKEY ACTIONS ---
       function processHotkeyAction(action) {
         if (action === 'read-clipboard') {
@@ -887,6 +903,7 @@
           } else {
             setState(STATES.RECORDING);
             startRecordingSim();
+            updateSttProviderLabel();
           }
           // Relay dictate-toggle to frontend to handle logic
           if (api?.triggerWidgetAction) api.triggerWidgetAction('dictate-toggle');
@@ -895,6 +912,7 @@
           if (currentState !== STATES.RECORDING && currentState !== STATES.TRANSCRIBING) {
             setState(STATES.RECORDING);
             startRecordingSim();
+            updateSttProviderLabel();
             if (api?.triggerWidgetAction) api.triggerWidgetAction('dictate-start');
           }
         } else if (action === 'dictate-stop') {

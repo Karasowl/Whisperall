@@ -3,6 +3,9 @@ title Whisperall
 cd /d "%~dp0"
 
 set VENV_PY=venv\Scripts\python.exe
+set WHISPERALL_BACKEND_PORT=8080
+set BACKEND_PORT=%WHISPERALL_BACKEND_PORT%
+set NEXT_PUBLIC_API_URL=http://localhost:%WHISPERALL_BACKEND_PORT%
 
 if not exist "%VENV_PY%" (
   echo Creating Python venv...

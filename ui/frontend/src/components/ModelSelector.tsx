@@ -24,6 +24,7 @@ export function ModelSelector({ models, selected, onSelect, label = 'Model' }: M
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {models.map((model) => {
           const Icon = modelIcons[model.id] || Cpu;
+          const languages = model.languages || [];
           return (
             <button
               key={model.id}
@@ -53,15 +54,15 @@ export function ModelSelector({ models, selected, onSelect, label = 'Model' }: M
               </div>
               <p className="text-sm text-slate-400 leading-relaxed">{model.description}</p>
               <div className="flex flex-wrap gap-1.5 mt-3">
-                {model.languages.length <= 3 ? (
-                  model.languages.map((lang) => (
+                {languages.length <= 3 ? (
+                  languages.map((lang) => (
                     <span key={lang} className="badge text-xs">
                       {lang}
                     </span>
                   ))
                 ) : (
                   <span className="badge badge-primary text-xs">
-                    {model.languages.length} languages
+                    {languages.length} languages
                   </span>
                 )}
               </div>

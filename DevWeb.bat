@@ -3,8 +3,10 @@ setlocal
 title Whisperall Web Dev
 cd /d "%~dp0"
 
-set BACKEND_PORT=8000
+set BACKEND_PORT=8080
 set FRONTEND_PORT=3000
+set WHISPERALL_BACKEND_PORT=%BACKEND_PORT%
+set NEXT_PUBLIC_API_URL=http://localhost:%BACKEND_PORT%
 
 echo Killing any process on ports %BACKEND_PORT% and %FRONTEND_PORT%...
 for %%P in (%BACKEND_PORT% %FRONTEND_PORT%) do (

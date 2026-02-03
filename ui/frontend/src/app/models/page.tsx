@@ -299,7 +299,7 @@ function ModelsPageContent() {
       </div>
 
       {/* Diarization Tab */}
-      {activeTab === 'diarization' && status && (
+      {activeTab === 'diarization' && status && status.diarization && (
         <div className="space-y-4">
           {/* Overall Status */}
           <div className={cn(
@@ -467,7 +467,7 @@ function ModelsPageContent() {
           <div className="glass-card p-4">
             <h4 className="font-medium mb-3">Required Models (Accept Terms on HuggingFace)</h4>
             <div className="space-y-2">
-              {status.diarization.models.map((model) => (
+              {(status.diarization.models || []).map((model) => (
                 <div
                   key={model.id}
                   className={cn(
@@ -512,7 +512,7 @@ function ModelsPageContent() {
       )}
 
       {/* API Providers Tab */}
-      {activeTab === 'api' && status && (
+      {activeTab === 'api' && status && status.api_providers && (
         <div className="grid gap-4">
           {Object.entries(status.api_providers).map(([id, provider]) => (
             <div key={id} className="glass-card p-4">
@@ -663,7 +663,7 @@ function ModelsPageContent() {
       )}
 
       {/* Local Models Tab */}
-      {activeTab === 'local' && status && (
+      {activeTab === 'local' && status && status.local_models && (
         <div className="space-y-6">
           {/* TTS Models */}
           <div>
@@ -904,6 +904,7 @@ function ModelsPageContent() {
           </div>
 
           {/* Local Providers */}
+          {status.local_providers && (
           <div>
             <h3 className="text-lg font-semibold mb-3">Local Services</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -956,6 +957,7 @@ function ModelsPageContent() {
               )}
             </div>
           </div>
+          )}
         </div>
       )}
     </div>

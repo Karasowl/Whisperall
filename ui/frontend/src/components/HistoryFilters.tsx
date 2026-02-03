@@ -92,28 +92,28 @@ export function HistoryFilters({ filters, onFiltersChange, className }: HistoryF
 
   const handleDatePreset = (preset: string) => {
     const now = new Date();
-    let date_from: string | undefined;
+    let dateFrom: string | undefined;
 
     switch (preset) {
       case 'today':
-        date_from = new Date(now.setHours(0, 0, 0, 0)).toISOString();
+        dateFrom = new Date(now.setHours(0, 0, 0, 0)).toISOString();
         break;
       case 'week':
         const weekAgo = new Date(now);
         weekAgo.setDate(weekAgo.getDate() - 7);
-        date_from = weekAgo.toISOString();
+        dateFrom = weekAgo.toISOString();
         break;
       case 'month':
         const monthAgo = new Date(now);
         monthAgo.setMonth(monthAgo.getMonth() - 1);
-        date_from = monthAgo.toISOString();
+        dateFrom = monthAgo.toISOString();
         break;
       case 'all':
       default:
-        date_from = undefined;
+        dateFrom = undefined;
     }
 
-    onFiltersChange({ ...filters, date_from, date_to: undefined, offset: 0 });
+    onFiltersChange({ ...filters, dateFrom, dateTo: undefined, offset: 0 });
     setShowDateDropdown(false);
   };
 
@@ -129,13 +129,13 @@ export function HistoryFilters({ filters, onFiltersChange, className }: HistoryF
     filters.module ||
     filters.provider ||
     filters.favorite ||
-    filters.date_from ||
+    filters.dateFrom ||
     filters.search
   );
 
   const getDateLabel = () => {
-    if (!filters.date_from) return 'All Time';
-    const from = new Date(filters.date_from);
+    if (!filters.dateFrom) return 'All Time';
+    const from = new Date(filters.dateFrom);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
     if (diffDays <= 1) return 'Today';
@@ -244,7 +244,7 @@ export function HistoryFilters({ filters, onFiltersChange, className }: HistoryF
             }}
             className={cn(
               'flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors',
-              filters.date_from
+              filters.dateFrom
                 ? 'bg-accent-primary/20 text-accent-primary border border-accent-primary/30'
                 : 'bg-surface-2 hover:bg-surface-3 text-foreground-secondary'
             )}
@@ -267,7 +267,7 @@ export function HistoryFilters({ filters, onFiltersChange, className }: HistoryF
                   onClick={() => handleDatePreset(key)}
                   className={cn(
                     'w-full px-3 py-2 text-sm text-left hover:bg-surface-2 transition-colors',
-                    (key === 'all' && !filters.date_from) && 'bg-accent-primary/10 text-accent-primary'
+                    (key === 'all' && !filters.dateFrom) && 'bg-accent-primary/10 text-accent-primary'
                   )}
                 >
                   {label}

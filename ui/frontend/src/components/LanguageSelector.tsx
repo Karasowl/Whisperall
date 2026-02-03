@@ -20,7 +20,12 @@ export function LanguageSelector({ languages, selected, onSelect, disabled }: La
   const [favorites, setFavorites] = useState<string[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const dropdownStyle = useDropdownPosition(isOpen && !disabled, buttonRef);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const { position: dropdownStyle } = useDropdownPosition({
+    triggerRef: buttonRef,
+    dropdownRef,
+    isOpen: isOpen && !disabled,
+  });
   const portalRoot = typeof document !== 'undefined' ? document.body : null;
 
   // Load favorites from localStorage
@@ -73,7 +78,8 @@ export function LanguageSelector({ languages, selected, onSelect, disabled }: La
       />
 
       <div
-        className="z-50 dropdown-content max-h-72 overflow-y-auto animate-fade-in custom-scrollbar"
+        ref={dropdownRef}
+        className="fixed z-50 dropdown-content max-h-72 overflow-y-auto animate-fade-in custom-scrollbar"
         style={dropdownStyle}
       >
         {/* Favorites section */}

@@ -132,7 +132,10 @@ export function HistoryEntryCard({
 
   // Audio playback
   const handlePlayPause = async () => {
-    if (!entry.output_audio_path) return;
+    // For STT, voice-changer, voice-isolator, etc, we might have input audio.
+    // Ideally we prefer input for STT, output for TTS.
+    const audioPath = entry.output_audio_path || entry.input_audio_path;
+    if (!audioPath) return;
 
     if (isPlaying && audio) {
       audio.pause();
@@ -146,16 +149,20 @@ export function HistoryEntryCard({
       return;
     }
 
+    // Determine download type based on what path we found
+    const downloadType = entry.output_audio_path ? 'output_audio' : 'input_audio';
+
     // Create new audio element
-    const downloadUrl = getHistoryFileDownloadUrl(entry.id, 'output_audio');
+    const downloadUrl = getHistoryFileDownloadUrl(entry.id, downloadType);
     const newAudio = new Audio(downloadUrl);
     newAudio.onended = () => setIsPlaying(false);
-    newAudio.onerror = () => {
-      console.error('Audio playback failed');
+    newAudio.onerror = (e) => {
+      console.error('Audio playback failed', e);
       setIsPlaying(false);
+      // Try to recover or show error?
     };
     setAudio(newAudio);
-    newAudio.play();
+    newAudio.play().catch(e => console.error("Play failed:", e));
     setIsPlaying(true);
   };
 
@@ -307,7 +314,7 @@ export function HistoryEntryCard({
 
         {/* Actions */}
         <div className="flex items-center gap-1 shrink-0">
-          {entry.output_audio_path && (
+          {(entry.output_audio_path || entry.input_audio_path) && (
             <button
               onClick={handlePlayPause}
               className={cn(

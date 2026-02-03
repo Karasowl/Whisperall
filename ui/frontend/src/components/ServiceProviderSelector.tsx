@@ -27,7 +27,12 @@ export function ServiceProviderSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const dropdownStyle = useDropdownPosition(isOpen, buttonRef);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const { position: dropdownStyle } = useDropdownPosition({
+    triggerRef: buttonRef,
+    dropdownRef,
+    isOpen,
+  });
   const portalRoot = typeof document !== 'undefined' ? document.body : null;
   const getLocalUnavailableLabel = (provider: ServiceProviderInfo) =>
     provider.requires_model_download ? 'install model' : 'start service';
@@ -60,7 +65,7 @@ export function ServiceProviderSelector({
 
   const selectedProvider = providers.find(p => p.id === selected);
 
-  const serviceLabels: Record<ServiceType, string> = {
+  const serviceLabels: Partial<Record<ServiceType, string>> = {
     tts: 'TTS Engine',
     stt: 'Transcription Engine',
     ai_edit: 'AI Model',
@@ -75,7 +80,8 @@ export function ServiceProviderSelector({
     <>
       <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
       <div
-        className="z-50 card shadow-xl max-h-72 overflow-y-auto custom-scrollbar"
+        ref={dropdownRef}
+        className="fixed z-50 card shadow-xl max-h-72 overflow-y-auto custom-scrollbar"
         style={dropdownStyle}
       >
         {/* Local providers */}
@@ -159,7 +165,7 @@ export function ServiceProviderSelector({
 
   return (
     <div className="space-y-2">
-      <label className="label">{label || serviceLabels[service]}</label>
+      <label className="label">{label || serviceLabels[service] || 'Service'}</label>
       <div className="relative">
         <button
           type="button"
