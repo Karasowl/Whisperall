@@ -31,7 +31,8 @@ export default function App() {
 
   // Listen for hotkey-driven navigation from Electron main process
   useEffect(() => {
-    const unsub = electron?.onHotkey((action) => {
+    if (!electron?.onHotkey) return;
+    const unsub = electron.onHotkey((action: string) => {
       const routeMap: Record<string, Page> = {
         'ai-edit': 'editor',
         'translate': 'editor',

@@ -6,6 +6,7 @@ let overlayWindow = null;
 let lastDictationText = '';
 
 const isDev = !app.isPackaged;
+const VITE_URL = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
 
 const createMainWindow = () => {
   mainWindow = new BrowserWindow({
@@ -17,8 +18,8 @@ const createMainWindow = () => {
     }
   });
 
-  if (isDev && process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+  if (isDev) {
+    mainWindow.loadURL(VITE_URL);
   } else {
     const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
     mainWindow.loadFile(indexPath);

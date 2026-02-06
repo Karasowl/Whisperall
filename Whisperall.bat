@@ -33,8 +33,8 @@ echo Starting Vite dev server...
 start "WhisperAll-Vite" /min cmd /c "cd /d %~dp0apps\desktop && pnpm dev"
 
 REM Wait for Vite to be ready (poll localhost:5173, up to 30s)
-echo Waiting for Vite on http://localhost:5173 ...
-powershell -Command "for ($i=0; $i -lt 30; $i++) { Start-Sleep 1; try { $null = Invoke-WebRequest -Uri 'http://localhost:5173' -UseBasicParsing -TimeoutSec 1; Write-Host 'Vite ready!'; exit 0 } catch {} }; Write-Host 'ERROR: Vite did not start after 30 seconds.'; exit 1"
+echo Waiting for Vite on http://127.0.0.1:5173 ...
+powershell -Command "for ($i=0; $i -lt 30; $i++) { Start-Sleep 1; try { $null = Invoke-WebRequest -Uri 'http://127.0.0.1:5173' -UseBasicParsing -TimeoutSec 1; Write-Host 'Vite ready!'; exit 0 } catch {} }; Write-Host 'ERROR: Vite did not start after 30 seconds.'; exit 1"
 if %errorlevel% neq 0 (
     pause
     exit /b 1
@@ -44,7 +44,7 @@ echo.
 REM Launch Electron (must unset ELECTRON_RUN_AS_NODE - VSCode sets it to 1)
 echo Starting Electron...
 cd /d "%~dp0apps\desktop"
-set VITE_DEV_SERVER_URL=http://localhost:5173
+set VITE_DEV_SERVER_URL=http://127.0.0.1:5173
 set ELECTRON_RUN_AS_NODE=
 pnpm electron:dev
 
