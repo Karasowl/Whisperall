@@ -47,7 +47,7 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(vitest@2.1.9(@types/node@25.2.1)(msw@2.12.8(@types/node@25.2.1)(typescript@5.9.3)))
       electron:
-        specifier: ^33.0.0
+        specifier: '33'
         version: 33.4.11
       typescript:
         specifier: ^5.6.2

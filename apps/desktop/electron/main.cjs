@@ -1,8 +1,5 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, clipboard } from 'electron';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const { app, BrowserWindow, globalShortcut, ipcMain, clipboard } = require('electron');
+const path = require('path');
 
 let mainWindow = null;
 let overlayWindow = null;
@@ -16,7 +13,7 @@ const createMainWindow = () => {
     height: 800,
     backgroundColor: '#0f172a',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.cjs')
     }
   });
 
@@ -38,7 +35,7 @@ const createOverlayWindow = () => {
     skipTaskbar: true,
     resizable: false,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.cjs')
     }
   });
 

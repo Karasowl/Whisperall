@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "main": "electron/main.js",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -12,7 +12,7 @@
     "test:e2e": "playwright test",
     "lint": "echo lint-not-configured",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.electron.json --noEmit",
-    "electron:dev": "electron ."
+    "electron:dev": "node -e \"delete process.env.ELECTRON_RUN_AS_NODE; require('child_process').spawn(require('electron'), ['.'], {stdio:'inherit', env:process.env}).on('exit',c=>process.exit(c))\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.95.2",
@@ -28,7 +28,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.1",
     "@vitest/coverage-v8": "^2.1.9",
-    "electron": "^33.0.0",
+    "electron": "33",
     "typescript": "^5.6.2",
     "vite": "^5.4.11",
     "vitest": "^2.1.0"

@@ -25,42 +25,32 @@ if not exist "apps\desktop\node_modules" (
     pnpm install
 )
 
-REM Kill any leftover Vite/Electron on our ports
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":5173 " ^| findstr "LISTENING" 2^>nul') do (
-    taskkill /PID %%p /F >nul 2>nul
-)
+REM Kill any leftover Vite on our port
+powershell -Command "Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" 2>nul
 
 REM Start Vite dev server in background
 echo Starting Vite dev server...
 start "WhisperAll-Vite" /min cmd /c "cd /d %~dp0apps\desktop && pnpm dev"
 
-REM Wait for Vite to be ready (poll localhost:5173)
+REM Wait for Vite to be ready (poll localhost:5173, up to 30s)
 echo Waiting for Vite on http://localhost:5173 ...
-set /a attempts=0
-:wait_vite
-set /a attempts+=1
-if %attempts% gtr 30 (
-    echo ERROR: Vite did not start after 30 seconds.
+powershell -Command "for ($i=0; $i -lt 30; $i++) { Start-Sleep 1; try { $null = Invoke-WebRequest -Uri 'http://localhost:5173' -UseBasicParsing -TimeoutSec 1; Write-Host 'Vite ready!'; exit 0 } catch {} }; Write-Host 'ERROR: Vite did not start after 30 seconds.'; exit 1"
+if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
-timeout /t 1 /nobreak >nul
-powershell -Command "try { (Invoke-WebRequest -Uri 'http://localhost:5173' -UseBasicParsing -TimeoutSec 1).StatusCode } catch { exit 1 }" >nul 2>nul
-if %errorlevel% neq 0 goto wait_vite
-echo Vite ready!
 echo.
 
-REM Launch Electron
+REM Launch Electron (must unset ELECTRON_RUN_AS_NODE - VSCode sets it to 1)
 echo Starting Electron...
 cd /d "%~dp0apps\desktop"
 set VITE_DEV_SERVER_URL=http://localhost:5173
+set ELECTRON_RUN_AS_NODE=
 pnpm electron:dev
 
 REM When Electron closes, kill the Vite server
 echo.
 echo Shutting down Vite...
 taskkill /FI "WindowTitle eq WhisperAll-Vite*" /F >nul 2>nul
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":5173 " ^| findstr "LISTENING" 2^>nul') do (
-    taskkill /PID %%p /F >nul 2>nul
-)
+powershell -Command "Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" 2>nul
 echo Done.
