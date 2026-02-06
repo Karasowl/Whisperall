@@ -9,6 +9,7 @@
     "start": "electron .",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
+    "build:msi": "electron-builder --win msi",
     "pack": "electron-builder --dir"
   },
   "dependencies": {
@@ -23,12 +24,15 @@
     "appId": "com.whisperall.app",
     "productName": "Whisperall",
     "directories": {
-      "output": "dist"
+      "output": "dist-msi2"
     },
     "files": [
       "main.js",
       "preload.js",
-      "overlay.html",
+      "loading.html",
+      "subtitle-overlay.html",
+      "widget-overlay.html",
+      "whisperall-tray.png",
       "frontend/**/*"
     ],
     "extraResources": [
@@ -49,7 +53,10 @@
       }
     ],
     "win": {
-      "target": "portable",
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "icon.ico",
       "signAndEditExecutable": false
     },

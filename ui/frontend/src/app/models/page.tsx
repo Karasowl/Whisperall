@@ -30,6 +30,7 @@ import {
   HuggingFaceVerification,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useDevMode } from '@/components/DevModeProvider';
 
 type Tab = 'local' | 'api' | 'diarization';
 
@@ -78,6 +79,7 @@ export default function ModelsPage() {
 }
 
 function ModelsPageContent() {
+  const { devMode } = useDevMode();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab') as Tab | null;
   const [activeTab, setActiveTab] = useState<Tab>(tabParam || 'diarization');
@@ -93,6 +95,20 @@ function ModelsPageContent() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
+
+  if (!devMode) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="glass-card p-8 max-w-md text-center space-y-3">
+          <h2 className="text-lg font-semibold text-foreground">Engines are managed automatically</h2>
+          <p className="text-sm text-foreground-muted">
+            Whisperall handles engine updates behind the scenes. If you need advanced diagnostics,
+            enable Developer mode in Settings.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const loadStatus = async () => {
     setLoading(true);
@@ -221,16 +237,16 @@ function ModelsPageContent() {
   const tabs = [
     { id: 'diarization' as Tab, label: 'Speaker Detection', icon: Users },
     { id: 'api' as Tab, label: 'API Providers', icon: Cloud },
-    { id: 'local' as Tab, label: 'Local Models', icon: HardDrive },
+    { id: 'local' as Tab, label: 'Local Resources', icon: HardDrive },
   ];
 
   return (
     <div className="space-y-6 animate-slide-up">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gradient">Model Management</h1>
+        <h1 className="text-3xl font-bold text-gradient">Resource Management</h1>
         <p className="text-slate-400 mt-2">
-          Configure AI models and API providers
+          Configure engines and API providers
         </p>
       </div>
 
@@ -463,9 +479,9 @@ function ModelsPageContent() {
             )}
           </div>
 
-          {/* Required Models */}
+          {/* Required Resources */}
           <div className="glass-card p-4">
-            <h4 className="font-medium mb-3">Required Models (Accept Terms on HuggingFace)</h4>
+            <h4 className="font-medium mb-3">Required Resources (Accept Terms on HuggingFace)</h4>
             <div className="space-y-2">
               {(status.diarization.models || []).map((model) => (
                 <div
@@ -662,12 +678,12 @@ function ModelsPageContent() {
         </div>
       )}
 
-      {/* Local Models Tab */}
+      {/* Local Resources Tab */}
       {activeTab === 'local' && status && status.local_models && (
         <div className="space-y-6">
-          {/* TTS Models */}
+          {/* TTS Engines */}
           <div>
-            <h3 className="text-lg font-semibold mb-3">Text-to-Speech Models</h3>
+            <h3 className="text-lg font-semibold mb-3">Text-to-Speech Engines</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {status.local_models.tts.map((model) => {
                 const isBusy = !!busy[model.id];
@@ -740,14 +756,14 @@ function ModelsPageContent() {
                 );
               })}
               {status.local_models.tts.length === 0 && (
-                <p className="text-slate-400 col-span-2">No TTS models available</p>
+                <p className="text-slate-400 col-span-2">No TTS engines available</p>
               )}
             </div>
           </div>
 
-          {/* STT Models */}
+          {/* STT Engines */}
           <div>
-            <h3 className="text-lg font-semibold mb-3">Speech-to-Text Models</h3>
+            <h3 className="text-lg font-semibold mb-3">Speech-to-Text Engines</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {status.local_models.stt.map((model) => {
                 const isBusy = !!busy[model.id];
@@ -820,14 +836,14 @@ function ModelsPageContent() {
                 );
               })}
               {status.local_models.stt.length === 0 && (
-                <p className="text-slate-400 col-span-2">No STT models available</p>
+                <p className="text-slate-400 col-span-2">No STT engines available</p>
               )}
             </div>
           </div>
 
-          {/* Translation Models */}
+          {/* Translation Engines */}
           <div>
-            <h3 className="text-lg font-semibold mb-3">Translation Models</h3>
+            <h3 className="text-lg font-semibold mb-3">Translation Engines</h3>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {status.local_models.translation.map((model) => {
                 const isBusy = !!busy[model.id];
@@ -898,7 +914,7 @@ function ModelsPageContent() {
                 );
               })}
               {status.local_models.translation.length === 0 && (
-                <p className="text-slate-400 col-span-2">No translation models available</p>
+                <p className="text-slate-400 col-span-2">No translation engines available</p>
               )}
             </div>
           </div>

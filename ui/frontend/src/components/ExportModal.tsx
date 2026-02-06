@@ -50,7 +50,7 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-white/10">
           <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-            <Download className="w-5 h-5 text-emerald-400" />
+            <Download className="w-5 h-5 text-accent-primary" />
             Export Transcript
           </h2>
           <button
@@ -77,7 +77,7 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
                     className={`
                       flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all
                       ${selectedFormat === format.id
-                        ? "bg-emerald-500/10 border-emerald-400/40"
+                        ? "bg-accent-primary/10 border-accent-primary/40"
                         : "bg-white/5 border-white/10 hover:border-white/20"}
                     `}
                   >
@@ -92,19 +92,19 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
                     <div
                       className={`
                         w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0
-                        ${selectedFormat === format.id ? "bg-emerald-500/20" : "bg-white/10"}
+                        ${selectedFormat === format.id ? "bg-accent-primary/15" : "bg-white/10"}
                       `}
                     >
                       <Icon
                         className={`w-5 h-5 ${
-                          selectedFormat === format.id ? "text-emerald-400" : "text-slate-400"
+                          selectedFormat === format.id ? "text-accent-primary" : "text-slate-400"
                         }`}
                       />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p
                         className={`font-medium ${
-                          selectedFormat === format.id ? "text-emerald-300" : "text-slate-100"
+                          selectedFormat === format.id ? "text-accent-primary" : "text-slate-100"
                         }`}
                       >
                         {format.name}
@@ -116,7 +116,7 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
                       className={`
                         w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center
                         ${selectedFormat === format.id
-                          ? "border-emerald-500 bg-emerald-500"
+                          ? "border-accent-primary bg-accent-primary"
                           : "border-white/30"}
                       `}
                     >
@@ -141,7 +141,7 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
                 type="checkbox"
                 checked={includeSpeakers}
                 onChange={(e) => setIncludeSpeakers(e.target.checked)}
-                className="w-5 h-5 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
+                className="w-5 h-5 rounded border-white/20 bg-white/5 text-accent-primary focus:ring-accent-primary focus:ring-offset-0"
               />
               <div>
                 <span className="text-slate-100">Include speaker labels</span>
@@ -155,7 +155,7 @@ export default function ExportModal({ onExport, onClose }: ExportModalProps) {
                   type="checkbox"
                   checked={includeTimestamps}
                   onChange={(e) => setIncludeTimestamps(e.target.checked)}
-                  className="w-5 h-5 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
+                  className="w-5 h-5 rounded border-white/20 bg-white/5 text-accent-primary focus:ring-accent-primary focus:ring-offset-0"
                 />
                 <div>
                   <span className="text-slate-100">Include timestamps</span>

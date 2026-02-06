@@ -19,11 +19,11 @@ export function ModuleHeader({
   className,
 }: ModuleHeaderProps) {
   return (
-    <div className={cn('space-y-2', className)}>
-      <div className="flex items-center gap-3 flex-wrap">
+    <div className={cn('space-y-3', className)}>
+      <div className="flex items-end gap-4 flex-wrap">
         {Icon && (
-          <div className="p-2 rounded-xl bg-accent-primary/10">
-            <Icon className="w-6 h-6 text-accent-primary" aria-hidden="true" />
+          <div className="w-10 h-10 rounded-xl bg-surface-2 border border-glass-border flex items-center justify-center text-accent-primary">
+            <Icon className="w-5 h-5" aria-hidden="true" />
           </div>
         )}
 

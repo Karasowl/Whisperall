@@ -133,20 +133,32 @@ class TranslationService:
         return self._translate_llm("zhipu", base_url, key, model, text, source_lang, target_lang)
 
     def translate(self, text: str, source_lang: str = "auto", target_lang: str = "en", provider: Optional[str] = None):
-        provider = provider or settings_service.get_selected_provider("translation")
+        provider_id = provider or settings_service.get_selected_provider("translation")
 
-        if provider == "argos":
-            return self._translate_argos(text, source_lang, target_lang)
-        if provider == "deepl":
-            return self._translate_deepl(text, source_lang, target_lang)
-        if provider == "google":
-            return self._translate_google(text, source_lang, target_lang)
-        if provider == "deepseek":
-            return self._translate_deepseek(text, source_lang, target_lang)
-        if provider == "zhipu":
-            return self._translate_zhipu(text, source_lang, target_lang)
+        try:
+            if provider_id == "argos":
+                return self._translate_argos(text, source_lang, target_lang)
+            if provider_id == "deepl":
+                return self._translate_deepl(text, source_lang, target_lang)
+            if provider_id == "google":
+                return self._translate_google(text, source_lang, target_lang)
+            if provider_id == "deepseek":
+                return self._translate_deepseek(text, source_lang, target_lang)
+            if provider_id == "zhipu":
+                return self._translate_zhipu(text, source_lang, target_lang)
 
-        raise RuntimeError(f"Translation provider not supported: {provider}")
+            raise RuntimeError(f"Translation provider not supported: {provider_id}")
+        except Exception as exc:
+            # Keep a usable UX: if an API provider is missing keys/quota, fall back to local Argos when available.
+            if provider_id != "argos":
+                try:
+                    translated, meta = self._translate_argos(text, source_lang, target_lang)
+                    meta = dict(meta or {})
+                    meta["fallback_from"] = provider_id
+                    return translated, meta
+                except Exception:
+                    pass
+            raise
 
 
 _service: Optional[TranslationService] = None

@@ -5,6 +5,8 @@ import { ArrowRightLeft, Copy, Check, Languages } from 'lucide-react';
 import { translateText, ServiceProviderInfo, getProviderSelection, setProvider } from '@/lib/api';
 import { SelectMenu } from '@/components/SelectMenu';
 import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
+import { usePlan } from '@/components/PlanProvider';
+import { useDevMode } from '@/components/DevModeProvider';
 import {
   ModuleShell,
   ActionBar,
@@ -22,6 +24,10 @@ const languageOptions = [
 ];
 
 export default function TranslatePage() {
+  const { hasPro } = usePlan();
+  const { devMode } = useDevMode();
+  const showEngineSelector = devMode;
+
   const [source, setSource] = useState('auto');
   const [target, setTarget] = useState('en');
   const [provider, setProviderState] = useState('argos');
@@ -139,17 +145,19 @@ export default function TranslatePage() {
       settingsTitle="Translation Settings"
       // Engine selector
       engineSelector={
-        <UnifiedProviderSelector
-          service="translation"
-          selected={provider}
-          onSelect={setProviderState}
-          selectedModel={providerModel}
-          onModelChange={setProviderModel}
-          onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
-          variant="dropdown"
-          showModelSelector
-          label="Translation Engine"
-        />
+        showEngineSelector ? (
+          <UnifiedProviderSelector
+            service="translation"
+            selected={provider}
+            onSelect={setProviderState}
+            selectedModel={providerModel}
+            onModelChange={setProviderModel}
+            onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
+            variant="dropdown"
+            showModelSelector
+            label="Translation Engine"
+          />
+        ) : undefined
       }
       // Settings panel (left side)
       settings={
@@ -258,10 +266,10 @@ export default function TranslatePage() {
             'Output is editable if you need adjustments',
           ]}
           metadata={
-            providerInfo
+            showEngineSelector && providerInfo
               ? [
                   { label: 'Provider', value: providerInfo.name },
-                  { label: 'Model', value: providerModel || providerInfo.default_model || 'Default' },
+                  { label: 'Quality', value: providerModel || providerInfo.default_model || 'Default' },
                   { label: 'Direction', value: `${source === 'auto' ? 'Auto' : source.toUpperCase()} → ${target.toUpperCase()}` },
                 ]
               : undefined

@@ -85,7 +85,7 @@ export default function PyannoteSetupWizard({
         setTokenError("Token could not be saved. Please try again.");
       } else {
         // Token saved but still not available - likely terms not accepted
-        setTokenError("Token saved but model access denied. Make sure you accepted terms for ALL 4 models: speaker-diarization-3.1, segmentation-3.0, speaker-diarization-community-1, and embedding");
+        setTokenError("Token saved but access denied. Make sure you accepted terms for all 4 repositories: speaker-diarization-3.1, segmentation-3.0, speaker-diarization-community-1, and embedding.");
       }
     } catch (err: any) {
       setTokenError(err.response?.data?.detail || err.message || "Failed to save token");
@@ -166,7 +166,7 @@ export default function PyannoteSetupWizard({
 
           <div className="p-6 space-y-4 text-center">
             <p className="text-sm text-slate-400">
-              The HuggingFace models are accessible, but the local audio decoder is missing or broken.
+              The HuggingFace resources are accessible, but the local audio decoder is missing or broken.
             </p>
             <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm select-text">
               <p className="font-medium">Details</p>
@@ -195,8 +195,8 @@ export default function PyannoteSetupWizard({
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-emerald-400" />
+            <div className="w-10 h-10 rounded-full bg-accent-primary/15 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-accent-primary" />
             </div>
             <div>
               <h2 className="text-lg font-semibold text-slate-100">
@@ -222,7 +222,7 @@ export default function PyannoteSetupWizard({
               <div className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium",
                 step.done
-                  ? "bg-emerald-500/20 text-emerald-400"
+                  ? "bg-accent-primary/10 text-accent-primary"
                   : currentStep === step.id
                     ? "bg-white/10 text-slate-100"
                     : "text-slate-400"
@@ -254,7 +254,7 @@ export default function PyannoteSetupWizard({
                   Accept HuggingFace Terms
                 </h3>
                 <p className="text-sm text-slate-400">
-                  Pyannote requires accepting terms for <strong>4 models</strong> on HuggingFace.
+                  Pyannote requires accepting terms for <strong>4 repositories</strong> on HuggingFace.
                   Click each button below and accept the terms.
                 </p>
               </div>
@@ -320,11 +320,11 @@ export default function PyannoteSetupWizard({
               </div>
 
               <div className="p-3 rounded-lg bg-white/5 text-sm text-slate-400">
-                <p className="font-medium text-slate-100 mb-1">For each model:</p>
+                <p className="font-medium text-slate-100 mb-1">For each repository:</p>
                 <ol className="list-decimal list-inside space-y-1">
                   <li>Log in to HuggingFace (create account if needed)</li>
                   <li>Click "Agree and access repository"</li>
-                  <li>Repeat for all 4 models above</li>
+                  <li>Repeat for all 4 repositories above</li>
                 </ol>
               </div>
 
@@ -421,8 +421,8 @@ export default function PyannoteSetupWizard({
           {/* Complete */}
           {currentStep === "complete" && (
             <div className="space-y-4 text-center">
-              <div className="w-16 h-16 mx-auto rounded-full bg-emerald-500/20 flex items-center justify-center">
-                <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+              <div className="w-16 h-16 mx-auto rounded-full bg-accent-primary/15 flex items-center justify-center">
+                <CheckCircle2 className="w-8 h-8 text-accent-primary" />
               </div>
               <h3 className="text-lg font-medium text-slate-100">
                 Setup Complete!

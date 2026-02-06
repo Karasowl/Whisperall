@@ -59,6 +59,30 @@ def download_media_from_url(
     output_dir.mkdir(parents=True, exist_ok=True)
     output_template = str(output_dir / f"import_{job_id}.%(ext)s")
 
+    def _format_speed(speed: Optional[float]) -> Optional[str]:
+        if not speed or speed <= 0:
+            return None
+        if speed >= 1024 * 1024:
+            return f"{speed / (1024 * 1024):.1f} MB/s"
+        if speed >= 1024:
+            return f"{speed / 1024:.1f} KB/s"
+        return f"{speed:.0f} B/s"
+
+    def _format_eta(seconds: Optional[float]) -> Optional[str]:
+        if seconds is None:
+            return None
+        try:
+            total = int(seconds)
+        except Exception:
+            return None
+        if total < 0:
+            return None
+        hours, rem = divmod(total, 3600)
+        minutes, secs = divmod(rem, 60)
+        if hours > 0:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes}:{secs:02d}"
+
     def progress_hook(data: Dict[str, Any]) -> None:
         if should_cancel and should_cancel():
             raise DownloadCancelled("Download cancelled by user")
@@ -68,11 +92,19 @@ def download_media_from_url(
         if status == "downloading":
             total = data.get("total_bytes") or data.get("total_bytes_estimate")
             downloaded = data.get("downloaded_bytes") or 0
+            speed = _format_speed(data.get("speed"))
+            eta = _format_eta(data.get("eta"))
+            extras = []
+            if speed:
+                extras.append(speed)
+            if eta:
+                extras.append(f"ETA {eta}")
+            suffix = f" • {' • '.join(extras)}" if extras else ""
             if total:
                 pct = max(0.0, min(100.0, downloaded / total * 100.0))
-                progress_callback(pct, "Downloading media...")
+                progress_callback(pct, f"Downloading media... {pct:.0f}%{suffix}")
             else:
-                progress_callback(0.0, "Downloading media...")
+                progress_callback(0.0, f"Downloading media...{suffix}")
         elif status == "finished":
             progress_callback(100.0, "Download complete")
 

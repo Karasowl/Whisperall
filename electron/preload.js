@@ -2,12 +2,19 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // Backend URL - centralized configuration
 const backendPort = process.env.WHISPERALL_BACKEND_PORT || process.env.BACKEND_PORT || '8080';
-const BACKEND_URL = `http://127.0.0.1:${backendPort}`;
+const configuredBackendUrl = process.env.WHISPERALL_API_URL || process.env.API_BASE_URL || process.env.BACKEND_URL;
+const BACKEND_URL = (configuredBackendUrl || `http://127.0.0.1:${backendPort}`).replace(/\/$/, '');
+const configuredAuthToken =
+  process.env.WHISPERALL_CLIENT_TOKEN ||
+  process.env.WHISPERALL_API_TOKEN ||
+  process.env.WHISPERALL_AUTH_TOKEN;
+const AUTH_TOKEN = (configuredAuthToken || '').trim() || null;
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   isElectron: true,
   backendUrl: BACKEND_URL,
+  authToken: AUTH_TOKEN,
   onHotkey: (callback) => {
     const handler = (_event, action) => callback(action);
     ipcRenderer.on('global-hotkey', handler);
@@ -97,6 +104,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getWidgetState: () => ipcRenderer.invoke('widget-get-state'),
   resizeWidget: (dims) => ipcRenderer.send('widget-resize', dims),
+  setWidgetIgnoreMouseEvents: (ignore) => ipcRenderer.send('widget-ignore-mouse', { ignore: !!ignore }),
   onWidgetSwitchModule: (callback) => {
     const handler = (_event, module) => callback(module);
     ipcRenderer.on('widget-switch-module', handler);
@@ -107,7 +115,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('widget-state-update', handler);
     return () => ipcRenderer.removeListener('widget-state-update', handler);
   },
+  onWidgetOverlayVisible: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('widget-overlay-visible', handler);
+    return () => ipcRenderer.removeListener('widget-overlay-visible', handler);
+  },
+  onWidgetHighlight: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('widget-highlight', handler);
+    return () => ipcRenderer.removeListener('widget-highlight', handler);
+  },
   moveWidget: (delta) => ipcRenderer.send('widget-move', delta),
+  moveWidgetAbs: (pos) => ipcRenderer.send('widget-move-abs', pos),
+  endMoveWidget: () => ipcRenderer.send('widget-move-end'),
+  centerWidget: () => ipcRenderer.send('widget-center'),
+  startWidgetDrag: (payload) => ipcRenderer.send('widget-drag-start', payload),
+  endWidgetDrag: () => ipcRenderer.send('widget-drag-end'),
   // Widget dictation helpers
   pasteText: (text) => ipcRenderer.send('widget-paste-text', text),
   undoPaste: () => ipcRenderer.send('widget-undo-paste'),

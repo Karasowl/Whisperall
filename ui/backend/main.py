@@ -8,9 +8,11 @@ import subprocess
 import sys
 import datetime
 import threading
+import math
 from pathlib import Path
 from typing import Any, Optional, List
 from contextlib import asynccontextmanager
+import requests
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -280,7 +282,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Whisperall API",
-    description="Local speech suite powered by Chatterbox and Whisper",
+    description="Dictation-first speech app for Windows (STT + Reader + Transcribe).",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -297,6 +299,49 @@ app.add_middleware(
 # Serve output files
 app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
 app.mount("/voice-files", StaticFiles(directory=str(VOICES_DIR)), name="voice-files")
+
+
+def _get_required_api_token() -> Optional[str]:
+    """Optional bearer token required for all API calls when hosting remotely.
+
+    If no token is configured, the API remains open (local-first dev behavior).
+    """
+    token = (
+        os.environ.get("WHISPERALL_API_TOKEN")
+        or os.environ.get("WHISPERALL_BEARER_TOKEN")
+        or os.environ.get("WHISPERALL_AUTH_TOKEN")
+    )
+    token = (token or "").strip()
+    return token or None
+
+
+@app.middleware("http")
+async def _whisperall_bearer_auth(request: Request, call_next):
+    required_token = _get_required_api_token()
+    if not required_token:
+        return await call_next(request)
+
+    # Let CORS preflight through (browser needs this).
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    # Public static assets. Audio tags can't send Authorization headers.
+    path = request.url.path or ""
+    if path.startswith("/output") or path.startswith("/voice-files"):
+        return await call_next(request)
+
+    header = request.headers.get("authorization") or ""
+    if not header:
+        return JSONResponse(status_code=401, content={"detail": "Missing Authorization header"})
+
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return JSONResponse(status_code=401, content={"detail": "Invalid Authorization header"})
+
+    if token.strip() != required_token:
+        return JSONResponse(status_code=403, content={"detail": "Invalid token"})
+
+    return await call_next(request)
 
 
 # --- Pydantic Models ---
@@ -2619,7 +2664,7 @@ async def reader_speak(request: ReaderRequest):
     output_id = str(uuid.uuid4())[:8]
     output_path = OUTPUT_DIR / f"reader_{output_id}.wav"
     try:
-        reader.synthesize_to_file(
+        output_path, meta = reader.synthesize_to_file_with_meta(
             text=request.text,
             output_path=output_path,
             language=request.language,
@@ -2635,6 +2680,8 @@ async def reader_speak(request: ReaderRequest):
         "id": output_id,
         "text": request.text[:500],
         "text_full": request.text,
+        "provider": meta.get("provider") if isinstance(meta, dict) else None,
+        "meta": meta,
         "language": request.language,
         "voice": request.voice,
         "speed": request.speed,
@@ -2653,7 +2700,7 @@ async def reader_speak(request: ReaderRequest):
         history_svc.save_reader_entry(
             text=request.text,
             audio_path=str(output_path),
-            provider="kokoro",
+            provider=(meta.get("provider") if isinstance(meta, dict) else None) or "unknown",
             voice_id=request.voice,
             voice_name=request.voice,
             duration_seconds=duration,
@@ -2793,9 +2840,12 @@ class TranscriptionPathRequest(BaseModel):
     diarization_mode: str = "auto"  # auto | pyannote | basic
     min_speakers: int = 1
     max_speakers: int = 10
+    model: Optional[str] = None  # Back-compat with older clients
     whisper_model: str = "base"
     enable_ai_cleanup: bool = False
     engine: str = "fast"  # "fast" (faster-whisper) or "accurate" (whisperx)
+    stt_provider: Optional[str] = None
+    stt_model: Optional[str] = None
 
 
 class TranscriptionLinkRequest(BaseModel):
@@ -2807,9 +2857,12 @@ class TranscriptionLinkRequest(BaseModel):
     diarization_mode: str = "auto"  # auto | pyannote | basic
     min_speakers: int = 1
     max_speakers: int = 10
+    model: Optional[str] = None  # Back-compat with older clients
     whisper_model: str = "base"
     enable_ai_cleanup: bool = False
     engine: str = "fast"  # "fast" (faster-whisper) or "accurate" (whisperx)
+    stt_provider: Optional[str] = None
+    stt_model: Optional[str] = None
 
 
 def _save_transcription_job(job_id: str, job_data: dict):
@@ -2892,6 +2945,244 @@ def _stage_transcription_upload(source_path: Path, job_id: str) -> Path:
         return dest_path
 
 
+def _resolve_stt_provider(provider_id: Optional[str]) -> str:
+    """Resolve requested STT provider, falling back to settings."""
+    provider = (provider_id or "").strip()
+    if not provider:
+        provider = settings_service.get_selected_provider("stt") or "faster-whisper"
+    provider = provider.replace("_", "-")
+    if provider == "local":
+        provider = "faster-whisper"
+    return provider
+
+
+def _convert_api_segments(api_segments: list, offset: float, fallback_text: Optional[str], chunk_end: float) -> list[dict]:
+    """Convert API segments into Whisperall segment format, applying time offset."""
+    segments: list[dict] = []
+    for seg in api_segments or []:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        start = float(seg.get("start") or 0.0) + offset
+        end = float(seg.get("end") or start) + offset
+        words = []
+        for word in seg.get("words") or []:
+            w_text = word.get("word") or word.get("text") or ""
+            if not w_text:
+                continue
+            words.append({
+                "word": w_text,
+                "start": (word.get("start") or 0.0) + offset,
+                "end": (word.get("end") or 0.0) + offset,
+                "probability": word.get("probability") or word.get("confidence"),
+            })
+        segments.append({
+            "id": str(uuid.uuid4())[:8],
+            "start_time": start,
+            "end_time": end,
+            "text": text,
+            "words": words,
+            "confidence": seg.get("confidence", 1.0),
+        })
+
+    if segments:
+        return segments
+
+    if fallback_text:
+        return [{
+            "id": str(uuid.uuid4())[:8],
+            "start_time": offset,
+            "end_time": chunk_end,
+            "text": fallback_text.strip(),
+            "words": [],
+            "confidence": 1.0,
+        }]
+
+    return []
+
+
+def _api_transcribe_chunk(
+    audio_path: Path,
+    provider_id: str,
+    model: Optional[str],
+    language: str,
+    prompt: Optional[str] = None,
+) -> tuple[list, dict]:
+    """Transcribe a single audio chunk via API provider, returning raw segments + metadata."""
+    provider_id = provider_id.lower().strip()
+
+    if provider_id == "groq":
+        key = settings_service.get_api_key("groq")
+        if not key:
+            raise RuntimeError("Groq API key is not configured")
+        model_name = model or settings_service.get("providers.stt.groq.model", "whisper-large-v3")
+        data = [
+            ("model", model_name),
+            ("response_format", "verbose_json"),
+            ("timestamp_granularities[]", "segment"),
+        ]
+        if language != "auto":
+            data.append(("language", language))
+        if prompt:
+            data.append(("prompt", prompt))
+        with audio_path.open("rb") as audio_file:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {key}"},
+                files={"file": audio_file},
+                data=data,
+                timeout=600,
+            )
+        if resp.status_code != 200:
+            # Fallback to basic text response if verbose_json not supported
+            fallback_data = {"model": model_name}
+            if language != "auto":
+                fallback_data["language"] = language
+            if prompt:
+                fallback_data["prompt"] = prompt
+            with audio_path.open("rb") as audio_file:
+                resp = requests.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {key}"},
+                    files={"file": audio_file},
+                    data=fallback_data,
+                    timeout=600,
+                )
+            if resp.status_code != 200:
+                raise RuntimeError(f"Groq STT error: HTTP {resp.status_code}")
+        result = resp.json()
+        return result.get("segments") or [], {"provider": "groq", "model": model_name, "text": result.get("text", "")}
+
+    if provider_id == "openai":
+        key = settings_service.get_api_key("openai")
+        if not key:
+            raise RuntimeError("OpenAI API key is not configured")
+        model_name = model or settings_service.get("providers.stt.openai.model", "gpt-4o-mini-transcribe")
+        data = [
+            ("model", model_name),
+            ("response_format", "verbose_json"),
+            ("timestamp_granularities[]", "segment"),
+        ]
+        if language != "auto":
+            data.append(("language", language))
+        if prompt:
+            data.append(("prompt", prompt))
+        with audio_path.open("rb") as audio_file:
+            resp = requests.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {key}"},
+                files={"file": audio_file},
+                data=data,
+                timeout=600,
+            )
+        if resp.status_code != 200:
+            # Fallback to basic text response (compat)
+            with audio_path.open("rb") as audio_file:
+                fallback_data = {
+                    "model": model_name,
+                    "language": language if language != "auto" else None,
+                    "prompt": prompt,
+                }
+                resp = requests.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {key}"},
+                    files={"file": audio_file},
+                    data={k: v for k, v in fallback_data.items() if v is not None},
+                    timeout=600,
+                )
+            if resp.status_code != 200:
+                raise RuntimeError(f"OpenAI STT error: HTTP {resp.status_code}")
+        result = resp.json()
+        return result.get("segments") or [], {"provider": "openai", "model": model_name, "text": result.get("text", "")}
+
+    # Default: fall back to STT service (text only)
+    stt_service = get_stt_service()
+    text, meta = stt_service.transcribe(audio_path, language=language, prompt=prompt)
+    meta = dict(meta or {})
+    meta.setdefault("text", text)
+    return [], meta
+
+
+def _transcribe_with_api_provider(
+    audio_path: Path,
+    total_duration: float,
+    provider_id: str,
+    model: Optional[str],
+    language: str,
+    progress_callback=None,
+    segment_callback=None,
+    check_cancelled=None,
+) -> tuple[list[dict], dict]:
+    """Chunk audio and transcribe via API provider with segment timestamps."""
+    if total_duration <= 0:
+        total_duration = 0.0
+    chunk_seconds = 600.0  # 10 minutes per request
+    if total_duration and total_duration < chunk_seconds:
+        chunk_seconds = total_duration
+    num_chunks = max(1, int(math.ceil((total_duration or chunk_seconds) / chunk_seconds)))
+
+    segments: list[dict] = []
+    meta: dict = {"provider": provider_id, "model": model}
+
+    ffmpeg_path = get_ffmpeg_path()
+
+    for idx in range(num_chunks):
+        if check_cancelled:
+            check_cancelled()
+        start_time = idx * chunk_seconds
+        end_time = min(start_time + chunk_seconds, total_duration or (start_time + chunk_seconds))
+        chunk_duration = max(0.1, end_time - start_time)
+
+        if progress_callback and total_duration:
+            pct = 10.0 + (start_time / total_duration) * 70.0
+            progress_callback(pct, f"Transcribing with {provider_id}... ({idx + 1}/{num_chunks})")
+
+        chunk_path = TEMP_DIR / f"api_chunk_{uuid.uuid4().hex}.wav"
+        try:
+            ffmpeg_cmd = [
+                ffmpeg_path, "-y",
+                "-ss", str(start_time),
+                "-t", str(chunk_duration),
+                "-i", str(audio_path),
+                "-ac", "1",
+                "-ar", "16000",
+                "-acodec", "pcm_s16le",
+                str(chunk_path)
+            ]
+            result = subprocess.run(ffmpeg_cmd, capture_output=True)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.decode(errors="ignore") or "FFmpeg chunk extraction failed")
+            if not chunk_path.exists() or chunk_path.stat().st_size == 0:
+                raise RuntimeError("Failed to extract audio chunk")
+
+            api_segments, api_meta = _api_transcribe_chunk(
+                chunk_path,
+                provider_id=provider_id,
+                model=model,
+                language=language,
+            )
+            meta.update({k: v for k, v in (api_meta or {}).items() if v is not None})
+            chunk_text = (api_meta or {}).get("text", "")
+            adjusted = _convert_api_segments(api_segments, start_time, chunk_text, end_time)
+            segments.extend(adjusted)
+
+            if segment_callback and adjusted:
+                # Use last segment to trigger live preview updates
+                segment_callback(adjusted[-1], segments)
+
+            if progress_callback and total_duration:
+                pct = 10.0 + (end_time / total_duration) * 70.0
+                progress_callback(pct, f"Transcribing with {provider_id}... ({idx + 1}/{num_chunks})")
+        finally:
+            if chunk_path.exists():
+                try:
+                    chunk_path.unlink()
+                except Exception:
+                    pass
+
+    return segments, meta
+
+
 async def transcription_task(
     job_id: str,
     file_path: Path,
@@ -2902,7 +3193,9 @@ async def transcription_task(
     max_speakers: int,
     whisper_model: str,
     enable_ai_cleanup: bool = False,
-    engine: str = "fast"
+    engine: str = "fast",
+    stt_provider: Optional[str] = None,
+    stt_model: Optional[str] = None,
 ):
     """Background task for transcription processing."""
     import datetime
@@ -3067,7 +3360,22 @@ async def transcription_task(
         if engine == "accurate" and normalized_mode == "basic":
             normalized_mode = "auto"
         transcription_jobs[job_id]["diarization_mode"] = normalized_mode
-        print(f"[Transcription] Job {job_id}: Engine={engine}, getting service...")
+
+        provider_id = _resolve_stt_provider(stt_provider)
+        use_api_provider = provider_id not in ("faster-whisper", "local")
+        if use_api_provider:
+            engine = "fast"
+            transcription_jobs[job_id]["engine"] = engine
+
+        provider_id = _resolve_stt_provider(stt_provider)
+        use_api_provider = provider_id not in ("faster-whisper", "local")
+        transcription_jobs[job_id]["stt_provider"] = provider_id
+        if stt_model:
+            transcription_jobs[job_id]["stt_model"] = stt_model
+        if use_api_provider:
+            engine = "fast"
+            transcription_jobs[job_id]["engine"] = engine
+        print(f"[Transcription] Job {job_id}: Provider={provider_id} Engine={engine}, getting service...")
         import sys
         sys.stdout.flush()
 
@@ -3087,7 +3395,7 @@ async def transcription_task(
                 _save_transcription_job(job_id, transcription_jobs[job_id])
             return True  # Continue
 
-        if engine == "accurate":
+        if not use_api_provider and engine == "accurate":
             # Use WhisperX for integrated transcription + alignment + diarization
             from whisperx_service import get_whisperx_service
             whisperx_service = get_whisperx_service()
@@ -3120,7 +3428,7 @@ async def transcription_task(
             else:
                 transcription_jobs[job_id]["diarization_error"] = None
 
-        else:
+        elif not use_api_provider:
             # Use faster-whisper (fast mode) - separate transcription + diarization
             transcription_service = get_transcription_service()
             print(f"[Transcription] Job {job_id}: Using faster-whisper (fast mode)...")
@@ -3222,6 +3530,85 @@ async def transcription_task(
                     seg["speaker"] = "Speaker 1"
                     seg["speaker_id"] = 0
                 transcription_jobs[job_id]["speakers_detected"] = 1
+                transcription_jobs[job_id]["diarization_method"] = "none"
+        else:
+            # API provider transcription (Groq/OpenAI/etc.)
+            print(f"[Transcription] Job {job_id}: Using API provider {provider_id}...")
+            sys.stdout.flush()
+
+            def api_progress(pct, msg):
+                update_progress(pct, msg)
+
+            segments, metadata = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    _transcribe_with_api_provider,
+                    audio_path,
+                    duration,
+                    provider_id,
+                    stt_model,
+                    language,
+                    progress_callback=api_progress,
+                    segment_callback=segment_callback,
+                    check_cancelled=check_cancelled,
+                )
+            )
+
+            transcription_jobs[job_id]["segments"] = segments
+            if isinstance(metadata, dict) and metadata.get("model"):
+                transcription_jobs[job_id]["stt_model"] = metadata.get("model")
+            transcription_jobs[job_id]["diarization_method"] = "none"
+            transcription_jobs[job_id]["speakers_detected"] = 0
+
+            # Diarization (optional) using local pipeline
+            if enable_diarization and len(segments) > 1:
+                transcription_jobs[job_id]["status"] = "diarizing"
+                update_progress(82, "Identifying speakers (auto)...")
+                diarization_service = get_diarization_service()
+                prefer_pyannote = normalized_mode != "basic"
+                force_pyannote = normalized_mode == "pyannote"
+
+                def diarization_progress(pct, msg):
+                    save_segments = "Assigning speakers" in msg
+                    update_progress(pct, msg, segments if save_segments else None)
+
+                try:
+                    diarization_result = await loop.run_in_executor(
+                        None,
+                        functools.partial(
+                            diarization_service.diarize_segments,
+                            audio_path,
+                            segments,
+                            min_speakers=min_speakers,
+                            max_speakers=max_speakers,
+                            progress_callback=diarization_progress,
+                            force_pyannote=force_pyannote,
+                            prefer_pyannote=prefer_pyannote,
+                            cache_info=transcription_jobs[job_id].get("audio_cache"),
+                        )
+                    )
+
+                    segments = diarization_result["segments"]
+                    transcription_jobs[job_id]["speakers_detected"] = diarization_result["num_speakers"]
+                    transcription_jobs[job_id]["diarization_method"] = diarization_result["method"]
+                    transcription_jobs[job_id]["diarization_error"] = None
+                except Exception as diarization_exc:
+                    reason = str(diarization_exc)
+                    print(f"[Transcription] Job {job_id}: Diarization failed: {reason}")
+                    transcription_jobs[job_id]["diarization_error"] = reason
+                    transcription_jobs[job_id]["diarization_method"] = "none"
+                    for seg in segments:
+                        seg["speaker"] = "Speaker 1"
+                        seg["speaker_id"] = 0
+                    transcription_jobs[job_id]["speakers_detected"] = 1
+                    update_progress(95, f"Diarization failed: {reason}")
+            else:
+                for seg in segments:
+                    if not seg.get("speaker"):
+                        seg["speaker"] = "Speaker 1"
+                    if seg.get("speaker_id") is None:
+                        seg["speaker_id"] = 0
+                transcription_jobs[job_id]["speakers_detected"] = 1 if segments else 0
                 transcription_jobs[job_id]["diarization_method"] = "none"
 
         # Check if cancelled
@@ -3380,9 +3767,11 @@ async def import_link_task(
             payload.diarization_mode,
             payload.min_speakers,
             payload.max_speakers,
-            payload.whisper_model,
+            payload.whisper_model or payload.model or "base",
             payload.enable_ai_cleanup,
             payload.engine,
+            payload.stt_provider,
+            payload.stt_model,
         )
     except DownloadCancelled:
         job = transcription_jobs.get(job_id)
@@ -3416,7 +3805,9 @@ async def resume_transcription_task(
     max_speakers: int,
     whisper_model: str,
     existing_segments: list,
-    engine: str = "fast"
+    engine: str = "fast",
+    stt_provider: Optional[str] = None,
+    stt_model: Optional[str] = None,
 ):
     """Resume transcription from a specific timestamp."""
 
@@ -3507,7 +3898,7 @@ async def resume_transcription_task(
         import functools
         loop = asyncio.get_event_loop()
 
-        if engine == "accurate":
+        if not use_api_provider and engine == "accurate":
             # WhisperX handles extraction internally via transcribe_partial
             from whisperx_service import get_whisperx_service
             whisperx_service = get_whisperx_service()
@@ -3536,7 +3927,7 @@ async def resume_transcription_task(
             # WhisperX already adjusts timestamps, merge directly
             all_segments = existing_segments + new_segments
 
-        else:
+        elif not use_api_provider:
             # Fast mode - use faster-whisper with pre-extracted audio
             from transcription_service import get_transcription_service
             transcription_service = get_transcription_service()
@@ -3567,6 +3958,43 @@ async def resume_transcription_task(
                 adjusted["start_time"] += resume_from_time
                 adjusted["end_time"] += resume_from_time
                 adjusted_segments.append(adjusted)
+
+            all_segments = existing_segments + adjusted_segments
+        else:
+            # API provider resume
+            print(f"[Resume] Using API provider {provider_id} from {resume_from_time:.1f}s")
+
+            def api_progress(pct, msg):
+                update_progress(
+                    progress_offset + (pct - 10) * (100 - progress_offset) / 70,
+                    msg
+                )
+
+            new_segments, _ = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    _transcribe_with_api_provider,
+                    temp_audio_path,
+                    remaining_duration if remaining_duration > 0 else 0,
+                    provider_id,
+                    stt_model,
+                    language,
+                    progress_callback=api_progress,
+                    segment_callback=None,
+                    check_cancelled=check_cancelled,
+                )
+            )
+
+            adjusted_segments = []
+            for seg in new_segments:
+                seg_copy = seg.copy()
+                seg_copy["start_time"] = seg_copy.get("start_time", 0) + resume_from_time
+                seg_copy["end_time"] = seg_copy.get("end_time", seg_copy["start_time"]) + resume_from_time
+                if seg_copy.get("words"):
+                    for word in seg_copy["words"]:
+                        word["start"] = (word.get("start") or 0.0) + resume_from_time
+                        word["end"] = (word.get("end") or 0.0) + resume_from_time
+                adjusted_segments.append(seg_copy)
 
             all_segments = existing_segments + adjusted_segments
 
@@ -3915,6 +4343,10 @@ async def upload_for_transcription_path(
     print(f"[Upload-Path] Size: {file_size / (1024*1024):.1f} MB")
 
     # Use original file directly - no staging/copying needed
+    whisper_model = payload.whisper_model or payload.model or "base"
+    stt_provider = payload.stt_provider
+    stt_model = payload.stt_model
+
     transcription_jobs[job_id] = {
         "job_id": job_id,
         "status": "pending",
@@ -3933,7 +4365,9 @@ async def upload_for_transcription_path(
         "file_size_bytes": file_size,
         "file_path": str(source_path),
         "language": payload.language,
-        "whisper_model": payload.whisper_model,
+        "whisper_model": whisper_model,
+        "stt_provider": stt_provider,
+        "stt_model": stt_model,
         "enable_diarization": payload.enable_diarization,
         "diarization_mode": payload.diarization_mode,
         "enable_ai_cleanup": payload.enable_ai_cleanup,
@@ -3952,9 +4386,11 @@ async def upload_for_transcription_path(
         payload.diarization_mode,
         payload.min_speakers,
         payload.max_speakers,
-        payload.whisper_model,
+        whisper_model,
         payload.enable_ai_cleanup,
-        payload.engine
+        payload.engine,
+        stt_provider,
+        stt_model,
     )
 
     print(f"[Upload-Path] Job {job_id}: Returning immediately")
@@ -3979,6 +4415,7 @@ async def import_transcription_link(
     job_id = payload.job_id if payload.job_id else str(uuid.uuid4())[:8]
     url_label = sanitize_filename(payload.filename) if payload.filename else None
 
+    whisper_model = payload.whisper_model or payload.model or "base"
     transcription_jobs[job_id] = {
         "job_id": job_id,
         "status": "downloading",
@@ -3998,7 +4435,9 @@ async def import_transcription_link(
         "file_path": "",
         "source_url": payload.url,
         "language": payload.language,
-        "whisper_model": payload.whisper_model,
+        "whisper_model": whisper_model,
+        "stt_provider": payload.stt_provider,
+        "stt_model": payload.stt_model,
         "enable_diarization": payload.enable_diarization,
         "diarization_mode": payload.diarization_mode,
         "enable_ai_cleanup": payload.enable_ai_cleanup,
@@ -4021,9 +4460,12 @@ async def upload_for_transcription(
     diarization_mode: str = Form("auto"),
     min_speakers: int = Form(1),
     max_speakers: int = Form(10),
-    whisper_model: str = Form("base"),
+    whisper_model: str = Form(""),
+    model: Optional[str] = Form(None),
     enable_ai_cleanup: bool = Form(False),
-    engine: str = Form("fast")
+    engine: str = Form("fast"),
+    stt_provider: Optional[str] = Form(None),
+    stt_model: Optional[str] = Form(None),
 ):
     """Upload audio/video for transcription with speaker diarization."""
     import datetime
@@ -4048,6 +4490,8 @@ async def upload_for_transcription(
 
     print(f"[Upload] Completed: {file_size / (1024*1024):.1f} MB saved to {file_path}")
 
+    resolved_whisper_model = whisper_model or model or "base"
+
     # Initialize job
     transcription_jobs[job_id] = {
         "job_id": job_id,
@@ -4067,7 +4511,9 @@ async def upload_for_transcription(
         "file_size_bytes": file_size,
         "file_path": str(file_path),
         "language": language,
-        "whisper_model": whisper_model,
+        "whisper_model": resolved_whisper_model,
+        "stt_provider": stt_provider,
+        "stt_model": stt_model,
         "enable_diarization": enable_diarization,
         "diarization_mode": diarization_mode,
         "enable_ai_cleanup": enable_ai_cleanup,
@@ -4086,9 +4532,11 @@ async def upload_for_transcription(
         diarization_mode,
         min_speakers,
         max_speakers,
-        whisper_model,
+        resolved_whisper_model,
         enable_ai_cleanup,
-        engine
+        engine,
+        stt_provider,
+        stt_model,
     )
 
     return {"job_id": job_id}
@@ -4212,7 +4660,9 @@ async def resume_transcription_job(job_id: str, background_tasks: BackgroundTask
         job.get("max_speakers", 10),
         job.get("whisper_model", "base"),
         segments,  # Existing segments to merge with
-        job.get("engine", "fast")  # Use same engine as original job
+        job.get("engine", "fast"),  # Use same engine as original job
+        job.get("stt_provider"),
+        job.get("stt_model"),
     )
 
     print(f"[Transcription] Job {job_id} resuming from {resume_from_time:.1f}s")
@@ -7301,6 +7751,13 @@ async def loopback_websocket(websocket: WebSocket):
     - {"action": "resume"}
     - {"action": "set_translation", "enabled": true, "target_language": "es"}
     """
+    required_token = _get_required_api_token()
+    if required_token:
+        token = websocket.query_params.get("token")
+        if not token or token.strip() != required_token:
+            await websocket.close(code=1008)
+            return
+
     await websocket.accept()
 
     session_id = id(websocket)

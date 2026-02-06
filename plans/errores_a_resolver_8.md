@@ -21,42 +21,33 @@ Ademas NO hay persistencia de las configuraciones guardadas en el Real Time Read
 - **Movible**: Arrastrable a cualquier posicion de la pantalla
 - **Persistencia de posicion**: Guardar y restaurar posicion al cerrar/abrir
 
-### Modulos del Widget
+### Scope Update (2026-02-03)
 
-#### 1. Text to Speech (TTS)
-- Cuadro de texto expandible para escribir texto
-- Genera voz con el modelo y voz elegidos
-- Controles de reproduccion (play/pause)
-- Selector de modelo y voz (persistente)
-- Control de velocidad hasta x4
+Para igualar el feeling de Wispr Flow y mantener el widget **super minimo** y **monetizable**, el widget v1 se reduce a:
+- **Solo 2 modulos dentro del widget:** Dictate + Reader.
+- Todo lo demas (Transcribe files, Voice Library, etc.) vive en la ventana principal.
+- Opcion extra: **System Audio** (loopback) abre el modulo **Live Capture** en la ventana principal.
 
-#### 2. Reader (Lector)
-- Lee y reproduce automaticamente lo que copias o mandas con hotkeys
-- Soporta hotkey de leer portapapeles
-- Controles:
-  - Pausar/Reanudar
-  - Velocidad hasta x4
-  - Cambiar voz
-- Persistencia de configuracion (idioma, modelo, voz)
+### Modulos del Widget (v1)
 
-#### 3. Speech to Text (STT / Dictado)
-- Boton de grabar
-- Pega automaticamente donde tengas el cursor al terminar
-- Streaming automatico (transcripcion en tiempo real)
-- Pausar y continuar grabacion
-- Al terminar, pega todo lo transcrito
-- Persistencia de modelo
+#### 1. Dictate (STT / Dictado)
+- Estado ultra compacto (bar) + modo panel (interactivo) con animacion impecable.
+- Start/Stop via hotkeys o boton.
+- Visual feedback (waveform + timer + estados: recording/transcribing/done).
+- Boton Undo (Ctrl+Z) cuando aplica.
 
-#### 4. Transcribe (Transcripcion)
-- Pegar link de video/audio O subir archivo
-- Muestra progreso en porcentaje durante el proceso
-- Boton de copiar bonito al terminar
-- Muestra el resultado de la transcripcion
+#### 2. Reader (Clipboard TTS)
+- Lee y reproduce automaticamente lo que copias o mandas con hotkeys.
+- Controles: play/pause, stop, seek, velocidad hasta x4, cambiar voz.
+- Persistencia: idioma/voz/velocidad via `/api/widget/settings`.
 
-#### 5. Voice Library (Biblioteca de Voces)
-- Grabar una voz para usarla luego
-- Generar voz segun el modelo elegido
-- Gestionar voces guardadas
+#### 3. Opcion Extra: System Audio
+- Shortcut/boton: abre Live Capture (transcribe audio interno del sistema) en la ventana principal.
+
+### Fuera de Scope (v1)
+- Text to Speech (textbox dedicado en widget).
+- Transcribe (subir archivo / pegar link) dentro del widget.
+- Voice Library dentro del widget.
 
 ### Caracteristicas Generales
 
@@ -82,8 +73,7 @@ Ademas NO hay persistencia de las configuraciones guardadas en el Real Time Read
 ## Arquitectura Propuesta
 
 ### Archivos Nuevos
-- `electron/widget-overlay.html` - HTML/CSS del widget glassmorfista
-- `electron/widget-overlay.js` - Logica del widget (frontend Electron)
+- `electron/widget-overlay.html` - HTML/CSS/JS del widget glassmorfista
 
 ### Archivos a Modificar
 - `electron/main.js` - Nueva ventana overlay para widget
@@ -116,14 +106,16 @@ Usuario puede pausar, cambiar velocidad, cambiar voz
 
 ## Prioridad de Implementacion
 
-## Progreso Actual (23/01)
-- [x] **Diseno**: Implementado "Pill Mode" con transicion fluida a "Card Mode".
-- [x] **Funcionalidad**: Integrados Reader, TTS, STT, Transcribe y Library en el widget.
-- [x] **Persistencia**: El widget carga configuraciones desde `/api/settings`.
-- [x] **Interactive**: Hover/Click para expandir.
+## Progreso Actual (2026-02-03)
+- [x] Widget overlay always-on-top responde instantaneo a hotkeys.
+- [x] Modo **bar** (minimo) + modo **panel** (interactivo) con animacion.
+- [x] Reader: read clipboard, play/pause/stop, seek, speed, voice cycling.
+- [x] Persistencia widget: `/api/widget/settings` (reader speed/voice/language + currentModule).
+- [x] Dictate: estados recording/transcribing/done + undo.
 
-## Pendiente
-- [ ] Validar persistencia de "Ultimo Modulo" (se guarda en `widget-overlay.json`).
-- [x] Conectar STT Real (fixed 'stuck' state and timeouts).
-- [ ] Integrar Backend real para Transcribe (actualmente simulado).
-- [ ] Pulir estilos visuales segun feedback.
+## Cierre (v1)
+- [x] Pulir estilo (tipografia, spacing) y micro-interactions (primer pase) para acercarlo a Wispr Flow.
+- [x] Click-through en margenes transparentes (Electron `setIgnoreMouseEvents`) para que no bloquee clicks debajo.
+
+## Futuro (opcional)
+- [ ] Si System Audio se vuelve core: flujo directo desde widget (start/stop loopback) en vez de abrir pagina.

@@ -1,0 +1,9 @@
+{
+  "name": "@whisperall/api",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "uvicorn app.main:app --reload --port 8080",
+    "test": "pytest"
+  }
+}

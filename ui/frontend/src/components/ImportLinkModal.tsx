@@ -45,7 +45,7 @@ export default function ImportLinkModal({
       >
         <div className="flex items-center justify-between p-4 border-b border-white/10">
           <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-            <Link2 className="w-5 h-5 text-emerald-400" />
+            <Link2 className="w-5 h-5 text-accent-primary" />
             Import from Link
           </h2>
           <button
@@ -94,7 +94,7 @@ export default function ImportLinkModal({
           )}
 
           <div className="text-xs text-slate-400 flex items-center gap-2">
-            <CloudDownload className="w-4 h-4 text-emerald-400" />
+            <CloudDownload className="w-4 h-4 text-accent-primary" />
             The link must be publicly accessible.
           </div>
 

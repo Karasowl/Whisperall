@@ -1,0 +1,6 @@
+project_id = "whisperall"
+
+[api]
+port = 54321
+schemas = ["public", "storage", "auth"]
+extra_search_path = ["public", "extensions"]

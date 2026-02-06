@@ -1,0 +1,37 @@
+appId: com.whisperall.desktop
+productName: Whisperall
+copyright: Copyright 2025 Whisperall
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron/**/*.js
+  - electron/**/*.js.map
+  - package.json
+
+extraMetadata:
+  main: electron/main.js
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+
+publish:
+  provider: github
+  owner: whisperall
+  repo: whisperall
+
+asar: true
+compression: maximum

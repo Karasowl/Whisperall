@@ -36,7 +36,7 @@ class GroqWhisperProvider(BaseAPIProvider, STTProvider):
             ],
             default_model="whisper-large-v3",
             supports_vad=False,
-            supports_timestamps=False,
+            supports_timestamps=True,
             supports_diarization=False,
             docs_url="https://console.groq.com/docs/speech-text",
             pricing_url="https://groq.com/pricing/",

@@ -45,7 +45,12 @@ def get_app_data_root(app_name: str = APP_NAME) -> Path:
     if app_name == APP_NAME:
         legacy = base / LEGACY_APP_NAME
         if legacy.exists() and not target.exists():
-            return legacy
+            # Prefer migrating to the new app name to avoid leaking legacy branding in paths.
+            # If the directory is in use (e.g., OneDrive/AV locks), fall back to legacy.
+            try:
+                legacy.rename(target)
+            except Exception:
+                return legacy
     return target
 
 

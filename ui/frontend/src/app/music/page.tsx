@@ -26,6 +26,7 @@ import {
   ExecutionModeSwitch,
   type ExecutionMode,
 } from '@/components/module';
+import { PlanGate } from '@/components/PlanGate';
 import { Slider } from '@/components/Slider';
 import {
   getMusicProviders,
@@ -70,6 +71,20 @@ const STYLE_PRESETS = [
 ];
 
 export default function MusicPage() {
+  return (
+    <PlanGate
+      requiredPlan="pro"
+      title="Music"
+      description="Generate music tracks from prompts and lyrics."
+      icon={Music}
+      feature="Music"
+    >
+      <MusicProPage />
+    </PlanGate>
+  );
+}
+
+function MusicProPage() {
   // Providers
   const [selectedProvider, setSelectedProvider] = useState<string>('diffrhythm');
   const [selectedModel, setSelectedModel] = useState<string>('');

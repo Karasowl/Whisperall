@@ -20,6 +20,7 @@ interface DropzoneProps {
   title?: string;
   subtitle?: string;
   icon?: LucideIcon;
+  variant?: 'card' | 'bare';
   className?: string;
 }
 
@@ -64,6 +65,7 @@ export function Dropzone({
   title,
   subtitle,
   icon,
+  variant = 'card',
   className,
 }: DropzoneProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -165,20 +167,20 @@ export function Dropzone({
     return (
       <div className={cn('glass-card p-6', className)}>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 rounded-lg bg-accent-primary/10">
-              <FileIcon className="w-5 h-5 text-accent-primary" aria-hidden="true" />
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="w-10 h-10 rounded-lg bg-surface-2 border border-glass-border flex items-center justify-center text-accent-primary">
+              <FileIcon className="w-5 h-5" aria-hidden="true" />
             </div>
             <div className="min-w-0">
               <p className="font-medium text-foreground truncate">{file.name}</p>
-              <p className="text-sm text-foreground-muted">{formatFileSize(file.size)}</p>
+              <p className="text-xs text-foreground-muted">{formatFileSize(file.size)}</p>
             </div>
           </div>
 
           {!uploading && onClear && (
             <button
               onClick={handleClear}
-              className="p-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-2 transition-colors"
+              className="text-foreground-muted hover:text-foreground transition-colors"
               title="Remove file"
               aria-label="Remove file"
             >
@@ -216,47 +218,52 @@ export function Dropzone({
 
   // Empty state / Drop zone
   return (
-    <div className={cn('glass-card p-6', className)}>
+    <div className={cn(variant === 'card' ? 'glass-card p-6' : 'p-0', className)}>
       <div
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         className={cn(
-          'border-2 border-dashed rounded-xl p-8 text-center transition-all',
+          'border border-dashed rounded-2xl px-8 py-20 text-center transition-all',
           isDragging
-            ? 'border-accent-primary bg-accent-primary/10'
-            : 'border-glass-border hover:border-glass-border-hover',
+            ? 'border-accent-primary/60 bg-accent-primary/10'
+            : 'border-surface-3/70 bg-surface-2/40 hover:border-accent-primary/40 hover:bg-surface-2/70',
           disabled && 'opacity-50 cursor-not-allowed'
         )}
       >
-        {icon ? (
-          <FileIcon
-            className={cn(
-              'w-12 h-12 mx-auto mb-4 transition-colors',
-              isDragging ? 'text-accent-primary' : 'text-foreground-muted'
-            )}
-            aria-hidden="true"
-          />
-        ) : (
-          <Upload
-            className={cn(
-              'w-12 h-12 mx-auto mb-4 transition-colors',
-              isDragging ? 'text-accent-primary' : 'text-foreground-muted'
-            )}
-            aria-hidden="true"
-          />
-        )}
+        <div className="mx-auto mb-6 w-14 h-14 rounded-full bg-surface-2 border border-surface-3/60 flex items-center justify-center text-foreground-muted">
+          {icon ? (
+            <FileIcon
+              className={cn(
+                'w-7 h-7 transition-colors',
+                isDragging ? 'text-accent-primary' : 'text-foreground-muted'
+              )}
+              aria-hidden="true"
+            />
+          ) : (
+            <Upload
+              className={cn(
+                'w-7 h-7 transition-colors',
+                isDragging ? 'text-accent-primary' : 'text-foreground-muted'
+              )}
+              aria-hidden="true"
+            />
+          )}
+        </div>
 
-        <p className="text-foreground-secondary mb-2">
-          {title || 'Drag and drop your file here, or'}
+        <p className="text-lg text-foreground mb-2">
+          {title || 'Drop files to upload'}
+        </p>
+        <p className="text-sm text-foreground-muted mb-6">
+          {subtitle || config.label}
         </p>
 
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled || uploading}
-          className="btn btn-secondary"
+          className="text-xs uppercase tracking-[0.2em] font-semibold text-accent-primary hover:text-white transition-colors"
         >
-          Select File
+          Browse Local Files
         </button>
 
         <input
@@ -269,9 +276,6 @@ export function Dropzone({
           aria-label="File input"
         />
 
-        <p className="text-xs text-foreground-muted mt-4">
-          {subtitle || config.label}
-        </p>
       </div>
 
       {/* Error */}

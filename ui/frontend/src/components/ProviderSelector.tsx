@@ -215,7 +215,7 @@ export function ProviderSelector({
                     href="/models?tab=local"
                     prefetch={false}
                     className="text-warning hover:text-warning-foreground"
-                    title="Install required - click to go to Models page"
+                    title="Install required components"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Download className="w-4 h-4" />

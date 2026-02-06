@@ -88,7 +88,7 @@ export function EngineCard({
       {!ready && requiresDownload && (
         <p className="text-xs text-amber-400 mt-2 flex items-center gap-1">
           <Download className="w-3 h-3" aria-hidden="true" />
-          Model not installed - download in Models
+          Engine not installed - install in Settings
         </p>
       )}
     </button>

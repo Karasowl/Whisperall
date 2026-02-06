@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Mic, Square, Loader2, Copy, Check, RefreshCw, MessageSquare, Trash2 } from 'lucide-react';
 import {
   startStt,
@@ -15,6 +16,9 @@ import {
   setProvider,
   getSTTSettings,
   STTSettings,
+  getHotkeys,
+  getOnboardingStatus,
+  completeOnboarding,
 } from '@/lib/api';
 import { formatDuration, cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -22,6 +26,8 @@ import { SelectMenu } from '@/components/SelectMenu';
 import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
 import { insertTextAtCursor, setLastSttTranscript } from '@/lib/sttHelper';
 import { playActionSound } from '@/lib/actionSounds';
+import { usePlan } from '@/components/PlanProvider';
+import { useDevMode } from '@/components/DevModeProvider';
 import {
   ModuleShell,
   ActionBar,
@@ -38,6 +44,13 @@ const languageOptions = [
 ];
 
 export default function DictatePage() {
+  const { hasPro } = usePlan();
+  const { devMode: devModeEnabled } = useDevMode();
+  const showEngineSelector = devModeEnabled;
+
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [hotkeys, setHotkeys] = useState<Record<string, string> | null>(null);
+
   const [isPreparing, setIsPreparing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -71,9 +84,14 @@ export default function DictatePage() {
   });
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const BAR_COUNT = 32;
+  const idleBars = useMemo(() => Array.from({ length: BAR_COUNT }, (_, i) => 6 + ((i % 6) * 2)), []);
+  const [audioBars, setAudioBars] = useState<number[]>(idleBars);
+  const [audioLevel, setAudioLevel] = useState(0);
   const hotkeyHeldRef = useRef(false);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -83,6 +101,40 @@ export default function DictatePage() {
   const lastPartialAtRef = useRef(0);
   const disablePartialRef = useRef(false);
   const didLoadRef = useRef(false);
+
+  const stopActiveStream = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    try {
+      stream.getTracks().forEach((track) => {
+        try { track.stop(); } catch { }
+      });
+    } finally {
+      streamRef.current = null;
+    }
+  }, []);
+
+  // === ONBOARDING (First run) ===
+  useEffect(() => {
+    let active = true;
+    getOnboardingStatus()
+      .then((status) => {
+        if (!active) return;
+        if (!status?.completed) setShowOnboarding(true);
+      })
+      .catch(() => {});
+
+    getHotkeys()
+      .then((hk) => {
+        if (!active) return;
+        setHotkeys(hk);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // === CLEANUP ===
   useEffect(() => {
@@ -101,9 +153,10 @@ export default function DictatePage() {
       if (mediaRecorderRef.current?.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
+      stopActiveStream();
       window.electronAPI?.hideSttOverlay?.();
     };
-  }, []);
+  }, [stopActiveStream]);
 
   // === SETTINGS LOADERS ===
   useEffect(() => {
@@ -206,14 +259,14 @@ export default function DictatePage() {
       }
 
       const installed = sttModelInstalled[model.id];
-      return {
-        value: model.id,
-        label: model.name,
-        description: installed
-          ? model.description
-          : `${model.description || 'Requires download'} - Install in Models`,
-        disabled: !installed,
-      };
+        return {
+          value: model.id,
+          label: model.name,
+          description: installed
+            ? model.description
+            : `${model.description || 'Requires download'} · Install required components`,
+          disabled: !installed,
+        };
     });
   }, [providerInfo, sttModelInstalled]);
 
@@ -237,8 +290,6 @@ export default function DictatePage() {
 
   // === AUDIO MONITORING ===
   const startAudioLevelMonitoring = useCallback((stream: MediaStream) => {
-    if (!sttSettings.overlay_enabled) return;
-
     try {
       const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
@@ -253,14 +304,36 @@ export default function DictatePage() {
 
       const updateLevel = () => {
         if (!streamActiveRef.current) {
-          window.electronAPI?.updateSttOverlayLevel?.(0);
+          setAudioLevel(0);
+          setAudioBars(idleBars);
+          if (sttSettings.overlay_enabled) {
+            window.electronAPI?.updateSttOverlayLevel?.(0);
+          }
           return;
         }
         analyser.getByteFrequencyData(dataArray);
         const sum = dataArray.reduce((a, b) => a + b, 0);
         const avg = sum / dataArray.length;
         const level = Math.min(1, avg / 128);
-        window.electronAPI?.updateSttOverlayLevel?.(level);
+        setAudioLevel(level);
+
+        const step = Math.max(1, Math.floor(dataArray.length / BAR_COUNT));
+        const nextBars = new Array(BAR_COUNT).fill(0).map((_, idx) => {
+          const start = idx * step;
+          const end = Math.min(start + step, dataArray.length);
+          let localSum = 0;
+          for (let i = start; i < end; i += 1) {
+            localSum += dataArray[i];
+          }
+          const localAvg = localSum / Math.max(1, end - start);
+          const height = Math.max(4, Math.round((localAvg / 255) * 40));
+          return height;
+        });
+        setAudioBars(nextBars);
+
+        if (sttSettings.overlay_enabled) {
+          window.electronAPI?.updateSttOverlayLevel?.(level);
+        }
         animationFrameRef.current = requestAnimationFrame(updateLevel);
       };
 
@@ -268,7 +341,7 @@ export default function DictatePage() {
     } catch (err) {
       console.warn('[AudioLevel] Failed to start monitoring:', err);
     }
-  }, [sttSettings.overlay_enabled]);
+  }, [BAR_COUNT, idleBars, sttSettings.overlay_enabled]);
 
   const stopAudioLevelMonitoring = useCallback(() => {
     if (animationFrameRef.current) {
@@ -280,8 +353,10 @@ export default function DictatePage() {
       audioContextRef.current = null;
     }
     analyserRef.current = null;
+    setAudioLevel(0);
+    setAudioBars(idleBars);
     window.electronAPI?.updateSttOverlayLevel?.(0);
-  }, []);
+  }, [idleBars]);
 
   // === ERROR HANDLING ===
   const handleSttError = useCallback((err: any, fallback: string) => {
@@ -348,6 +423,7 @@ export default function DictatePage() {
       setSessionId(session.session_id);
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : 'audio/webm';
@@ -362,11 +438,11 @@ export default function DictatePage() {
       // Disable partials if transcription_mode is 'final'
       disablePartialRef.current = sttSettings.transcription_mode === 'final';
 
-      // Show overlay and start audio monitoring
+      // Start audio monitoring (UI waveform always, overlay only if enabled)
+      startAudioLevelMonitoring(stream);
       if (sttSettings.overlay_enabled) {
         window.electronAPI?.showSttOverlay?.();
         window.electronAPI?.updateSttOverlayState?.('listening');
-        startAudioLevelMonitoring(stream);
       }
 
       recorder.ondataavailable = (event) => {
@@ -380,7 +456,7 @@ export default function DictatePage() {
       };
 
       recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
+        stopActiveStream();
         stopAudioLevelMonitoring();
 
         if (!session.session_id) {
@@ -445,9 +521,10 @@ export default function DictatePage() {
     } catch (err: any) {
       setIsPreparing(false);
       handleSttError(err, 'Could not access microphone');
+      stopActiveStream();
       window.electronAPI?.hideSttOverlay?.();
     }
-  }, [language, prompt, sendPartial, handleSttError, sttSettings, providerInfo, startAudioLevelMonitoring, stopAudioLevelMonitoring]);
+  }, [language, prompt, sendPartial, handleSttError, sttSettings, providerInfo, startAudioLevelMonitoring, stopAudioLevelMonitoring, stopActiveStream]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
@@ -470,6 +547,7 @@ export default function DictatePage() {
     setIsTranscribing(false);
     streamActiveRef.current = false;
     stopAudioLevelMonitoring();
+    stopActiveStream();
     window.electronAPI?.hideSttOverlay?.();
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
@@ -587,7 +665,7 @@ export default function DictatePage() {
             const success = normalized.includes('successfully installed') || normalized.includes('requirement already satisfied');
             setInstallOutput(output || 'Install complete.');
             setError(null);
-            disablePartialRef.current = false;
+        disablePartialRef.current = false;
             if (success) {
               setTimeout(() => {
                 setShowInstallPrompt(false);
@@ -602,7 +680,77 @@ export default function DictatePage() {
         busy={installing}
       />
 
-      <ModuleShell
+      <ConfirmDialog
+        open={showOnboarding}
+        title="Welcome to Whisperall"
+        confirmLabel="Start dictating"
+        cancelLabel="Don't show again"
+        onCancel={() => {
+          setShowOnboarding(false);
+          completeOnboarding().catch(() => {});
+        }}
+        onConfirm={() => {
+          setShowOnboarding(false);
+          completeOnboarding().catch(() => {});
+        }}
+        description={
+          <div className="space-y-3">
+            <p>
+              Whisperall is <span className="text-slate-100 font-medium">dictation-first</span>. You should be able to
+              get your first transcript in under 60 seconds.
+            </p>
+            <div className="space-y-1 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-300">Dictate anywhere</span>
+                <span className="font-mono text-xs text-slate-100 bg-white/5 border border-glass-border rounded px-2 py-1">
+                  {hotkeys?.dictate || 'Alt+X'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-300">Paste last transcript</span>
+                <span className="font-mono text-xs text-slate-100 bg-white/5 border border-glass-border rounded px-2 py-1">
+                  {hotkeys?.stt_paste || 'Alt+Shift+S'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-300">Read clipboard</span>
+                <span className="font-mono text-xs text-slate-100 bg-white/5 border border-glass-border rounded px-2 py-1">
+                  {hotkeys?.read_clipboard || 'Ctrl+Shift+R'}
+                </span>
+              </div>
+            </div>
+            <div className="text-xs text-slate-400">
+              Need to change shortcuts?{' '}
+              <Link href="/settings?tab=hotkeys" className="text-amber-300 underline">
+                Open Hotkeys settings
+              </Link>
+            </div>
+          </div>
+        }
+      />
+
+      <div className="min-h-screen bg-background text-foreground overflow-x-hidden page-premium">
+        <header className="w-full max-w-[1400px] mx-auto flex items-center justify-between px-8 py-8 md:px-12">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center justify-center size-10 rounded-xl bg-surface-2 border border-surface-3 text-accent-primary">
+              <Mic className="w-5 h-5" />
+            </div>
+            <h2 className="text-lg font-semibold tracking-wide text-foreground">
+              Whisperall <span className="text-foreground-muted font-normal">Dictate</span>
+            </h2>
+          </div>
+          <nav className="hidden md:flex flex-1 justify-center gap-12">
+            <Link className="text-foreground-muted hover:text-foreground text-sm font-medium transition-colors" href="/transcribe">Studio</Link>
+            <Link className="text-foreground text-sm font-medium transition-colors" href="/dictate">Dictate</Link>
+            <Link className="text-foreground-muted hover:text-foreground text-sm font-medium transition-colors" href="/history">Library</Link>
+          </nav>
+          <div className="flex items-center gap-6">
+            <div className="size-10 rounded-full bg-surface-2 border border-surface-3" />
+          </div>
+        </header>
+
+        <main className="flex-1 w-full max-w-[1200px] mx-auto px-6 md:px-12 py-8 flex flex-col gap-12">
+          <ModuleShell
         title="Speech to Text"
         description="Dictate inside Whisperall with smart formatting and backtrack rules."
         icon={Mic}
@@ -611,17 +759,19 @@ export default function DictatePage() {
         settingsTitle="Dictation Controls"
         // Engine selector
         engineSelector={
-          <UnifiedProviderSelector
-            service="stt"
-            selected={provider}
-            onSelect={updateProvider}
-            selectedModel={providerModel}
-            onModelChange={setProviderModel}
-            onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
-            variant="dropdown"
-            showModelSelector
-            label="Transcription Engine"
-          />
+          showEngineSelector ? (
+            <UnifiedProviderSelector
+              service="stt"
+              selected={provider}
+              onSelect={updateProvider}
+              selectedModel={providerModel}
+              onModelChange={setProviderModel}
+              onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
+              variant="dropdown"
+              showModelSelector
+              label="Transcription Engine"
+            />
+          ) : undefined
         }
         // Settings panel content
         settings={
@@ -642,11 +792,13 @@ export default function DictatePage() {
                 onChange={(e) => setPrompt(e.target.value)}
               />
             </div>
-            <div className="text-xs text-foreground-muted">
-              Provider: <span className="text-foreground">{providerLabel}</span>
-              {providerModelLabel ? ` • Model: ${providerModelLabel}` : ''}
-              {billingLabel ? ` • Billing: ${billingLabel}` : ''}
-            </div>
+            {showEngineSelector && (
+              <div className="text-xs text-foreground-muted">
+                Provider: <span className="text-foreground">{providerLabel}</span>
+                {providerModelLabel ? ` • Quality: ${providerModelLabel}` : ''}
+                {billingLabel ? ` • Billing: ${billingLabel}` : ''}
+              </div>
+            )}
 
             {/* Recording status */}
             {isRecording && (
@@ -691,78 +843,105 @@ export default function DictatePage() {
         }
         // Main content: Transcription panel
         main={
-          <div className="glass-card p-6 space-y-4 h-full flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-foreground-muted" />
-                <h2 className="text-lg font-semibold text-foreground">Transcription</h2>
+          <div className="space-y-6">
+            <div className="glass-card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-foreground-muted">
+                  <span className={cn('w-2 h-2 rounded-full', isRecording ? 'bg-emerald-400 animate-pulse' : 'bg-surface-3')} />
+                  {isRecording ? 'Listening' : isTranscribing ? 'Transcribing' : 'Ready'}
+                </div>
+                <div className="text-[10px] text-foreground-muted font-mono">
+                  {isRecording ? formatDuration(duration) : '00:00:00'}
+                </div>
               </div>
-              <div className="flex gap-1">
-                <button
-                  onClick={copyToClipboard}
-                  disabled={!hasTranscript}
-                  className={cn(
-                    'p-2 rounded-lg transition-colors',
-                    copied
-                      ? 'text-emerald-400 bg-emerald-500/10'
-                      : 'text-foreground-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed'
-                  )}
-                  title={copied ? 'Copied!' : 'Copy to clipboard'}
-                >
-                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </button>
-                <button
-                  onClick={clearTranscript}
-                  disabled={!hasTranscript}
-                  className="p-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  title="Clear transcript"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+              <div className="h-24 rounded-2xl border border-surface-3/60 bg-surface-2/40 flex items-center justify-center overflow-hidden">
+                <div className="flex items-center justify-center gap-1 h-16 w-full px-8 opacity-80">
+                  {audioBars.map((height, idx) => (
+                    <div
+                      key={`bar-${idx}`}
+                      className="w-0.5 rounded-full bg-accent-primary/80 transition-[height] duration-150 ease-out"
+                      style={{ height: `${height}px`, opacity: 0.5 + audioLevel * 0.5 }}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* Transcribing indicator */}
-            {isTranscribing && (
-              <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-accent-primary/10 border border-accent-primary/20">
-                <Loader2 className="w-4 h-4 animate-spin text-accent-primary" />
-                <span className="text-sm text-accent-primary">Transcribing audio...</span>
-              </div>
-            )}
-
-            {/* Editable transcript textarea */}
-            <textarea
-              className="input textarea flex-1 min-h-[300px] resize-none font-sans text-base leading-relaxed focus:ring-0 border-transparent bg-surface-1"
-              placeholder="Your transcription will appear here..."
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-            />
-
-            {/* Raw transcript (if different) */}
-            {rawTranscript && rawTranscript !== transcript && (
-              <details className="text-xs text-foreground-muted">
-                <summary className="cursor-pointer hover:text-foreground transition-colors">
-                  Show raw transcript
-                </summary>
-                <div className="mt-2 p-3 rounded-lg bg-surface-1 font-mono">
-                  {rawTranscript}
+            <div className="glass-card p-6 space-y-4 h-full flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-foreground-muted" />
+                  <h2 className="text-lg font-semibold text-foreground">Transcription</h2>
                 </div>
-              </details>
-            )}
-
-            {/* Character count */}
-            {hasTranscript && (
-              <div className="text-xs text-foreground-muted text-right">
-                {transcript.length.toLocaleString()} characters
+                <div className="flex gap-1">
+                  <button
+                    onClick={copyToClipboard}
+                    disabled={!hasTranscript}
+                    className={cn(
+                      'p-2 rounded-lg transition-colors',
+                      copied
+                        ? 'text-emerald-400 bg-emerald-500/10'
+                        : 'text-foreground-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed'
+                    )}
+                    title={copied ? 'Copied!' : 'Copy to clipboard'}
+                  >
+                    {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                  <button
+                    onClick={clearTranscript}
+                    disabled={!hasTranscript}
+                    className="p-2 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title="Clear transcript"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            )}
+
+              {/* Transcribing indicator */}
+              {isTranscribing && (
+                <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-accent-primary/10 border border-accent-primary/20">
+                  <Loader2 className="w-4 h-4 animate-spin text-accent-primary" />
+                  <span className="text-sm text-accent-primary">Transcribing audio...</span>
+                </div>
+              )}
+
+              {/* Editable transcript textarea */}
+              <textarea
+                className="input textarea flex-1 min-h-[300px] resize-none font-sans text-base leading-relaxed focus:ring-0 border-transparent bg-surface-1"
+                placeholder={isRecording ? 'Listening...' : 'Your transcription will appear here...'}
+                value={transcript}
+                onChange={(e) => setTranscript(e.target.value)}
+              />
+
+              {/* Raw transcript (if different) */}
+              {rawTranscript && rawTranscript !== transcript && (
+                <details className="text-xs text-foreground-muted">
+                  <summary className="cursor-pointer hover:text-foreground transition-colors">
+                    Show raw transcript
+                  </summary>
+                  <div className="mt-2 p-3 rounded-lg bg-surface-1 font-mono">
+                    {rawTranscript}
+                  </div>
+                </details>
+              )}
+
+              {/* Character count */}
+              {hasTranscript && (
+                <div className="text-xs text-foreground-muted text-right">
+                  {transcript.length.toLocaleString()} characters
+                </div>
+              )}
+            </div>
           </div>
         }
         // Status
         error={error}
         onErrorDismiss={() => setError(null)}
       />
+        </main>
+      </div>
     </>
   );
 }

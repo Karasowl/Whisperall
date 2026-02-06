@@ -16,6 +16,8 @@ import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
 import { PresetVoiceSelector } from '@/components/PresetVoiceSelector';
 import { AdvancedSettings, getDefaultParamValues } from '@/components/AdvancedSettings';
 import { Toggle } from '@/components/Toggle';
+import { usePlan } from '@/components/PlanProvider';
+import { useDevMode } from '@/components/DevModeProvider';
 import {
   ModuleShell,
   ExecutionModeSwitch,
@@ -41,6 +43,9 @@ const LANGUAGE_LABELS: Record<string, string> = {
 
 export default function ReaderPage() {
   const toast = useToast();
+  const { hasPro } = usePlan();
+  const { devMode: devModeEnabled } = useDevMode();
+  const showEngineSelector = devModeEnabled;
   
   // Text input
   const [text, setText] = useState('');
@@ -312,20 +317,22 @@ export default function ReaderPage() {
       }
       // Engine/Provider selector
       engineSelector={
-        <UnifiedProviderSelector
-          service="tts"
-          selected={provider}
-          onSelect={setProviderState}
-          selectedModel={model}
-          onModelChange={setModel}
-          onProviderInfoChange={(info) => {
-            setProviderInfo(info as ServiceProviderInfo | null);
-            setTtsProviderInfo(info as TTSProviderInfo | null);
-          }}
-          variant="dropdown"
-          showModelSelector
-          label="TTS Engine"
-        />
+        showEngineSelector ? (
+          <UnifiedProviderSelector
+            service="tts"
+            selected={provider}
+            onSelect={setProviderState}
+            selectedModel={model}
+            onModelChange={setModel}
+            onProviderInfoChange={(info) => {
+              setProviderInfo(info as ServiceProviderInfo | null);
+              setTtsProviderInfo(info as TTSProviderInfo | null);
+            }}
+            variant="dropdown"
+            showModelSelector
+            label="TTS Engine"
+          />
+        ) : undefined
       }
       // Settings panel content
       settings={

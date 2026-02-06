@@ -105,7 +105,7 @@ export function AudioOutputPanel({
           </h3>
         </div>
         {showBadge && (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400">
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-success/10 text-success">
             <CheckCircle className="w-3 h-3" aria-hidden="true" />
             {badgeText}
           </span>
@@ -179,7 +179,7 @@ export function AudioOutputPanel({
             )}
             {metadata.model && (
               <span>
-                Model: <span className="text-foreground">{metadata.model}</span>
+                Quality: <span className="text-foreground">{metadata.model}</span>
               </span>
             )}
             {metadata.voice && (

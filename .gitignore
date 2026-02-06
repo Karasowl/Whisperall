@@ -59,6 +59,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .next/
+.next_old_*/
 out/
 .turbo/
 
@@ -66,9 +67,11 @@ out/
 electron/dist/
 electron/out/
 electron/frontend/
+electron/dist-msi*/
 
 # Packaged backend artifacts
 backend-dist/
+backend-build/
 
 # Runtime data (should live in OS app data, not repo)
 /temp/
@@ -84,3 +87,9 @@ backend-dist/
 
 # Ignore generated sample .wav files
 **/*.wav
+
+# Test/coverage artifacts
+coverage/
+test-results/
+playwright-report/
+.playwright/

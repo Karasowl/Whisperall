@@ -22,7 +22,7 @@ export function Toggle({
   className,
 }: ToggleProps) {
   const sizes = {
-    sm: { track: 'w-8 h-4', thumb: 'w-3 h-3', translate: 'translate-x-4' },
+    sm: { track: 'w-10 h-5', thumb: 'w-4 h-4', translate: 'translate-x-5' },
     md: { track: 'w-11 h-6', thumb: 'w-5 h-5', translate: 'translate-x-5' },
     lg: { track: 'w-14 h-7', thumb: 'w-6 h-6', translate: 'translate-x-7' },
   };
@@ -44,14 +44,14 @@ export function Toggle({
         disabled={disabled}
         onClick={() => !disabled && onChange(!enabled)}
         className={cn(
-          'relative inline-flex flex-shrink-0 rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent-primary focus:ring-offset-2 focus:ring-offset-background',
+          'relative inline-flex flex-shrink-0 rounded-full border border-surface-3 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent-primary focus:ring-offset-2 focus:ring-offset-background',
           sizeConfig.track,
           enabled ? 'bg-accent-primary' : 'bg-surface-3'
         )}
       >
         <span
           className={cn(
-            'pointer-events-none inline-block rounded-full bg-white shadow-lg transform ring-0 transition duration-200 ease-in-out',
+            'pointer-events-none inline-block rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.35)] transform ring-0 transition duration-200 ease-in-out',
             sizeConfig.thumb,
             enabled ? sizeConfig.translate : 'translate-x-0.5',
             'mt-0.5 ml-0.5'

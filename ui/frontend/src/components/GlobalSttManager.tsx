@@ -32,10 +32,27 @@ export function GlobalSttManager() {
     });
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const streamRef = useRef<MediaStream | null>(null);
     const startRef = useRef<number>(0);
     const chunksRef = useRef<Blob[]>([]);
     const streamActiveRef = useRef(false);
     const mimeTypeRef = useRef('audio/webm');
+    const stoppingRef = useRef(false);
+    const audioContextRef = useRef<AudioContext | null>(null);
+    const analyserRef = useRef<AnalyserNode | null>(null);
+    const rafRef = useRef<number | null>(null);
+
+    const stopMediaStream = useCallback(() => {
+        const stream = streamRef.current;
+        if (!stream) return;
+        try {
+            stream.getTracks().forEach((track) => {
+                try { track.stop(); } catch { }
+            });
+        } finally {
+            streamRef.current = null;
+        }
+    }, []);
 
     // Load settings on mount
     useEffect(() => {
@@ -44,15 +61,17 @@ export function GlobalSttManager() {
 
     // STOP function shared logic
     const performStop = useCallback(async () => {
-        if (!sessionId) return;
-        if (!streamActiveRef.current) return;
+        if (stoppingRef.current) return;
+        if (!sessionId || !streamActiveRef.current) {
+            stopMediaStream();
+            return;
+        }
 
+        stoppingRef.current = true;
         streamActiveRef.current = false;
 
-        // Show Transcribing state
-        if (sttSettings.overlay_enabled) {
-            window.electronAPI?.updateSttOverlayState?.('transcribing');
-        }
+        // Always update widget/overlay state (even if overlay is hidden).
+        window.electronAPI?.updateSttOverlayState?.('transcribing');
 
         try {
             const mimeType = mimeTypeRef.current;
@@ -125,9 +144,7 @@ export function GlobalSttManager() {
             window.electronAPI?.setLastSttTranscript?.(result.text);
 
             // Show Done state
-            if (sttSettings.overlay_enabled) {
-                window.electronAPI?.updateSttOverlayState?.('done');
-            }
+            window.electronAPI?.updateSttOverlayState?.('done');
 
             // PASTE LOGIC
             if (result.text) {
@@ -149,14 +166,30 @@ export function GlobalSttManager() {
             playActionSound('complete');
         } catch (err) {
             console.error('Global STT Error:', err);
-            // If error, force hide and reset state
+            // If error, force reset state; hide only if overlay is enabled
             window.electronAPI?.updateSttOverlayState?.('idle');
-            window.electronAPI?.hideSttOverlay?.();
+            if (sttSettings.overlay_enabled) {
+                window.electronAPI?.hideSttOverlay?.();
+            }
         } finally {
+            stopMediaStream();
+            // Cleanup analyser + RAF
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+            if (analyserRef.current) {
+                try { analyserRef.current.disconnect(); } catch { }
+                analyserRef.current = null;
+            }
+            if (audioContextRef.current) {
+                try { audioContextRef.current.close(); } catch { }
+                audioContextRef.current = null;
+            }
+            window.electronAPI?.updateSttOverlayLevel?.(0);
             setSessionId(null);
             chunksRef.current = [];
+            stoppingRef.current = false;
         }
-    }, [sessionId, sttSettings]);
+    }, [sessionId, sttSettings, stopMediaStream]);
 
     const startRecording = useCallback(async () => {
         try {
@@ -184,6 +217,38 @@ export function GlobalSttManager() {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: audioConstraints
             });
+            streamRef.current = stream;
+
+            // Audio level visualization for widget/overlay
+            try {
+                const audioContext = new AudioContext();
+                try { await audioContext.resume(); } catch { }
+                audioContextRef.current = audioContext;
+                const source = audioContext.createMediaStreamSource(stream);
+                const analyser = audioContext.createAnalyser();
+                analyser.fftSize = 512;
+                analyser.smoothingTimeConstant = 0.6;
+                analyserRef.current = analyser;
+                source.connect(analyser);
+
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                const tick = () => {
+                    if (!streamActiveRef.current || !analyserRef.current) return;
+                    analyser.getByteFrequencyData(dataArray);
+                    let sumSquares = 0;
+                    for (let i = 0; i < dataArray.length; i++) {
+                        const v = dataArray[i] / 255;
+                        sumSquares += v * v;
+                    }
+                    const rms = Math.sqrt(sumSquares / Math.max(1, dataArray.length));
+                    const level = Math.min(1, rms * 1.8);
+                    window.electronAPI?.updateSttOverlayLevel?.(level);
+                    rafRef.current = requestAnimationFrame(tick);
+                };
+                rafRef.current = requestAnimationFrame(tick);
+            } catch {
+                // Non-blocking: visualization is optional.
+            }
 
             // Prefer opus
             const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -208,21 +273,22 @@ export function GlobalSttManager() {
             };
 
             recorder.onstop = () => {
-                stream.getTracks().forEach(t => t.stop());
+                stopMediaStream();
             };
 
             recorder.start(200); // Smaller chunks for responsiveness
             playActionSound('start');
 
+            window.electronAPI?.updateSttOverlayState?.('recording');
             if (currentSettings.overlay_enabled) {
                 window.electronAPI?.showSttOverlay?.();
-                window.electronAPI?.updateSttOverlayState?.('recording');
             }
         } catch (err) {
             console.error('Failed to start global STT:', err);
+            stopMediaStream();
             window.electronAPI?.hideSttOverlay?.();
         }
-    }, []);
+    }, [stopMediaStream]);
 
     useEffect(() => {
         // If on /dictate page, do NOT listen to global hotkeys to avoid conflict
@@ -247,6 +313,12 @@ export function GlobalSttManager() {
         window.addEventListener('hotkey-action', handleHotkey as EventListener);
         return () => window.removeEventListener('hotkey-action', handleHotkey as EventListener);
     }, [pathname, startRecording, performStop]);
+
+    useEffect(() => {
+        return () => {
+            stopMediaStream();
+        };
+    }, [stopMediaStream]);
 
     return null;
 }

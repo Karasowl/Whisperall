@@ -1,0 +1,13 @@
+{
+  "name": "whisperall-monorepo",
+  "private": true,
+  "version": "0.0.1",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev:desktop": "pnpm --filter @whisperall/desktop dev",
+    "build:desktop": "pnpm --filter @whisperall/desktop build",
+    "dev:api": "pnpm --filter @whisperall/api dev",
+    "test:api": "pnpm --filter @whisperall/api test",
+    "lint": "pnpm -r lint"
+  }
+}

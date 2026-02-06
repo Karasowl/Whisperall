@@ -1,0 +1,11 @@
+name: android-build
+on:
+  push:
+    paths:
+      - 'apps/android/**'
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "TODO: configure android build"

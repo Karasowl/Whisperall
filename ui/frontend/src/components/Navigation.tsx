@@ -19,39 +19,37 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getHotkeys } from '@/lib/api';
+import { useDevMode } from '@/components/DevModeProvider';
 
 const navItems = [
-  { href: '/', label: 'TTS', icon: MessageSquare, description: 'Text to Speech' },
-  { href: '/reader', label: 'Reader', icon: Headphones, description: 'Real-time Reader' },
-  { href: '/dictate', label: 'STT', icon: Mic, description: 'Speech to Text' },
-  { href: '/ai-edit', label: 'AI Edit', icon: Sparkles, description: 'AI Text Editing' },
-  { href: '/translate', label: 'Translate', icon: Languages, description: 'Translation' },
-  { href: '/music', label: 'Music', icon: Music, description: 'AI Music Generation' },
-  { href: '/sfx', label: 'SFX', icon: Volume2, description: 'Sound Effects from Video' },
-  { href: '/audiobook', label: 'Audiobook', icon: BookOpen, description: 'Audiobook Creator' },
-  { href: '/transcribe', label: 'Transcribe', icon: FileAudio, description: 'Long-form Transcription' },
-  { href: '/voices', label: 'Voices', icon: Mic, description: 'Voice Library' },
+  { href: '/dictate', label: 'Dictate', icon: Mic, description: 'Dictation' },
+  { href: '/reader', label: 'Reader', icon: Headphones, description: 'Read aloud' },
+  { href: '/transcribe', label: 'Transcribe', icon: FileAudio, description: 'Long-form transcription' },
+  { href: '/voices', label: 'Voices', icon: Mic, description: 'Voice library' },
   { href: '/history', label: 'History', icon: History, description: 'History' },
-];
-
-const secondaryItems = [
-  { href: '/models', label: 'Models', icon: HardDrive },
-  { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export function Navigation() {
   const pathname = usePathname();
   const router = useRouter();
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
+  const { devMode } = useDevMode();
+
+  const secondaryItems = [
+    ...(devMode ? [{ href: '/models', label: 'Resources', icon: HardDrive }] : []),
+    { href: '/settings', label: 'Settings', icon: Settings },
+  ];
 
   useEffect(() => {
     if (!window.electronAPI?.onHotkey) return;
 
     const unsubscribe = window.electronAPI.onHotkey((action) => {
       window.__lastHotkey = action;
-      if (action === 'open-tts') router.push('/');
+      // "Home" is dictation-first now.
+      if (action === 'open-tts') router.push('/dictate');
       if (action === 'dictate-toggle') router.push('/dictate');
       if (action === 'read-clipboard') router.push('/reader');
+      if (action === 'open-loopback') router.push('/loopback');
       if (action === 'ai-edit') router.push('/ai-edit');
       if (action === 'translate') router.push('/translate');
       if (action === 'open-settings') router.push('/settings');
@@ -78,7 +76,7 @@ export function Navigation() {
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="/" prefetch={false} className="flex items-center gap-3 group">
+          <Link href="/dictate" prefetch={false} className="flex items-center gap-3 group">
             <div className="w-9 h-9 bg-gradient-to-br from-accent-primary via-teal-400 to-accent-secondary rounded-xl shadow-lg shadow-accent-primary/20 group-hover:shadow-accent-primary/40 transition-shadow" />
             <span className="text-xl font-bold text-gradient-accent">Whisperall</span>
           </Link>

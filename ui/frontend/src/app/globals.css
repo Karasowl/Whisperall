@@ -51,37 +51,27 @@
    THEME VARIABLES
    ===================================================== */
 :root {
-  /* LIGHT Theme - "Deep Light" - High Contrast Modern */
-  --background: #ffffff;
-  /* Pure white for max contrast */
-  --surface-base: #f8fafc;
-  --surface-1: #f1f5f9;
-  --surface-2: #e2e8f0;
-  --surface-3: #cbd5e1;
+  /* LIGHT Theme (fallback) */
+  --background: #f5f5f8;
+  --surface-base: #f5f5f8;
+  --surface-1: #ffffff;
+  --surface-2: #f0f2f6;
+  --surface-3: #e6e9f0;
 
-  --foreground: #020617;
-  /* Slate-950 - Almost black for text */
-  --foreground-secondary: #334155;
-  /* Slate-700 - Dark grey */
-  --foreground-muted: #64748b;
-  /* Slate-500 */
+  --foreground: #111418;
+  --foreground-secondary: #3d4252;
+  --foreground-muted: #6a6f7f;
 
-  --accent-primary: #0284c7;
-  /* Sky-600 - slightly darker for light mode */
-  --accent-secondary: #0f766e;
-  /* Teal-700 */
+  --accent-primary: #6b6bff;
+  --accent-secondary: #8b8bff;
 
-  /* Light Glass System - Higher Contrast */
-  --glass-surface: rgba(255, 255, 255, 0.85);
-  /* More opaque */
-  --glass-border: rgba(2, 6, 23, 0.12);
-  /* Much darker border */
-  --glass-border-hover: rgba(2, 132, 199, 0.4);
-  --glass-highlight: rgba(2, 6, 23, 0.08);
+  --glass-surface: rgba(255, 255, 255, 0.95);
+  --glass-border: rgba(17, 20, 24, 0.08);
+  --glass-border-hover: rgba(107, 107, 255, 0.3);
+  --glass-highlight: rgba(17, 20, 24, 0.04);
 
-  /* Shadows - Sharper */
-  --shadow-glow: 0 0 20px -5px rgba(2, 132, 199, 0.15);
-  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --shadow-glow: 0 0 0 rgba(0, 0, 0, 0);
+  --shadow-card: 0 10px 24px -18px rgba(15, 17, 20, 0.35);
 
   --radius-lg: 1rem;
   --radius-xl: 1.5rem;
@@ -95,14 +85,14 @@
   --space-2xl: 3rem;     /* 48px */
 
   /* === STATE COLORS === */
-  --color-success: #10b981;
-  --color-success-muted: rgba(16, 185, 129, 0.1);
-  --color-warning: #f59e0b;
-  --color-warning-muted: rgba(245, 158, 11, 0.1);
-  --color-error: #ef4444;
-  --color-error-muted: rgba(239, 68, 68, 0.1);
-  --color-info: #3b82f6;
-  --color-info-muted: rgba(59, 130, 246, 0.1);
+  --color-success: #8bc4ff;
+  --color-success-muted: rgba(139, 196, 255, 0.12);
+  --color-warning: #f0b35b;
+  --color-warning-muted: rgba(240, 179, 91, 0.12);
+  --color-error: #f07a7a;
+  --color-error-muted: rgba(240, 122, 122, 0.12);
+  --color-info: #7b88ff;
+  --color-info-muted: rgba(123, 136, 255, 0.12);
 
   /* === Z-INDEX SCALE === */
   --z-sticky: 40;
@@ -120,32 +110,27 @@
 }
 
 .dark {
-  /* DARK Theme - "Midnight Glass" */
-  --background: #030711;
-  --surface-base: #0b1221;
-  --surface-1: #0b1221;
-  --surface-2: #111a2e;
-  --surface-3: #17213a;
-  --foreground: #f8fafc;
-  --foreground-secondary: #cbd5e1;
-  --foreground-muted: #64748b;
+  /* DARK Theme - Stitch Premium */
+  --background: #0f0f23;
+  --surface-base: #0f0f23;
+  --surface-1: #18182f;
+  --surface-2: #1f2036;
+  --surface-3: #27273a;
 
-  --accent-primary: #0ea5e9;
-  --accent-secondary: #2dd4bf;
+  --foreground: #e8eaed;
+  --foreground-secondary: #c7c9d6;
+  --foreground-muted: #9a9abc;
 
-  --glass-surface: rgba(11, 18, 33, 0.65);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-border-hover: rgba(255, 255, 255, 0.2);
-  --glass-highlight: rgba(255, 255, 255, 0.12);
+  --accent-primary: #6b6bff;
+  --accent-secondary: #8b8bff;
 
-  --shadow-glow: 0 0 50px -12px rgba(14, 165, 233, 0.4);
-  --shadow-card: 0 8px 32px -8px rgba(0, 0, 0, 0.5);
+  --glass-surface: rgba(24, 24, 47, 0.9);
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-border-hover: rgba(107, 107, 255, 0.35);
+  --glass-highlight: rgba(255, 255, 255, 0.04);
 
-  /* State colors - dark mode adjustments */
-  --color-success: #34d399;
-  --color-warning: #fbbf24;
-  --color-error: #f87171;
-  --color-info: #60a5fa;
+  --shadow-glow: 0 0 20px rgba(107, 107, 255, 0.12);
+  --shadow-card: 0 8px 24px -18px rgba(0, 0, 0, 0.6);
 }
 
 /* Reset basics */
@@ -154,8 +139,33 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   min-height: 100vh;
   overflow-x: hidden;
+}
+
+/* Premium page backdrop */
+.page-premium {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(1200px circle at 12% -10%, rgba(107, 107, 255, 0.18), transparent 45%),
+    radial-gradient(800px circle at 90% 0%, rgba(255, 255, 255, 0.06), transparent 40%);
+}
+
+.page-premium::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(600px circle at 50% 20%, rgba(107, 107, 255, 0.06), transparent 60%);
+  opacity: 0.8;
+  z-index: 0;
+}
+
+.page-premium > * {
+  position: relative;
+  z-index: 1;
 }
 
 /* Electron titlebar overlay support */
@@ -176,25 +186,27 @@ body {
 .glass,
 .surface {
   position: relative;
-  background: linear-gradient(180deg, var(--glass-surface) 0%, var(--surface-1) 100%);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(24, 24, 47, 0.75);
   border: 1px solid var(--glass-border);
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 10px 24px -18px rgba(0, 0, 0, 0.55);
   border-radius: var(--radius-xl);
-  overflow: visible;
-  transition: all 0.3s ease;
+  overflow: hidden;
+  transition: all 0.2s ease;
 }
 
-/* Top highlight for 3D effect */
+.glass-card:hover,
+.card:hover {
+  border-color: var(--glass-border-hover);
+}
+
+/* Subtle top highlight */
 .card::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  /* Subtle highlight adaptable to theme */
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, transparent 100%);
+  background: linear-gradient(180deg, var(--glass-highlight) 0%, transparent 80%);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
@@ -204,33 +216,26 @@ body {
 
 /* Interactive Card */
 .card-interactive {
-  /* Replicating .card styles */
   position: relative;
   background: var(--glass-surface);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--shadow-card);
   border-radius: var(--radius-xl);
-  overflow: visible;
-  transition: all 0.3s ease;
-
-  /* Interactive specific */
+  overflow: hidden;
+  transition: all 0.2s ease;
   cursor: pointer;
   border: 1px solid var(--glass-border);
 }
 
 .card-interactive:hover {
-  background: var(--glass-surface);
-  /* Keep base but maybe slight opacity change if needed */
   border-color: var(--glass-border-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-glow);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
 }
 
 .card-selected {
-  background: linear-gradient(180deg, rgba(14, 165, 233, 0.15) 0%, rgba(14, 165, 233, 0.05) 100%);
-  border-color: rgba(14, 165, 233, 0.5);
-  box-shadow: 0 0 30px -10px rgba(14, 165, 233, 0.3);
+  background: rgba(107, 107, 255, 0.08);
+  border-color: rgba(107, 107, 255, 0.35);
+  box-shadow: none;
 }
 
 .card-header {
@@ -255,27 +260,23 @@ body {
 }
 
 .btn-primary {
-  background: var(--foreground);
-  color: var(--background);
-  box-shadow: 0 0 20px -5px rgba(14, 165, 233, 0.4);
+  background: var(--accent-primary);
+  color: #ffffff;
+  box-shadow: 0 8px 20px -12px rgba(107, 107, 255, 0.6);
 }
 
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 0 30px -5px rgba(14, 165, 233, 0.6);
-  background: var(--foreground);
-  opacity: 0.9;
+  background: #7c7cff;
 }
 
 .btn-secondary {
-  background: var(--glass-surface);
+  background: rgba(24, 24, 47, 0.6);
   color: var(--foreground);
   border: 1px solid var(--glass-border);
 }
 
 .btn-secondary:hover {
-  background: var(--glass-surface);
-  /* Handle with opacity or filter if needed */
   border-color: var(--glass-border-hover);
 }
 
@@ -301,8 +302,7 @@ body {
 .textarea,
 .select {
   width: 100%;
-  background: var(--glass-surface);
-  backdrop-filter: blur(12px);
+  background: rgba(24, 24, 47, 0.6);
   border: 1px solid var(--glass-border);
   color: var(--foreground);
   border-radius: 12px;
@@ -314,10 +314,9 @@ body {
 .textarea:focus,
 .select:focus {
   outline: none;
-  background: var(--background);
-  /* Solid on focus for readability */
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px var(--shadow-glow);
+  background: rgba(24, 24, 47, 0.75);
+  border-color: rgba(107, 107, 255, 0.6);
+  box-shadow: 0 0 0 2px rgba(107, 107, 255, 0.15);
 }
 
 /* Fix standard select dropdown readability */
@@ -329,9 +328,9 @@ select option {
 /* Custom Dropdown/Popover Container */
 .dropdown-content,
 .popover-content {
-  background: var(--glass-surface);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: var(--surface-1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-card);
   border-radius: var(--radius-lg);
@@ -343,31 +342,25 @@ select option {
    UTILITIES
    ===================================================== */
 .text-gradient {
-  background: linear-gradient(to right, var(--foreground), var(--foreground-secondary));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--foreground);
 }
 
 .text-gradient-accent {
-  background: linear-gradient(to right, #2dd4bf, #0ea5e9);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--accent-primary);
 }
 
 /* Legacy Compat */
 .glass {
   background: var(--glass-surface);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(10px);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
 }
 
 .nav-glass {
-  background: var(--glass-surface);
-  backdrop-filter: blur(14px);
+  background: rgba(15, 15, 35, 0.85);
   border-bottom: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
 }
 
 .nav-item {
@@ -481,26 +474,25 @@ select option {
    MODULE COMPONENTS
    ===================================================== */
 .module-title {
-  font-size: 2.25rem;
-  font-weight: 700;
-  background: linear-gradient(to right, var(--foreground), var(--foreground-secondary));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  letter-spacing: -0.025em;
+  font-size: clamp(1.9rem, 1.6rem + 1.2vw, 2.4rem);
+  font-weight: 300;
+  color: #ffffff;
+  letter-spacing: -0.02em;
 }
 
 .module-description {
-  color: var(--foreground-secondary);
-  font-size: 1.125rem;
+  color: var(--foreground-muted);
+  font-size: clamp(0.85rem, 0.8rem + 0.2vw, 1rem);
+  font-weight: 300;
+  letter-spacing: 0.02em;
 }
 
 .section-label {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--foreground-muted);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.2em;
 }
 
 /* =====================================================
@@ -513,19 +505,18 @@ select option {
   gap: 0.5rem;
   width: 100%;
   padding: 1rem 1.5rem;
-  border-radius: 12px;
+  border-radius: 16px;
   font-weight: 600;
   font-size: 1rem;
-  background: var(--foreground);
-  color: var(--background);
-  box-shadow: 0 0 20px -5px rgba(14, 165, 233, 0.4);
+  background: var(--accent-primary);
+  color: #ffffff;
+  box-shadow: 0 10px 25px -18px rgba(107, 107, 255, 0.8);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .btn-cta:hover {
   transform: translateY(-1px);
-  box-shadow: 0 0 30px -5px rgba(14, 165, 233, 0.6);
-  opacity: 0.9;
+  background: #7c7cff;
 }
 
 .btn-cta:disabled {
@@ -541,21 +532,21 @@ select option {
   gap: 0.5rem;
   width: 100%;
   padding: 1rem 1.5rem;
-  border-radius: 12px;
+  border-radius: 16px;
   font-weight: 600;
   font-size: 1rem;
-  background: var(--foreground);
-  color: var(--background);
+  background: var(--accent-primary);
+  color: #ffffff;
   animation: pulse-glow 2s ease-in-out infinite;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @keyframes pulse-glow {
   0%, 100% {
-    box-shadow: 0 0 20px -5px rgba(14, 165, 233, 0.4);
+    box-shadow: 0 0 0 rgba(107, 107, 255, 0);
   }
   50% {
-    box-shadow: 0 0 30px -5px rgba(14, 165, 233, 0.7);
+    box-shadow: 0 0 18px rgba(107, 107, 255, 0.35);
   }
 }
 

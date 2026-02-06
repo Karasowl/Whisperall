@@ -33,8 +33,23 @@ import {
   ExecutionModeSwitch,
   type ExecutionMode,
 } from '@/components/module';
+import { PlanGate } from '@/components/PlanGate';
 
 export default function VoiceIsolatorPage() {
+  return (
+    <PlanGate
+      requiredPlan="pro"
+      title="Voice Isolator"
+      description="Extract a clean voice track from noisy audio."
+      icon={AudioWaveform}
+      feature="Voice Isolator"
+    >
+      <VoiceIsolatorProPage />
+    </PlanGate>
+  );
+}
+
+function VoiceIsolatorProPage() {
   // Provider state
   const [providers, setProviders] = useState<VoiceIsolatorProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('elevenlabs');

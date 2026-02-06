@@ -1,14 +1,49 @@
 const electron = require('electron');
 const app = electron.app;
 if (!app) {
-  console.error('Electron main process not available. Run via "npm start" in the electron folder or ChatterboxUI.bat.');
+  console.error('Electron main process not available. Run via \"npm start\" in the electron folder or the Windows launcher (.bat).');
   process.exit(1);
 }
-const { BrowserWindow, dialog, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, shell, session } = electron;
+const { BrowserWindow, dialog, Tray, Menu, globalShortcut, ipcMain, clipboard, Notification, shell, session, screen } = electron;
 const path = require('path');
 const fs = require('fs');
 const { spawn, execSync } = require('child_process');
 const http = require('http');
+const https = require('https');
+
+let logFilePath = null;
+const initLogging = () => {
+  try {
+    const logDir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    logFilePath = path.join(logDir, 'main.log');
+    fs.appendFileSync(logFilePath, `\n--- Launch ${new Date().toISOString()} ---\n`);
+  } catch (e) {
+    // ignore logging init failures
+  }
+};
+
+const writeLog = (level, args) => {
+  const line = `[${new Date().toISOString()}] [${level}] ${args.map(String).join(' ')}\n`;
+  try {
+    if (logFilePath) fs.appendFileSync(logFilePath, line);
+  } catch (_) {
+    // ignore
+  }
+};
+
+const hookConsole = () => {
+  const origLog = console.log;
+  const origErr = console.error;
+  console.log = (...args) => {
+    writeLog('INFO', args);
+    origLog(...args);
+  };
+  console.error = (...args) => {
+    writeLog('ERROR', args);
+    origErr(...args);
+  };
+};
 
 // Handle uncaught exceptions to prevent crash dialogs
 process.on('uncaughtException', (error) => {
@@ -27,11 +62,43 @@ const DEFAULT_BACKEND_PORT = 8080;
 const envPort = parseInt(process.env.WHISPERALL_BACKEND_PORT || process.env.BACKEND_PORT || '', 10);
 const BACKEND_PORT = Number.isFinite(envPort) ? envPort : DEFAULT_BACKEND_PORT;
 process.env.WHISPERALL_BACKEND_PORT = String(BACKEND_PORT);
+const LOCAL_BACKEND_HOST = '127.0.0.1';
 let traySettings = {
   minimizeToTray: true,
   showNotifications: true,
 };
 let lastSttTranscript = '';
+let lastPasteAt = 0;
+
+// Single instance guard: prevents duplicate Electron processes competing for cache/hotkeys.
+// This is especially important in dev where the launcher can be re-run while an instance is minimized to tray.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // Someone tried to run a second instance; focus the existing one.
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    } catch (_) {
+      // ignore
+    }
+  });
+}
+
+const getClientAuthToken = () => {
+  const token = (
+    process.env.WHISPERALL_CLIENT_TOKEN ||
+    process.env.WHISPERALL_API_TOKEN ||
+    process.env.WHISPERALL_AUTH_TOKEN ||
+    ''
+  ).trim();
+  return token || null;
+};
 
 // Subtitle overlay for loopback transcription
 let subtitleOverlayWindow;
@@ -47,6 +114,10 @@ let subtitleOverlayState = {
 // Widget overlay for multi-module quick access
 let widgetOverlayWindow;
 let widgetOverlaySaveTimer;
+let widgetOverlayIgnoreMouse = null;
+let widgetDragInterval = null;
+let widgetDragOffset = { x: 0, y: 0 };
+let widgetDragLastCursor = null;
 const widgetOverlayStatePath = path.join(app.getPath('userData'), 'widget-overlay.json');
 let widgetOverlayState = {
   width: 500,
@@ -129,6 +200,10 @@ const configureMediaPermissions = () => {
 
 // Paths
 const getBackendPath = () => {
+  const envBackend = (process.env.WHISPERALL_BACKEND_PATH || '').trim();
+  if (envBackend && fs.existsSync(envBackend)) {
+    return envBackend;
+  }
   if (isDev) {
     return path.join(__dirname, '..', 'ui', 'backend');
   }
@@ -136,26 +211,52 @@ const getBackendPath = () => {
 };
 
 const getPythonPath = () => {
+  const envPython = (
+    process.env.WHISPERALL_PYTHON_PATH ||
+    process.env.PYTHON_PATH ||
+    ''
+  ).trim();
+  if (envPython && fs.existsSync(envPython)) {
+    return envPython;
+  }
   if (isDev) {
     // Use venv Python in development
-    return path.join(__dirname, '..', 'venv', 'Scripts', 'python.exe');
+    const devPython = path.join(__dirname, '..', 'venv', 'Scripts', 'python.exe');
+    if (fs.existsSync(devPython)) return devPython;
   }
   // In production, Python is bundled
-  return path.join(process.resourcesPath, 'backend', 'python', 'python.exe');
+  const bundled = path.join(process.resourcesPath, 'backend', 'python', 'python.exe');
+  if (fs.existsSync(bundled)) return bundled;
+  // Fall back to system python in PATH
+  return 'python';
 };
 
 const getFrontendURL = () => {
-  return `http://localhost:${BACKEND_PORT}`;
+  return `http://${LOCAL_BACKEND_HOST}:${BACKEND_PORT}`;
 };
 
 const getTrayIconPath = () => {
   const candidates = [];
   if (isDev) {
+    candidates.push(path.join(__dirname, 'whisperall-tray.png'));
     candidates.push(path.join(__dirname, 'icon.png'));
     candidates.push(path.join(__dirname, '..', 'Chatterbox-Multilingual.png'));
   } else {
+    candidates.push(path.join(process.resourcesPath, 'whisperall-tray.png'));
     candidates.push(path.join(process.resourcesPath, 'icon.png'));
     candidates.push(path.join(process.resourcesPath, 'Chatterbox-Multilingual.png'));
+  }
+  return candidates.find((p) => fs.existsSync(p)) || null;
+};
+
+const getAppIconPath = () => {
+  const candidates = [];
+  if (isDev) {
+    candidates.push(path.join(__dirname, 'icon.png'));
+    candidates.push(path.join(__dirname, 'whisperall-tray.png'));
+  } else {
+    candidates.push(path.join(process.resourcesPath, 'icon.png'));
+    candidates.push(path.join(process.resourcesPath, 'whisperall-tray.png'));
   }
   return candidates.find((p) => fs.existsSync(p)) || null;
 };
@@ -334,10 +435,11 @@ const scheduleWidgetOverlaySave = () => {
 };
 
 const getWidgetOverlayBounds = () => {
-  // Always start at idle size (80x12 visible + 80px padding)
+  // Always start at compact bar size (widget will resize itself on load)
   const bounds = {
-    width: 160,  // 80 + 80
-    height: 92,  // 12 + 80
+    // bar: 72x12 + 0px padding (widget-overlay.html)
+    width: 72,
+    height: 12,
   };
   // Restore saved position if available
   if (Number.isFinite(widgetOverlayState.x) && Number.isFinite(widgetOverlayState.y)) {
@@ -345,6 +447,43 @@ const getWidgetOverlayBounds = () => {
     bounds.y = widgetOverlayState.y;
   }
   return bounds;
+};
+
+const clampToWorkArea = (bounds, padding = 10) => {
+  try {
+    const displays = screen.getAllDisplays();
+    const areas = displays.map((d) => d.workArea || d.bounds);
+
+    // Union of all work areas (multi-monitor, can include negative coords).
+    const unionMinX = Math.min(...areas.map((a) => a.x));
+    const unionMinY = Math.min(...areas.map((a) => a.y));
+    const unionMaxX = Math.max(...areas.map((a) => a.x + a.width));
+    const unionMaxY = Math.max(...areas.map((a) => a.y + a.height));
+    const area = { x: unionMinX, y: unionMinY, width: unionMaxX - unionMinX, height: unionMaxY - unionMinY };
+
+    const width = Math.round(bounds.width);
+    const height = Math.round(bounds.height);
+
+    const clampMinX = area.x + padding;
+    const clampMinY = area.y + padding;
+    const clampMaxX = area.x + area.width - width - padding;
+    const clampMaxY = area.y + area.height - height - padding;
+
+    const rawX = Number.isFinite(bounds.x) ? bounds.x : clampMinX;
+    const rawY = Number.isFinite(bounds.y) ? bounds.y : clampMinY;
+
+    const x = Math.max(clampMinX, Math.min(Math.round(rawX), clampMaxX));
+    const y = Math.max(clampMinY, Math.min(Math.round(rawY), clampMaxY));
+
+    return { x, y, width, height };
+  } catch (e) {
+    return {
+      x: Math.round(bounds.x || 0),
+      y: Math.round(bounds.y || 0),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height),
+    };
+  }
 };
 
 const ensureWidgetOverlayWindow = () => {
@@ -355,10 +494,10 @@ const ensureWidgetOverlayWindow = () => {
   loadWidgetOverlayState();
 
   widgetOverlayWindow = new BrowserWindow({
-    ...getWidgetOverlayBounds(),
+    ...clampToWorkArea(getWidgetOverlayBounds()),
     frame: false,
     transparent: true,
-    resizable: true,  // REQUIRED: Must be true for -webkit-app-region: drag to work on Windows
+    resizable: false,  // We handle drag + resize programmatically; avoid OS resize border jitter
     show: false,
     focusable: false,  // Don't steal focus from other apps
     alwaysOnTop: true,
@@ -373,6 +512,14 @@ const ensureWidgetOverlayWindow = () => {
       backgroundThrottling: false,  // Keep events running when unfocused
     },
   });
+
+  // Make transparent padding click-through while still receiving hover via forwarded mouse moves.
+  try {
+    widgetOverlayWindow.setIgnoreMouseEvents(true, { forward: true });
+    widgetOverlayIgnoreMouse = true;
+  } catch (e) {
+    console.warn('[Widget] Failed to enable click-through mode:', e);
+  }
 
   widgetOverlayWindow.setAlwaysOnTop(true, 'screen-saver');
   widgetOverlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -394,6 +541,11 @@ const showWidgetOverlay = (module = null) => {
   const windowRef = ensureWidgetOverlayWindow();
   if (!windowRef) return;
 
+  // If the saved position is off-screen (e.g. display changed), clamp it before showing.
+  try {
+    windowRef.setBounds(clampToWorkArea(windowRef.getBounds()));
+  } catch (e) { }
+
   if (!windowRef.isVisible()) {
     // Only center if we don't have a valid saved position (e.g. first run)
     // or if the window is off-screen (safety check could be added here)
@@ -404,12 +556,30 @@ const showWidgetOverlay = (module = null) => {
     }
     windowRef.show();
   }
+
+  // Reset click-through behavior whenever the widget becomes visible.
+  try {
+    windowRef.setIgnoreMouseEvents(true, { forward: true });
+    widgetOverlayIgnoreMouse = true;
+  } catch (e) { }
+
   windowRef.focus();
 
   // If specific module requested, notify the widget
   if (module) {
     windowRef.webContents.send('widget-switch-module', module);
   }
+
+  // Tell the widget renderer it's visible (used to reset hover/click-through state).
+  try {
+    if (windowRef.webContents.isLoading()) {
+      windowRef.webContents.once('did-finish-load', () => {
+        try { windowRef.webContents.send('widget-overlay-visible', { visible: true }); } catch (e) { }
+      });
+    } else {
+      windowRef.webContents.send('widget-overlay-visible', { visible: true });
+    }
+  } catch (e) { }
 };
 
 const hideWidgetOverlay = () => {
@@ -498,6 +668,10 @@ const sendPasteKeystroke = () => {
 
 const pasteLastTranscript = async () => {
   if (!lastSttTranscript) return;
+  const now = Date.now();
+  // Guard against double paste from duplicate stop events or hotkey overlap.
+  if (now - lastPasteAt < 700) return;
+  lastPasteAt = now;
   const snapshot = snapshotClipboard();
   clipboard.writeText(lastSttTranscript);
   await sendPasteKeystroke();
@@ -517,11 +691,18 @@ const waitForBackend = (retries = 180) => {
       if (attempt % 5 === 0) {
         console.log(`[Startup] Checking backend health... (attempt ${attempt + 1}/${retries})`);
       }
+      const headers = {};
+      const token = getClientAuthToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       const req = http.request({
-        hostname: 'localhost',
+        hostname: LOCAL_BACKEND_HOST,
         port: BACKEND_PORT,
         path: '/api/health',
         method: 'GET',
+        headers,
         timeout: 2000
       }, (res) => {
         // Consume response data to free up memory
@@ -575,37 +756,56 @@ const startBackend = () => {
     // Kill any existing process on our port first
     killPortProcess();
 
-    const pythonPath = getPythonPath();
     const backendPath = getBackendPath();
+    const backendExeEnv = (process.env.WHISPERALL_BACKEND_EXE || '').trim();
+    const backendExeCandidates = [
+      backendExeEnv,
+      path.join(backendPath, 'whisperall-backend', 'whisperall-backend.exe'),
+      path.join(backendPath, 'whisperall-backend.exe')
+    ].filter(Boolean);
+    const backendExe = backendExeCandidates.find((p) => p && fs.existsSync(p));
+
+    const pythonPath = getPythonPath();
     const mainScript = path.join(backendPath, 'main.py');
 
     console.log('[Startup] Starting backend...');
-    console.log('[Startup] Python path:', pythonPath);
     console.log('[Startup] Backend path:', backendPath);
+    console.log('[Startup] Backend exe:', backendExe || 'none');
+    console.log('[Startup] Python path:', pythonPath);
     console.log('[Startup] Main script:', mainScript);
 
-    // Verify paths exist
-    if (!fs.existsSync(pythonPath)) {
+    if (backendExe) {
+      backendProcess = spawn(backendExe, [], {
+        cwd: path.dirname(backendExe),
+        env: { ...process.env },
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+    } else {
+      // Verify paths exist
+      if (!fs.existsSync(pythonPath)) {
       const err = new Error(`Python not found at: ${pythonPath}`);
       console.error('[Startup]', err.message);
+      dialog.showErrorBox('Backend Error', `${err.message}\nLog: ${logFilePath || 'N/A'}`);
       reject(err);
       return;
     }
     if (!fs.existsSync(mainScript)) {
       const err = new Error(`Backend script not found at: ${mainScript}`);
       console.error('[Startup]', err.message);
+      dialog.showErrorBox('Backend Error', `${err.message}\nLog: ${logFilePath || 'N/A'}`);
       reject(err);
       return;
     }
 
-    backendProcess = spawn(pythonPath, [mainScript], {
-      cwd: backendPath,
-      env: {
-        ...process.env,
-        PYTHONUNBUFFERED: '1'
-      },
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
+      backendProcess = spawn(pythonPath, [mainScript], {
+        cwd: backendPath,
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1'
+        },
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+    }
 
     console.log('[Startup] Backend process spawned with PID:', backendProcess.pid);
 
@@ -627,13 +827,14 @@ const startBackend = () => {
 
     backendProcess.on('error', (err) => {
       console.error('[Startup] Failed to start backend:', err);
+      dialog.showErrorBox('Backend Error', `Failed to start backend.\n${err.message}\nLog: ${logFilePath || 'N/A'}`);
       reject(err);
     });
 
     backendProcess.on('close', (code) => {
       console.log(`[Startup] Backend exited with code ${code}`);
       if (code !== 0 && mainWindow && !mainWindow.isDestroyed()) {
-        dialog.showErrorBox('Backend Error', `The backend process stopped unexpectedly (code ${code}).`);
+        dialog.showErrorBox('Backend Error', `The backend process stopped unexpectedly (code ${code}).\nLog: ${logFilePath || 'N/A'}`);
       }
     });
 
@@ -646,6 +847,7 @@ const startBackend = () => {
 // Create main window
 const createWindow = async () => {
   // Show loading window
+  const appIconPath = getAppIconPath();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -660,6 +862,7 @@ const createWindow = async () => {
     show: false,
     backgroundColor: '#030711',
     title: 'Whisperall',
+    icon: appIconPath || undefined,
     autoHideMenuBar: true,  // Hide menu bar (press Alt to show)
     titleBarStyle: 'hidden',  // Hide default title bar
     titleBarOverlay: {
@@ -714,6 +917,8 @@ const createWindow = async () => {
 
 // App lifecycle
 app.whenReady().then(() => {
+  initLogging();
+  hookConsole();
   configureMediaPermissions();
 });
 
@@ -768,8 +973,8 @@ const createTray = () => {
     { label: 'Open Whisperall', click: () => showMainWindow() },
     { label: 'Open Widget', click: () => showWidgetOverlay('reader') },
     { type: 'separator' },
-    { label: 'Text to Speech', click: () => sendHotkeyAction('open-tts') },
-    { label: 'Dictate (STT)', click: () => sendHotkeyAction('dictate-toggle') },
+    { label: 'Dictate', click: () => sendHotkeyAction('open-tts') },
+    { label: 'Toggle Dictate (STT)', click: () => sendHotkeyAction('dictate-toggle') },
     { label: 'Reader (Clipboard)', click: () => { showWidgetOverlay('reader'); sendWidgetHotkeyAction('read-clipboard'); } },
     { label: 'AI Edit', click: () => sendHotkeyAction('ai-edit') },
     { label: 'Translate', click: () => sendHotkeyAction('translate') },
@@ -830,7 +1035,18 @@ const hotkeyActions = {
 const loadSttSettings = async () => {
   try {
     const response = await new Promise((resolve, reject) => {
-      http.get(`http://localhost:${BACKEND_PORT}/api/settings`, (res) => {
+      const headers = {};
+      const token = getClientAuthToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      http.get({
+        hostname: LOCAL_BACKEND_HOST,
+        port: BACKEND_PORT,
+        path: '/api/settings',
+        headers,
+      }, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => {
@@ -1003,6 +1219,13 @@ ipcMain.on('stt-overlay-state', (event, state) => {
 
 ipcMain.on('stt-last-transcript', (event, text) => {
   lastSttTranscript = typeof text === 'string' ? text : '';
+  if (widgetOverlayWindow && !widgetOverlayWindow.isDestroyed()) {
+    try {
+      widgetOverlayWindow.webContents.send('stt-transcript', lastSttTranscript);
+    } catch (_) {
+      // ignore
+    }
+  }
 });
 
 ipcMain.on('stt-paste', (event, text) => {
@@ -1066,16 +1289,62 @@ ipcMain.on('widget-resize', (event, { width, height }) => {
   const deltaW = width - currentBounds.width;
   const deltaH = height - currentBounds.height;
 
-  // Calculate new position to keep widget centered during resize
-  const newX = Math.round(currentBounds.x - deltaW / 2);
-  const newY = Math.round(currentBounds.y - deltaH / 2);
+  // Prefer keeping edge anchoring stable when the widget is "docked" near a screen edge.
+  // Otherwise, keep it centered during resize.
+  let newX = Math.round(currentBounds.x - deltaW / 2);
+  let newY = Math.round(currentBounds.y - deltaH / 2);
 
-  widgetOverlayWindow.setBounds({
+  try {
+    const display = screen.getDisplayMatching(currentBounds);
+    const area = display.workArea || display.bounds;
+    const anchorThreshold = 24; // px (DIP)
+
+    const leftGap = currentBounds.x - area.x;
+    const rightGap = (area.x + area.width) - (currentBounds.x + currentBounds.width);
+    const topGap = currentBounds.y - area.y;
+    const bottomGap = (area.y + area.height) - (currentBounds.y + currentBounds.height);
+
+    const currentRight = currentBounds.x + currentBounds.width;
+    const currentBottom = currentBounds.y + currentBounds.height;
+
+    if (rightGap <= anchorThreshold && leftGap > anchorThreshold) {
+      newX = Math.round(currentRight - width);
+    } else if (leftGap <= anchorThreshold && rightGap > anchorThreshold) {
+      newX = Math.round(currentBounds.x);
+    }
+
+    if (bottomGap <= anchorThreshold && topGap > anchorThreshold) {
+      newY = Math.round(currentBottom - height);
+    } else if (topGap <= anchorThreshold && bottomGap > anchorThreshold) {
+      newY = Math.round(currentBounds.y);
+    }
+  } catch (e) {
+    // ignore, fall back to centered behavior
+  }
+
+  widgetOverlayWindow.setBounds(clampToWorkArea({
     x: newX,
     y: newY,
     width: Math.round(width),
-    height: Math.round(height)
-  });
+    height: Math.round(height),
+  }));
+});
+
+ipcMain.on('widget-ignore-mouse', (event, { ignore }) => {
+  if (!widgetOverlayWindow || widgetOverlayWindow.isDestroyed()) return;
+  const next = !!ignore;
+  if (widgetOverlayIgnoreMouse === next) return;
+
+  widgetOverlayIgnoreMouse = next;
+  try {
+    if (next) {
+      widgetOverlayWindow.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      widgetOverlayWindow.setIgnoreMouseEvents(false);
+    }
+  } catch (e) {
+    console.warn('[Widget] Failed to set ignore mouse events:', e);
+  }
 });
 
 ipcMain.on('widget-overlay-show', (event, module) => {
@@ -1090,15 +1359,125 @@ ipcMain.on('widget-overlay-toggle', (event, module) => {
   toggleWidgetOverlay(module);
 });
 
+ipcMain.on('widget-center', () => {
+  const windowRef = ensureWidgetOverlayWindow();
+  if (!windowRef) return;
+  try {
+    const display = screen.getPrimaryDisplay();
+    const area = display?.workArea || display?.bounds;
+    const bounds = windowRef.getBounds();
+    const nextX = Math.round(area.x + (area.width - bounds.width) / 2);
+    const nextY = Math.round(area.y + (area.height - bounds.height) / 2);
+    windowRef.setBounds(clampToWorkArea({
+      x: nextX,
+      y: nextY,
+      width: bounds.width,
+      height: bounds.height,
+    }), false);
+  } catch (e) {
+    try { windowRef.center(); } catch { }
+  }
+  if (!windowRef.isVisible()) {
+    windowRef.show();
+  }
+  windowRef.focus();
+  try { windowRef.webContents.send('widget-highlight', { reason: 'center' }); } catch { }
+});
+
 ipcMain.on('widget-move', (event, { x, y }) => {
   if (!widgetOverlayWindow || widgetOverlayWindow.isDestroyed()) return;
   const bounds = widgetOverlayWindow.getBounds();
-  widgetOverlayWindow.setBounds({
-    x: bounds.x + x,
-    y: bounds.y + y,
-    width: bounds.width,
-    height: bounds.height
-  });
+  const dx = Number(x) || 0;
+  const dy = Number(y) || 0;
+  // Don't clamp while dragging; it causes the window to "stick" at display edges and feel jittery.
+  // Clamp once at the end of the drag (widget-move-end).
+  widgetOverlayWindow.setBounds(
+    {
+      x: Math.round(bounds.x + dx),
+      y: Math.round(bounds.y + dy),
+      width: bounds.width,
+      height: bounds.height,
+    },
+    false
+  );
+});
+
+ipcMain.on('widget-move-abs', (event, { x, y }) => {
+  if (!widgetOverlayWindow || widgetOverlayWindow.isDestroyed()) return;
+  const bounds = widgetOverlayWindow.getBounds();
+  const nextX = Number.isFinite(x) ? Math.round(x) : bounds.x;
+  const nextY = Number.isFinite(y) ? Math.round(y) : bounds.y;
+  const clamped = clampToWorkArea(
+    {
+      x: nextX,
+      y: nextY,
+      width: bounds.width,
+      height: bounds.height,
+    },
+    0
+  );
+  widgetOverlayWindow.setBounds(clamped, false);
+});
+
+ipcMain.on('widget-move-end', () => {
+  if (!widgetOverlayWindow || widgetOverlayWindow.isDestroyed()) return;
+  try {
+    const current = widgetOverlayWindow.getBounds();
+    const clamped = clampToWorkArea(current);
+    widgetOverlayWindow.setBounds(clamped, false);
+    widgetOverlayWindow.showInactive();
+    widgetOverlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  } catch (e) {
+    // ignore
+  }
+});
+
+ipcMain.on('widget-drag-start', (event, payload) => {
+  const windowRef = ensureWidgetOverlayWindow();
+  if (!windowRef) return;
+  const bounds = windowRef.getBounds();
+  const cursor = screen.getCursorScreenPoint();
+  widgetDragOffset = { x: cursor.x - bounds.x, y: cursor.y - bounds.y };
+  widgetDragLastCursor = { x: cursor.x, y: cursor.y };
+
+  if (widgetDragInterval) clearInterval(widgetDragInterval);
+  widgetDragInterval = setInterval(() => {
+    if (!widgetOverlayWindow || widgetOverlayWindow.isDestroyed()) return;
+    const cursor = screen.getCursorScreenPoint();
+    if (widgetDragLastCursor && cursor.x === widgetDragLastCursor.x && cursor.y === widgetDragLastCursor.y) {
+      return;
+    }
+    widgetDragLastCursor = { x: cursor.x, y: cursor.y };
+    const next = {
+      x: cursor.x - widgetDragOffset.x,
+      y: cursor.y - widgetDragOffset.y,
+    };
+    const bounds = widgetOverlayWindow.getBounds();
+    const clamped = clampToWorkArea({ x: next.x, y: next.y, width: bounds.width, height: bounds.height }, 0);
+    widgetOverlayWindow.setBounds(clamped, false);
+  }, 8);
+});
+
+ipcMain.on('widget-drag-end', () => {
+  if (widgetDragInterval) {
+    clearInterval(widgetDragInterval);
+    widgetDragInterval = null;
+  }
+  widgetDragLastCursor = null;
+  if (widgetOverlayWindow && !widgetOverlayWindow.isDestroyed()) {
+    try {
+      const cursor = screen.getCursorScreenPoint();
+      const bounds = widgetOverlayWindow.getBounds();
+      const next = {
+        x: cursor.x - widgetDragOffset.x,
+        y: cursor.y - widgetDragOffset.y,
+      };
+      const clamped = clampToWorkArea({ x: next.x, y: next.y, width: bounds.width, height: bounds.height }, 0);
+      widgetOverlayWindow.setBounds(clamped, false);
+      widgetOverlayWindow.showInactive();
+      widgetOverlayWindow.setAlwaysOnTop(true, 'screen-saver');
+    } catch { }
+  }
 });
 
 ipcMain.on('widget-save-module', (event, moduleName) => {
@@ -1141,7 +1520,15 @@ ipcMain.on('widget-undo-paste', async () => {
 // Widget action trigger (widget buttons send actions to main process)
 ipcMain.on('widget-trigger-action', (event, action) => {
   console.log('[Widget] Action triggered:', action);
-  // Forward to main window for processing
+
+  // Some widget actions are meant to open UI modules in the main window.
+  // Dictation actions should NOT steal focus.
+  const foregroundActions = new Set(['open-settings', 'ai-edit', 'translate', 'open-loopback']);
+  if (foregroundActions.has(action)) {
+    showMainWindow();
+  }
+
+  // Forward to main window for processing (routing, feature logic, etc.).
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('global-hotkey', action);
   }
@@ -1206,16 +1593,30 @@ ipcMain.handle('net-fetch', async (event, url, options = {}) => {
 
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
+    const headers = { ...(options.headers || {}) };
+    const authToken = (
+      process.env.WHISPERALL_CLIENT_TOKEN ||
+      process.env.WHISPERALL_API_TOKEN ||
+      process.env.WHISPERALL_AUTH_TOKEN ||
+      ''
+    ).trim();
+    const hasAuthHeader = Object.keys(headers).some((k) => k.toLowerCase() === 'authorization');
+    if (authToken && !hasAuthHeader) {
+      headers.Authorization = `Bearer ${authToken}`;
+    }
+
+    const isHttps = parsedUrl.protocol === 'https:';
+    const transport = isHttps ? https : http;
     const requestOptions = {
       hostname: parsedUrl.hostname,
-      port: parsedUrl.port || 80,
+      port: parsedUrl.port || (isHttps ? 443 : 80),
       path: parsedUrl.pathname + parsedUrl.search,
       method: method,
-      headers: options.headers || {},
+      headers: headers,
       timeout: 30000,  // 30 seconds for longer operations like resume
     };
 
-    const req = http.request(requestOptions, (res) => {
+    const req = transport.request(requestOptions, (res) => {
       let body = '';
       res.on('data', (chunk) => {
         body += chunk;

@@ -4,8 +4,32 @@
  */
 
 const API_BASE =
+  (typeof window !== 'undefined' ? window.electronAPI?.backendUrl : undefined) ||
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080');
+
+function getAuthToken(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const token = window.electronAPI?.authToken;
+  const trimmed = typeof token === 'string' ? token.trim() : '';
+  return trimmed ? trimmed : undefined;
+}
+
+function withAuthHeaders(headers?: HeadersInit): Headers {
+  const merged = new Headers(headers);
+  const token = getAuthToken();
+  if (token && !merged.has('Authorization')) {
+    merged.set('Authorization', `Bearer ${token}`);
+  }
+  return merged;
+}
+
+async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
+  return fetch(url, {
+    ...options,
+    headers: withAuthHeaders(options.headers),
+  });
+}
 
 // ============================================
 // Types
@@ -241,13 +265,16 @@ export interface FFmpegStatus {
 // API Functions
 // ============================================
 
-async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const headers = withAuthHeaders(options.headers);
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  if (!isFormData && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -371,7 +398,7 @@ export async function createVoice(name: string, tags: string, audioFile: File): 
   formData.append('tags', tags);
   formData.append('audio', audioFile);
 
-  const response = await fetch(`${API_BASE}/api/voices`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/voices`, {
     method: 'POST',
     body: formData,
   });
@@ -503,7 +530,7 @@ export async function uploadMedia(file: File): Promise<MediaUploadResponse> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE}/api/media/upload`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/media/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -531,7 +558,7 @@ export async function trimAndSaveVoice(
     formData.append('tags', tags);
   }
 
-  const response = await fetch(`${API_BASE}/api/media/trim`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/media/trim`, {
     method: 'POST',
     body: formData,
   });
@@ -612,6 +639,22 @@ export async function getAllSettings(): Promise<AppSettings> {
 
 export async function getHotkeys(): Promise<Record<string, string>> {
   return fetchApi<Record<string, string>>('/api/settings/hotkeys');
+}
+
+// Onboarding
+export interface OnboardingStatus {
+  completed: boolean;
+  models_installed?: number;
+}
+
+export async function getOnboardingStatus(): Promise<OnboardingStatus> {
+  return fetchApi<OnboardingStatus>('/api/onboarding/status');
+}
+
+export async function completeOnboarding(): Promise<{ message?: string; completed: boolean }> {
+  return fetchApi<{ message?: string; completed: boolean }>('/api/onboarding/complete', {
+    method: 'POST',
+  });
 }
 
 // ============================================
@@ -695,7 +738,7 @@ export async function stopStt(
   formData.append('audio', audioBlob, 'audio.webm');
   if (language) formData.append('language', language);
   if (prompt) formData.append('prompt', prompt);
-  const response = await fetch(`${API_BASE}/api/stt/stop`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/stt/stop`, {
     method: 'POST',
     body: formData,
   });
@@ -731,7 +774,7 @@ export async function partialStt(
   if (language) formData.append('language', language);
   if (prompt) formData.append('prompt', prompt);
 
-  const response = await fetch(`${API_BASE}/api/stt/partial`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/stt/partial`, {
     method: 'POST',
     body: formData,
   });
@@ -857,6 +900,8 @@ export interface TranscriptionJob {
   file_size_bytes?: number;
   source_url?: string;
   elapsed_seconds?: number;
+  stt_provider?: string;
+  stt_model?: string;
 }
 
 export interface HistoryStats {
@@ -867,6 +912,27 @@ export interface HistoryStats {
   total_duration_seconds?: number;
   total_characters?: number;
   storage_bytes?: number;
+}
+
+export interface MonthlyHistoryStats {
+  total_entries: number;
+  by_module: Record<
+    string,
+    {
+      count: number;
+      total_duration: number;
+      total_characters: number;
+      total_credits: number;
+    }
+  >;
+  by_provider: Record<
+    string,
+    {
+      count: number;
+      total_duration: number;
+      total_credits: number;
+    }
+  >;
 }
 
 export interface HistoryResponse {
@@ -907,6 +973,14 @@ export async function getNewHistory(filter?: HistoryFilter): Promise<NewHistoryR
 
 export async function getHistoryStats(): Promise<HistoryStats> {
   return fetchApi<HistoryStats>('/api/history/stats');
+}
+
+export async function getMonthlyHistoryStats(year: number, month: number): Promise<MonthlyHistoryStats> {
+  const params = new URLSearchParams({
+    year: String(year),
+    month: String(month),
+  });
+  return fetchApi<MonthlyHistoryStats>(`/api/history/stats/monthly?${params.toString()}`);
 }
 
 export async function deleteHistoryEntry(entryId: string, deleteFile?: boolean): Promise<void> {
@@ -1019,7 +1093,7 @@ export async function parseDocument(file: File): Promise<ParseDocumentResponse> 
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE}/api/audiobook/parse`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/audiobook/parse`, {
     method: 'POST',
     body: formData,
   });
@@ -1200,7 +1274,7 @@ export async function uploadVideoForSFX(file: File): Promise<{ temp_id: string; 
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE}/api/sfx/upload`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/sfx/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -1288,7 +1362,7 @@ export async function uploadDubbingFile(file: File): Promise<{ input_path: strin
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE}/api/dubbing/upload`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/dubbing/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -1361,7 +1435,7 @@ export async function uploadVoiceIsolatorAudio(
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE}/api/voice-isolator/upload`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/voice-isolator/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -1383,7 +1457,7 @@ export async function startVoiceIsolation(request: {
     formData.append('provider', request.provider);
   }
 
-  const response = await fetch(`${API_BASE}/api/voice-isolator/isolate`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/voice-isolator/isolate`, {
     method: 'POST',
     body: formData,
   });
@@ -1445,7 +1519,7 @@ export async function uploadVoiceChangerAudio(
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE}/api/voice-changer/upload`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/voice-changer/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -1516,7 +1590,12 @@ export async function getLoopbackStatus(): Promise<LoopbackStatus> {
 
 export function getLoopbackWebSocketUrl(): string {
   const wsBase = API_BASE.replace('http', 'ws');
-  return `${wsBase}/ws/loopback`;
+  const url = new URL(`${wsBase}/ws/loopback`);
+  const token = getAuthToken();
+  if (token) {
+    url.searchParams.set('token', token);
+  }
+  return url.toString();
 }
 
 // ============================================
@@ -1802,7 +1881,7 @@ export async function createTrainingDataset(name: string): Promise<{ dataset_id:
   const formData = new FormData();
   formData.append('name', name);
 
-  const response = await fetch(`${API_BASE}/api/voice-training/datasets`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/voice-training/datasets`, {
     method: 'POST',
     body: formData,
   });
@@ -1818,7 +1897,7 @@ export async function uploadAudioToDataset(datasetId: string, file: File): Promi
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${API_BASE}/api/voice-training/datasets/${datasetId}/upload`, {
+  const response = await fetchWithAuth(`${API_BASE}/api/voice-training/datasets/${datasetId}/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -2005,6 +2084,8 @@ export async function uploadForTranscription(
   enableAICleanup: boolean,
   diarizationMode: DiarizationMode,
   engine: string,
+  sttProvider?: string,
+  sttModel?: string,
   onProgress?: (progress: number, loaded: number) => void
 ): Promise<{ job_id: string }> {
   const formData = new FormData();
@@ -2013,14 +2094,25 @@ export async function uploadForTranscription(
   formData.append('enable_diarization', String(enableDiarization));
   formData.append('min_speakers', String(minSpeakers));
   formData.append('max_speakers', String(maxSpeakers));
-  formData.append('model', whisperModel);
+  formData.append('whisper_model', whisperModel);
   formData.append('enable_ai_cleanup', String(enableAICleanup));
   formData.append('diarization_mode', diarizationMode);
   formData.append('engine', engine);
+  if (sttProvider) {
+    formData.append('stt_provider', sttProvider);
+  }
+  if (sttModel) {
+    formData.append('stt_model', sttModel);
+  }
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_BASE}/api/transcribe/upload`);
+
+    const token = getAuthToken();
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {
@@ -2066,11 +2158,17 @@ export async function exportTranscript(
   includeSpeakers?: boolean,
   includeTimestamps?: boolean
 ): Promise<Blob> {
-  const params = new URLSearchParams({ format });
-  if (includeSpeakers !== undefined) params.append('include_speakers', String(includeSpeakers));
-  if (includeTimestamps !== undefined) params.append('include_timestamps', String(includeTimestamps));
-
-  const response = await fetch(`${API_BASE}/api/transcribe/${jobId}/export?${params}`);
+  const response = await fetchWithAuth(`${API_BASE}/api/transcribe/${jobId}/export`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      format,
+      include_speakers: includeSpeakers ?? true,
+      include_timestamps: includeTimestamps ?? true,
+    }),
+  });
 
   if (!response.ok) {
     throw new Error(`Export failed: ${response.status}`);
@@ -2088,7 +2186,9 @@ export async function importTranscriptionFromLink(
   whisperModel: string,
   enableAICleanup: boolean,
   diarizationMode: DiarizationMode,
-  engine: string
+  engine: string,
+  sttProvider?: string,
+  sttModel?: string
 ): Promise<{ job_id: string }> {
   return fetchApi('/api/transcribe/import-link', {
     method: 'POST',
@@ -2098,10 +2198,12 @@ export async function importTranscriptionFromLink(
       enable_diarization: enableDiarization,
       min_speakers: minSpeakers,
       max_speakers: maxSpeakers,
-      model: whisperModel,
+      whisper_model: whisperModel,
       enable_ai_cleanup: enableAICleanup,
       diarization_mode: diarizationMode,
       engine,
+      stt_provider: sttProvider || undefined,
+      stt_model: sttModel || undefined,
     }),
   });
 }

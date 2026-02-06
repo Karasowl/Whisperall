@@ -53,14 +53,14 @@ export function ProviderModelSelector({
       <div className={cn('space-y-3', className)}>
         <label className="label flex items-center gap-2">
           <Cpu className="w-4 h-4" />
-          Model Size
+          Quality
         </label>
         <div className="card p-4 rounded-lg border-warning/30 bg-warning/10">
           <div className="flex items-center gap-3">
             <Download className="w-5 h-5 text-warning" />
             <div className="flex-1">
               <p className="text-sm text-warning-foreground">Install {providerInfo.name} first</p>
-              <p className="text-xs text-warning-foreground/70">Go to Models page to download</p>
+              <p className="text-xs text-warning-foreground/70">Open Settings to install</p>
             </div>
             <Link href="/models?tab=local" prefetch={false} className="btn btn-secondary text-sm">
               Install
@@ -75,7 +75,7 @@ export function ProviderModelSelector({
     <div className={cn('space-y-3', className)}>
       <label className="label flex items-center gap-2">
         <Cpu className="w-4 h-4" />
-        Model Size
+        Quality
         <span className="text-foreground-muted font-normal text-xs">
           (bigger = better quality, slower)
         </span>

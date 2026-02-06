@@ -35,7 +35,7 @@ export function ServiceProviderSelector({
   });
   const portalRoot = typeof document !== 'undefined' ? document.body : null;
   const getLocalUnavailableLabel = (provider: ServiceProviderInfo) =>
-    provider.requires_model_download ? 'install model' : 'start service';
+    provider.requires_model_download ? 'install engine' : 'start service';
 
   useEffect(() => {
     async function loadProviders() {
@@ -68,7 +68,7 @@ export function ServiceProviderSelector({
   const serviceLabels: Partial<Record<ServiceType, string>> = {
     tts: 'TTS Engine',
     stt: 'Transcription Engine',
-    ai_edit: 'AI Model',
+    ai_edit: 'AI Engine',
     translation: 'Translation Engine',
     music: 'Music Engine',
     sfx: 'SFX Engine',
@@ -88,7 +88,7 @@ export function ServiceProviderSelector({
         {providers.filter(p => p.type === 'local').length > 0 && (
           <>
             <div className="px-4 py-2 text-xs font-semibold text-slate-400 uppercase bg-surface-1">
-              Local Models
+              Local Engines
             </div>
             {providers.filter(p => p.type === 'local').map(provider => (
               <button

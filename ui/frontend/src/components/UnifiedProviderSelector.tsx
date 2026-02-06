@@ -98,7 +98,7 @@ const PROVIDER_STYLES: Record<string, { icon: typeof Cpu; color: string; gradien
 const SERVICE_LABELS: Partial<Record<ServiceType, string>> = {
   tts: 'Voice Engine',
   stt: 'Transcription Engine',
-  ai_edit: 'AI Model',
+  ai_edit: 'AI Engine',
   translation: 'Translation Engine',
   music: 'Music Engine',
   sfx: 'SFX Engine',
@@ -370,7 +370,7 @@ export function UnifiedProviderSelector({
         href="/models?tab=local"
         className="text-amber-400 hover:text-amber-300"
         onClick={(e) => e.stopPropagation()}
-        title="Install model"
+        title="Install required components"
       >
         <Download className="w-4 h-4" />
       </Link>
@@ -428,7 +428,7 @@ export function UnifiedProviderSelector({
             {localProviders.length > 0 && (
               <div className="space-y-2">
                 {apiProviders.length > 0 && (
-                  <div className="text-xs font-semibold text-slate-400 uppercase">Local Models</div>
+                  <div className="text-xs font-semibold text-slate-400 uppercase">Local Engines</div>
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   {localProviders.map(provider => (
@@ -479,7 +479,7 @@ export function UnifiedProviderSelector({
         {/* Model selector */}
         {showModelSelector && selectedProvider && getProviderModels(selectedProvider).length > 1 && (
           <SelectMenu
-            label="Model"
+            label="Quality"
             value={selectedModel || getDefaultModel(selectedProvider)}
             options={getProviderModels(selectedProvider).map(m => ({
               value: m.id,
@@ -530,7 +530,7 @@ export function UnifiedProviderSelector({
           {localProviders.length > 0 && (
             <>
               <div className="px-4 py-2 text-xs font-semibold text-slate-400 uppercase bg-surface-1 sticky top-0">
-                Local Models ({localProviders.length})
+                Local Engines ({localProviders.length})
               </div>
               {localProviders.map(provider => (
                 <ProviderRow
@@ -608,7 +608,7 @@ export function UnifiedProviderSelector({
                     <span className="text-amber-400 ml-2">
                       {getProviderType(selectedProvider) === 'api'
                         ? '(configure key)'
-                        : '(install model)'}
+                        : '(setup required)'}
                     </span>
                   )}
                 </div>
@@ -626,7 +626,7 @@ export function UnifiedProviderSelector({
       {/* Model selector */}
       {showModelSelector && selectedProvider && getProviderModels(selectedProvider).length > 1 && (
         <SelectMenu
-          label="Model"
+          label="Quality"
           value={selectedModel || getDefaultModel(selectedProvider)}
           options={getProviderModels(selectedProvider).map(m => ({
             value: m.id,

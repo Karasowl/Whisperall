@@ -21,6 +21,7 @@ import {
   ExecutionModeSwitch,
   type ExecutionMode,
 } from '@/components/module';
+import { PlanGate } from '@/components/PlanGate';
 import { Slider } from '@/components/Slider';
 import { Toggle } from '@/components/Toggle';
 import {
@@ -48,6 +49,20 @@ const PROMPT_EXAMPLES = [
 ];
 
 export default function SFXPage() {
+  return (
+    <PlanGate
+      requiredPlan="pro"
+      title="Sound Effects"
+      description="Generate sound effects (optionally synced to video)."
+      icon={Volume2}
+      feature="Sound Effects"
+    >
+      <SFXProPage />
+    </PlanGate>
+  );
+}
+
+function SFXProPage() {
   // Providers
   const [providers, setProviders] = useState<SFXProviderInfo[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('mmaudio');
@@ -410,7 +425,7 @@ export default function SFXPage() {
             {/* Model variant selector */}
             {currentProviderInfo && currentProviderInfo.models && currentProviderInfo.models.length > 1 && (
               <div className="mt-4 pt-4 border-t border-glass-border">
-                <label className="label text-sm mb-2">Model Size</label>
+                <label className="label text-sm mb-2">Quality</label>
                 <div className="flex gap-2 flex-wrap">
                   {currentProviderInfo.models.map((model) => (
                     <button

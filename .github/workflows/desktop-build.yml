@@ -1,0 +1,11 @@
+name: desktop-build
+on:
+  push:
+    paths:
+      - 'apps/desktop/**'
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "TODO: configure desktop build"

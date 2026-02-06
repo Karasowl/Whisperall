@@ -35,9 +35,24 @@ import {
   ActionBar,
   SidebarPanel,
 } from '@/components/module';
+import { PlanGate } from '@/components/PlanGate';
 import { Toggle } from '@/components/Toggle';
 
 export default function DubbingPage() {
+  return (
+    <PlanGate
+      requiredPlan="pro"
+      title="Auto Dubbing"
+      description="Translate and re-voice videos with synced audio."
+      icon={Globe}
+      feature="Auto Dubbing"
+    >
+      <DubbingProPage />
+    </PlanGate>
+  );
+}
+
+function DubbingProPage() {
   // Provider state
   const [providers, setProviders] = useState<DubbingProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('elevenlabs');

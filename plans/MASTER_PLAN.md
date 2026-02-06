@@ -1,5 +1,10 @@
 # Whisperall: La App Definitiva de Voz + IA
 
+> Nota (2026-02-03): Este documento es parcialmente legacy. La dirección actual (dictation-first, Core/Tools/Labs, monetización agresiva vs Wispr Flow) vive en:
+> `docs/whisperall_product_strategy.md`
+>
+> Si hay conflicto entre ambos documentos, manda `docs/whisperall_product_strategy.md`.
+
 ## Vision
 Crear la aplicación todo-en-uno para voz e inteligencia artificial que combine:
 

@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
-  isDevMode,
   getDiagnosticsStatus,
   getErrors,
   downloadBundle,
@@ -28,6 +27,7 @@ import {
   type SystemInfo,
   type VersionsInfo,
 } from '@/lib/diagnosticsApi';
+import { useDevMode } from '@/components/DevModeProvider';
 
 interface DevDiagnosticsProps {
   collapsed?: boolean;
@@ -51,7 +51,7 @@ export function DevDiagnostics({ collapsed = false }: DevDiagnosticsProps) {
   );
 
   // Check if dev mode is enabled
-  const devModeEnabled = isDevMode();
+  const { devMode: devModeEnabled } = useDevMode();
 
   // Fetch status on mount and periodically
   useEffect(() => {

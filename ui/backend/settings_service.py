@@ -4,6 +4,7 @@ Guarda automaticamente todas las configuraciones del usuario.
 """
 
 import json
+import os
 from typing import Any, Dict, Optional
 from pydantic import BaseModel
 import threading
@@ -16,7 +17,9 @@ SETTINGS_FILE = get_settings_path()
 
 class TTSProviderSettings(BaseModel):
     """Configuracion de proveedores TTS - 20 providers totales"""
-    selected: str = "chatterbox"
+    # Default to Kokoro for a "Reader-first" experience (fast + lightweight).
+    # Chatterbox remains available as an advanced/local option.
+    selected: str = "kokoro"
     # Local providers (10) - model IDs must match provider's models list
     chatterbox: Dict[str, Any] = {"model": "multilingual", "voice_id": None, "exaggeration": 0.5, "cfg_weight": 0.5}
     f5_tts: Dict[str, Any] = {"model": "F5TTS_v1_Base", "voice_id": None}
@@ -45,7 +48,8 @@ class STTProviderSettings(BaseModel):
     """Configuracion de proveedores STT"""
     selected: str = "faster-whisper"
     faster_whisper: Dict[str, Any] = {"model": "faster-whisper-base", "language": "auto", "device": "auto"}
-    openai: Dict[str, Any] = {"model": "whisper-1"}
+    # Prefer the newer OpenAI STT model by default (faster/cheaper). Keep whisper-1 as legacy fallback.
+    openai: Dict[str, Any] = {"model": "gpt-4o-mini-transcribe"}
     deepgram: Dict[str, Any] = {"model": "nova-2"}
     groq: Dict[str, Any] = {"model": "whisper-large-v3"}
     elevenlabs: Dict[str, Any] = {"model": "scribe_v1"}
@@ -312,10 +316,7 @@ class SettingsService:
 
     def _migrate_settings(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Migrate old settings field names to new ones - comprehensive migration"""
-        if "providers" not in data:
-            return data
-
-        providers = data["providers"]
+        providers = data.get("providers") if isinstance(data.get("providers"), dict) else {}
 
         # === STT Migrations ===
         if "stt" in providers:
@@ -340,6 +341,12 @@ class SettingsService:
                 old_model = stt["faster_whisper"].get("model", "")
                 if old_model in model_id_map:
                     stt["faster_whisper"]["model"] = model_id_map[old_model]
+
+            # Prefer new OpenAI STT model unless the user explicitly picked something else.
+            if "openai" in stt and isinstance(stt["openai"], dict):
+                model = (stt["openai"].get("model") or "").strip()
+                if not model or model == "whisper-1":
+                    stt["openai"]["model"] = "gpt-4o-mini-transcribe"
 
         # === TTS Migrations ===
         if "tts" in providers:
@@ -371,6 +378,18 @@ class SettingsService:
             if music.get("selected") == "acemusic":
                 music["selected"] = "diffrhythm"
 
+        # === Hotkey Migrations / Sanitization ===
+        # Electron accelerators only accept ASCII. Some keyboard layouts can produce
+        # strings like "Shift+¨" which break registration and make the app feel broken.
+        defaults = HotkeysSettings().model_dump()
+        hotkeys = data.get("hotkeys")
+        if isinstance(hotkeys, dict):
+            for k, v in list(hotkeys.items()):
+                if not isinstance(v, str) or not v.strip():
+                    continue
+                if any(ord(ch) > 127 for ch in v):
+                    hotkeys[k] = defaults.get(k, "")
+
         return data
 
     def _load_settings(self) -> AppSettings:
@@ -379,7 +398,18 @@ class SettingsService:
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                before = json.dumps(data, sort_keys=True, ensure_ascii=False)
                 data = self._migrate_settings(data)
+                after = json.dumps(data, sort_keys=True, ensure_ascii=False)
+
+                # Persist migrations so Electron/hotkeys/providers don't keep breaking every boot.
+                if before != after:
+                    try:
+                        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                            json.dump(data, f, indent=2, ensure_ascii=False)
+                    except Exception as e:
+                        print(f"Error saving migrated settings: {e}")
                 return AppSettings(**data)
             except Exception as e:
                 print(f"Error loading settings: {e}")
@@ -474,6 +504,22 @@ class SettingsService:
 
     def get_api_key(self, provider: str) -> Optional[str]:
         """Obtener API key de un proveedor"""
+        provider = (provider or "").strip().lower()
+        if not provider:
+            return None
+
+        # Allow deploying "managed keys" via environment variables.
+        # This is the bridge we need for a cloud-proxy architecture where end users
+        # don't configure keys locally (see docs/whisperall_product_strategy.md).
+        env_candidates = (
+            f"WHISPERALL_API_KEY_{provider.upper()}",
+            f"WHISPERALL_{provider.upper()}_API_KEY",
+        )
+        for env_key in env_candidates:
+            value = os.environ.get(env_key)
+            if value:
+                return value.strip()
+
         return getattr(self._settings.api_keys, provider, None)
 
     def set_api_key(self, provider: str, key: str) -> bool:

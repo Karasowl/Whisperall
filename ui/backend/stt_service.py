@@ -90,6 +90,13 @@ class STTService:
     def _transcribe_local(self, audio_path: Path, language: str, prompt: Optional[str]) -> Tuple[str, dict]:
         provider = settings_service.get_selected_provider("stt")
         model_name = self._resolve_local_model(provider)
+
+        # Auto quality bump: for non-English dictation, prefer the best installed local model.
+        # This helps Spanish and other languages where tiny/base models are often unusable.
+        if language != "auto" and not str(language).lower().startswith("en"):
+            best_model = self._pick_best_local_model()
+            if best_model and best_model != model_name:
+                model_name = best_model
         device = self._detect_device(settings_service.get("providers.stt.faster_whisper.device", "auto"))
         model = self._load_local_model(model_name, device=device)
 
@@ -111,14 +118,17 @@ class STTService:
             "device": device
         }
 
-    def _transcribe_openai(self, audio_path: Path, language: str) -> Tuple[str, dict]:
+    def _transcribe_openai(self, audio_path: Path, language: str, prompt: Optional[str] = None) -> Tuple[str, dict]:
         key = settings_service.get_api_key("openai")
         if not key:
             raise RuntimeError("OpenAI API key is not configured")
 
-        data = {"model": "whisper-1"}
+        model = settings_service.get("providers.stt.openai.model", "gpt-4o-mini-transcribe")
+        data = {"model": model}
         if language != "auto":
             data["language"] = language
+        if prompt:
+            data["prompt"] = prompt
 
         with audio_path.open("rb") as audio_file:
             resp = requests.post(
@@ -129,10 +139,24 @@ class STTService:
                 timeout=120
             )
         if resp.status_code != 200:
+            # Backwards-compatible fallback. If a newer model name fails (e.g., account/model mismatch),
+            # retry with whisper-1 before failing over to local faster-whisper.
+            if model != "whisper-1":
+                with audio_path.open("rb") as audio_file:
+                    retry = requests.post(
+                        "https://api.openai.com/v1/audio/transcriptions",
+                        headers={"Authorization": f"Bearer {key}"},
+                        files={"file": audio_file},
+                        data={k: v for k, v in {**data, "model": "whisper-1"}.items() if v is not None},
+                        timeout=120,
+                    )
+                if retry.status_code == 200:
+                    result = retry.json()
+                    return result.get("text", "").strip(), {"provider": "openai", "model": "whisper-1", "fallback_from": model}
             raise RuntimeError(f"OpenAI STT error: HTTP {resp.status_code}")
 
         result = resp.json()
-        return result.get("text", "").strip(), {"provider": "openai"}
+        return result.get("text", "").strip(), {"provider": "openai", "model": model}
 
     def _transcribe_groq(self, audio_path: Path, language: str, prompt: Optional[str]) -> Tuple[str, dict]:
         key = settings_service.get_api_key("groq")
@@ -309,9 +333,20 @@ class STTService:
         with error_context(provider=provider, language=language):
             try:
                 if provider.startswith("faster-whisper"):
+                    # If the user explicitly dictates in a non-English language and only has tiny/base locally,
+                    # a cheap cloud STT (Groq) is often dramatically better. Use it opportunistically when available.
+                    # This keeps the UI "non-technical" while still delivering quality. Fallback remains local.
+                    if language != "auto" and not str(language).lower().startswith("en"):
+                        best_model = self._pick_best_local_model()
+                        if best_model in ("tiny", "base") and settings_service.get_api_key("groq"):
+                            try:
+                                return self._transcribe_groq(audio_path, language, prompt)
+                            except Exception as exc:
+                                print(f"[STT] Groq fallback attempt failed (continuing local): {exc}")
+
                     return self._transcribe_local(audio_path, language, prompt)
                 if provider == "openai":
-                    return self._transcribe_openai(audio_path, language)
+                    return self._transcribe_openai(audio_path, language, prompt=prompt)
                 if provider == "groq":
                     return self._transcribe_groq(audio_path, language, prompt)
                 if provider == "deepgram":
@@ -321,6 +356,41 @@ class STTService:
 
                 raise RuntimeError(f"STT provider not supported: {provider}")
             except Exception as exc:
+                # Cloud/API providers can fail due to missing keys, quota, or connectivity.
+                # For a dictation-first UX, we prefer to degrade gracefully to local.
+                if provider in ("openai", "groq", "deepgram", "elevenlabs"):
+                    msg = str(exc).lower()
+                    if provider != "elevenlabs" or ("credits" in msg or "quota" in msg or "not configured" in msg):
+                        try:
+                            print(f"[STT] Provider '{provider}' failed ({exc}). Falling back to local faster-whisper.")
+                            best_model = self._pick_best_local_model()
+                            device = self._detect_device(settings_service.get("providers.stt.faster_whisper.device", "auto"))
+                            model = self._load_local_model(best_model, device=device)
+                            lang = None if language == "auto" else language
+                            audio_str = str(audio_path).replace("\\", "/")
+                            segments, info = model.transcribe(
+                                audio_str,
+                                language=lang,
+                                vad_filter=True,
+                                initial_prompt=prompt or None
+                            )
+                            text = " ".join(seg.text.strip() for seg in segments if seg.text).strip()
+                            meta = {
+                                "provider": "faster-whisper",
+                                "language": info.language,
+                                "duration": info.duration,
+                                "model": best_model,
+                                "device": device,
+                                "fallback_from": provider,
+                            }
+                            return text, dict(meta or {})
+                        except Exception as fallback_exc:
+                            print(f"[STT] Local fallback failed: {fallback_exc}")
+                            # Fall through and re-raise the original provider error.
+                            pass
+
+                        raise
+
                 # Fallback to local when ElevenLabs is out of credits/quota.
                 if provider == "elevenlabs":
                     msg = str(exc).lower()

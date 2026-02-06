@@ -17,7 +17,7 @@ const modelIcons: Record<string, typeof Cpu> = {
   turbo: Zap,
 };
 
-export function ModelSelector({ models, selected, onSelect, label = 'Model' }: ModelSelectorProps) {
+export function ModelSelector({ models, selected, onSelect, label = 'Quality' }: ModelSelectorProps) {
   return (
     <div className="space-y-3">
       <label className="label">{label}</label>
@@ -32,7 +32,7 @@ export function ModelSelector({ models, selected, onSelect, label = 'Model' }: M
               className={cn(
                 'p-4 rounded-xl text-left transition-all duration-200 group',
                 selected === model.id
-                  ? 'bg-gradient-to-br from-emerald-500/20 to-amber-500/20 border-2 border-emerald-400/50 shadow-lg shadow-emerald-500/10'
+                  ? 'bg-gradient-to-br from-accent-primary/15 to-accent-secondary/15 border-2 border-accent-primary/40 shadow-lg shadow-accent-primary/10'
                   : 'glass glass-hover border border-transparent'
               )}
             >
@@ -40,7 +40,7 @@ export function ModelSelector({ models, selected, onSelect, label = 'Model' }: M
                 <div className={cn(
                   'p-2 rounded-lg transition-colors',
                   selected === model.id
-                    ? 'bg-emerald-500/20 text-emerald-200'
+                    ? 'bg-accent-primary/15 text-accent-primary'
                     : 'bg-white/5 text-slate-400 group-hover:text-slate-100'
                 )}>
                   <Icon className="w-5 h-5" />

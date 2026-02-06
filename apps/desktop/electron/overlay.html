@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body {
+        margin: 0;
+        font-family: 'Inter', system-ui, sans-serif;
+        background: rgba(15, 23, 42, 0.85);
+        color: white;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        border-radius: 16px;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .state {
+        font-size: 16px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="state" id="state">Idle</div>
+    <script>
+      window.whisperall?.onOverlayState?.((payload) => {
+        const el = document.getElementById('state');
+        el.textContent = payload.state === 'listening' ? 'Listening...' : 'Ready';
+      });
+    </script>
+  </body>
+</html>

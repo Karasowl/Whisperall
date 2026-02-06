@@ -1,918 +1,660 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  History,
-  Play,
-  Pause,
-  Trash2,
-  RefreshCw,
+  Calendar,
+  ChevronDown,
+  Copy,
   Download,
-  Clock,
+  Eye,
   FileAudio,
   FileText,
-  AlertCircle,
-  Users,
+  Globe,
+  Loader2,
   Mic,
-  Filter,
-  ArrowUp,
-  ArrowDown,
-  LayoutGrid,
-  BarChart3,
-  CheckSquare,
-  Square,
-  X,
+  Music,
+  Pause,
+  Play,
+  Search,
+  Sparkles,
+  Trash2,
+  Wand2,
+  Languages,
+  RefreshCw,
 } from 'lucide-react';
-import {
-  getHistory,
-  deleteHistoryEntry,
-  clearHistory,
-  getAudioUrl,
-  getTranscriptionHistory,
-  deleteTranscriptionJob,
-  clearAllTranscriptions,
-  HistoryEntry,
-  TranscriptionJob,
-  NewHistoryEntry,
-  HistoryFilter,
-  getNewHistory,
-  getHistoryStats,
-  HistoryStats,
-  bulkDeleteHistoryEntries,
-} from '@/lib/api';
 import { cn } from '@/lib/utils';
-import HistoryFilters from '@/components/HistoryFilters';
-import HistoryEntryCard from '@/components/HistoryEntryCard';
-import { SkeletonHistoryEntry, SkeletonStatsGrid } from '@/components/Skeleton';
+import {
+  deleteHistoryEntry,
+  deleteNewHistoryEntry,
+  exportTranscript,
+  getAudioUrl,
+  getHistoryFileDownloadUrl,
+  getHistoryModules,
+  getNewHistory,
+  HistoryFilter,
+  HistoryModuleInfo,
+  NewHistoryEntry,
+} from '@/lib/api';
 import { useToast } from '@/components/Toast';
 
-type TabType = 'all' | 'tts' | 'transcriptions';
-type TranscriptionStatus = 'all' | 'completed' | 'paused' | 'interrupted' | 'error' | 'cancelled';
-type SortOrder = 'newest' | 'oldest';
+type ModuleTab = {
+  id: string;
+  label: string;
+  count: number;
+};
+
+const MODULE_CONFIG: Record<string, { label: string; icon: any; accent: string }> = {
+  transcribe: { label: 'Transcriptions', icon: FileAudio, accent: 'text-blue-400' },
+  stt: { label: 'Dictation', icon: Mic, accent: 'text-emerald-400' },
+  tts: { label: 'Reader', icon: FileText, accent: 'text-indigo-400' },
+  reader: { label: 'Reader', icon: FileText, accent: 'text-indigo-400' },
+  'ai-edit': { label: 'AI Edit', icon: Sparkles, accent: 'text-purple-400' },
+  translate: { label: 'Translate', icon: Languages, accent: 'text-sky-400' },
+  dubbing: { label: 'Dubbing', icon: Globe, accent: 'text-amber-400' },
+  'voice-changer': { label: 'Voice Changer', icon: Wand2, accent: 'text-pink-400' },
+  'voice-isolator': { label: 'Voice Isolator', icon: Wand2, accent: 'text-cyan-400' },
+  sfx: { label: 'Sound FX', icon: Sparkles, accent: 'text-orange-400' },
+  music: { label: 'Music', icon: Music, accent: 'text-rose-400' },
+  loopback: { label: 'Live Capture', icon: Mic, accent: 'text-red-400' },
+};
+
+const MODULE_ROUTE_MAP: Record<string, string> = {
+  transcribe: '/transcribe',
+  stt: '/dictate',
+  tts: '/reader',
+  reader: '/reader',
+  'ai-edit': '/ai-edit',
+  translate: '/translate',
+  dubbing: '/dubbing',
+  'voice-changer': '/voice-changer',
+  'voice-isolator': '/voice-isolator',
+  sfx: '/sfx',
+  music: '/music',
+  loopback: '/loopback',
+};
+
+const processingStatuses = new Set([
+  'pending',
+  'processing',
+  'transcribing',
+  'diarizing',
+  'downloading',
+  'cleaning',
+  'paused',
+  'interrupted',
+]);
+
+const PREFER_TEXT_MODULES = new Set(['transcribe', 'stt', 'translate', 'ai-edit']);
+const PREFER_AUDIO_MODULES = new Set([
+  'tts',
+  'reader',
+  'voice-changer',
+  'voice-isolator',
+  'music',
+  'sfx',
+  'loopback',
+]);
+const PREFER_VIDEO_MODULES = new Set(['dubbing']);
 
 export default function HistoryPage() {
   const router = useRouter();
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<TabType>('all');
+  const [modules, setModules] = useState<HistoryModuleInfo[]>([]);
+  const [activeModule, setActiveModule] = useState('all');
+  const [entries, setEntries] = useState<NewHistoryEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [playingEntryId, setPlayingEntryId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // New unified history state
-  const [newHistory, setNewHistory] = useState<NewHistoryEntry[]>([]);
-  const [newHistoryLoading, setNewHistoryLoading] = useState(true);
-  const [newHistoryTotal, setNewHistoryTotal] = useState(0);
-  const [filters, setFilters] = useState<HistoryFilter>({ limit: 50, offset: 0 });
-  const [stats, setStats] = useState<HistoryStats | null>(null);
-
-  // TTS History state (legacy)
-  const [ttsHistory, setTtsHistory] = useState<HistoryEntry[]>([]);
-  const [ttsLoading, setTtsLoading] = useState(true);
-  const [ttsTotal, setTtsTotal] = useState(0);
-
-  // Transcription History state
-  const [transcriptions, setTranscriptions] = useState<TranscriptionJob[]>([]);
-  const [transcriptionsLoading, setTranscriptionsLoading] = useState(true);
-  const [transcriptionsTotal, setTranscriptionsTotal] = useState(0);
-
-  // Error state removed - now using toast notifications
-  const [playingId, setPlayingId] = useState<string | null>(null);
-  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
-
-  // Filter state for transcriptions
-  const [statusFilter, setStatusFilter] = useState<TranscriptionStatus>('all');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
-
-  // Selection state
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-
-  // Load new history
-  const loadNewHistory = useCallback(async () => {
-    setNewHistoryLoading(true);
+  const loadModules = useCallback(async () => {
     try {
-      const data = await getNewHistory(filters);
-      setNewHistory(data.entries);
-      setNewHistoryTotal(data.total);
-    } catch (err) {
-      console.error('Error loading new history:', err);
-    } finally {
-      setNewHistoryLoading(false);
+      const data = await getHistoryModules();
+      setModules(data.modules || []);
+    } catch {
+      setModules([]);
     }
-  }, [filters]);
-
-  // Load stats
-  const loadStats = async () => {
-    try {
-      const data = await getHistoryStats();
-      setStats(data);
-    } catch (err) {
-      console.error('Error loading stats:', err);
-    }
-  };
-
-  useEffect(() => {
-    loadNewHistory();
-    loadStats();
-  }, [loadNewHistory]);
-
-  useEffect(() => {
-    loadTtsHistory();
-    loadTranscriptionHistory();
   }, []);
 
-  const loadTtsHistory = async () => {
-    setTtsLoading(true);
-    try {
-      const data = await getHistory(50, 0);
-      setTtsHistory(data.history);
-      setTtsTotal(data.total);
-    } catch (err) {
-      console.error('Error loading TTS history:', err);
-    } finally {
-      setTtsLoading(false);
-    }
-  };
-
-  const loadTranscriptionHistory = async () => {
-    setTranscriptionsLoading(true);
-    try {
-      const data = await getTranscriptionHistory();
-      setTranscriptions(data.jobs);
-      setTranscriptionsTotal(data.total);
-    } catch (err) {
-      console.error('Error loading transcription history:', err);
-    } finally {
-      setTranscriptionsLoading(false);
-    }
-  };
-
-  const handleFiltersChange = (newFilters: HistoryFilter) => {
-    setFilters(newFilters);
-  };
-
-  const handleEntryUpdate = (updatedEntry: NewHistoryEntry) => {
-    setNewHistory(prev => prev.map(e => e.id === updatedEntry.id ? updatedEntry : e));
-  };
-
-  const handleEntryDelete = (entryId: string) => {
-    setNewHistory(prev => prev.filter(e => e.id !== entryId));
-    setNewHistoryTotal(prev => prev - 1);
-    selectedIds.delete(entryId);
-    setSelectedIds(new Set(selectedIds));
-  };
-
-  // Selection handlers
-  const handleSelectionChange = (entryId: string, selected: boolean) => {
-    const newSelection = new Set(selectedIds);
-    if (selected) {
-      newSelection.add(entryId);
-    } else {
-      newSelection.delete(entryId);
-    }
-    setSelectedIds(newSelection);
-  };
-
-  const handleSelectAll = () => {
-    if (selectedIds.size === newHistory.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(newHistory.map(e => e.id)));
-    }
-  };
-
-  const handleExitSelectionMode = () => {
-    setSelectionMode(false);
-    setSelectedIds(new Set());
-  };
-
-  const handleBulkDelete = async () => {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`Delete ${selectedIds.size} selected entries?`)) return;
-
-    setBulkDeleting(true);
-    try {
-      const result = await bulkDeleteHistoryEntries(Array.from(selectedIds));
-      setNewHistory(prev => prev.filter(e => !selectedIds.has(e.id)));
-      setNewHistoryTotal(prev => prev - result.deleted_count);
-      setSelectedIds(new Set());
-      setSelectionMode(false);
-
-      if (result.failed_count > 0) {
-        toast.warning('Partial delete', `Deleted ${result.deleted_count} entries. ${result.failed_count} failed.`);
-      } else {
-        toast.success('Deleted', `${result.deleted_count} entries removed`);
-      }
-    } catch (err) {
-      toast.error('Bulk delete failed', 'Please try again');
-    } finally {
-      setBulkDeleting(false);
-    }
-  };
-
-  // Regeneration handler - navigate to appropriate module with params
-  const handleRegenerate = (entry: NewHistoryEntry) => {
-    const params = new URLSearchParams();
-
-    switch (entry.module) {
-      case 'tts':
-        params.set('text', entry.input_text || '');
-        if (entry.provider) params.set('provider', entry.provider);
-        if (entry.model) params.set('model', entry.model);
-        if (entry.metadata?.voice_id) params.set('voice', entry.metadata.voice_id);
-        router.push(`/?${params.toString()}`);
-        break;
-      case 'stt':
-        router.push('/dictate');
-        break;
-      case 'voice-changer':
-        if (entry.metadata?.target_voice_id) params.set('voice', entry.metadata.target_voice_id);
-        router.push(`/voice-changer?${params.toString()}`);
-        break;
-      case 'voice-isolator':
-        if (entry.provider) params.set('provider', entry.provider);
-        router.push(`/voice-isolator?${params.toString()}`);
-        break;
-      case 'sfx':
-        if (entry.input_text) params.set('prompt', entry.input_text);
-        router.push(`/sfx?${params.toString()}`);
-        break;
-      case 'music':
-        if (entry.metadata?.lyrics) params.set('lyrics', entry.metadata.lyrics);
-        if (entry.metadata?.style) params.set('style', entry.metadata.style);
-        router.push(`/music?${params.toString()}`);
-        break;
-      case 'translate':
-        params.set('text', entry.input_text || '');
-        if (entry.metadata?.source_language) params.set('from', entry.metadata.source_language);
-        if (entry.metadata?.target_language) params.set('to', entry.metadata.target_language);
-        router.push(`/translate?${params.toString()}`);
-        break;
-      case 'ai-edit':
-        params.set('text', entry.input_text || '');
-        if (entry.metadata?.instruction) params.set('command', entry.metadata.instruction);
-        router.push(`/ai-edit?${params.toString()}`);
-        break;
-      case 'reader':
-        if (entry.input_text) params.set('text', entry.input_text);
-        if (entry.metadata?.source_url) params.set('url', entry.metadata.source_url);
-        if (entry.metadata?.voice_id) params.set('voice', entry.metadata.voice_id);
-        router.push(`/reader?${params.toString()}`);
-        break;
-      default:
-        // For other modules, just navigate to the module page
-        router.push(`/${entry.module}`);
-    }
-  };
-
-  const handlePlay = (entry: HistoryEntry) => {
-    if (!entry.file_exists || !entry.output_url) return;
-
-    if (playingId === entry.id) {
-      audioElement?.pause();
-      setPlayingId(null);
-      return;
-    }
-
-    audioElement?.pause();
-
-    const audio = new Audio(getAudioUrl(entry.output_url));
-    audio.onended = () => setPlayingId(null);
-    audio.onerror = () => {
-      setPlayingId(null);
-      toast.error('Playback failed', 'Unable to play audio file');
+  const loadEntries = useCallback(async () => {
+    setLoading(true);
+    const filter: HistoryFilter = {
+      limit: 50,
+      offset: 0,
+      module: activeModule === 'all' ? undefined : activeModule,
+      search: searchTerm.trim() || undefined,
     };
-    audio.play();
-    setAudioElement(audio);
-    setPlayingId(entry.id);
-  };
-
-  const handleDeleteTts = async (entry: HistoryEntry) => {
-    if (!confirm('Delete this entry and its audio file?')) return;
     try {
-      await deleteHistoryEntry(entry.id, true);
-      await loadTtsHistory();
-      toast.success('Deleted', 'Entry removed');
+      const data = await getNewHistory(filter);
+      setEntries(data.entries || []);
+      setTotal(data.total || 0);
     } catch {
-      toast.error('Delete failed', 'Could not remove entry');
+      setEntries([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [activeModule, searchTerm]);
 
-  const handleDeleteTranscription = async (job: TranscriptionJob) => {
-    if (!confirm('Delete this transcription?')) return;
-    try {
-      await deleteTranscriptionJob(job.job_id);
-      await loadTranscriptionHistory();
-      toast.success('Deleted', 'Transcription removed');
-    } catch {
-      toast.error('Delete failed', 'Could not remove transcription');
-    }
-  };
+  useEffect(() => {
+    loadModules();
+  }, [loadModules]);
 
-  const handleClearAll = async () => {
-    if (activeTab === 'tts') {
-      if (!confirm('Delete all TTS history entries?')) return;
-      if (!confirm('Also delete audio files to free disk space?')) {
-        try {
-          await clearHistory(false);
-          await loadTtsHistory();
-          toast.success('Cleared', 'History entries removed');
-        } catch {
-          toast.error('Clear failed', 'Could not clear history');
-        }
-        return;
-      }
+  useEffect(() => {
+    loadEntries();
+  }, [loadEntries]);
 
-      try {
-        const result = await clearHistory(true);
-        await loadTtsHistory();
-        toast.success('History cleared', `${(result.freed_bytes / (1024 * 1024)).toFixed(2)} MB freed`);
-      } catch {
-        toast.error('Clear failed', 'Could not clear history');
-      }
-    } else if (activeTab === 'transcriptions') {
-      if (!confirm('Delete all transcriptions? This will also delete any temporary media files.')) return;
+  const tabs: ModuleTab[] = useMemo(() => {
+    const allCount = modules.reduce((sum, moduleInfo) => sum + moduleInfo.count, 0);
+    const sorted = [...modules].sort((a, b) => b.count - a.count);
+    return [
+      { id: 'all', label: 'All', count: allCount },
+      ...sorted.map((moduleInfo) => ({
+        id: moduleInfo.module,
+        label: MODULE_CONFIG[moduleInfo.module]?.label || moduleInfo.module,
+        count: moduleInfo.count,
+      })),
+    ];
+  }, [modules]);
 
-      try {
-        const result = await clearAllTranscriptions();
-        await loadTranscriptionHistory();
-        toast.success('Transcriptions cleared', `${result.deleted_count} deleted, ${(result.freed_bytes / (1024 * 1024)).toFixed(2)} MB freed`);
-      } catch {
-        toast.error('Clear failed', 'Could not clear transcriptions');
-      }
-    }
-  };
+  const completedCount = modules.reduce((sum, moduleInfo) => sum + moduleInfo.count, 0);
+  const processingCount = entries.filter((entry) => processingStatuses.has(entry.status || '')).length;
 
-  const handleDownloadTts = (entry: HistoryEntry) => {
-    if (!entry.file_exists || !entry.output_url) return;
-    const link = document.createElement('a');
-    link.href = getAudioUrl(entry.output_url);
-    link.download = entry.filename || 'audio.wav';
-    link.click();
-  };
-
-  const formatDate = (isoString: string) => {
-    const date = new Date(isoString);
-    return date.toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  const formatDuration = (seconds: number | undefined) => {
-    if (!seconds) return '--:--';
+  const formatDuration = (seconds?: number) => {
+    if (!seconds || seconds <= 0) return '--:--';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const formatBillingValue = (value?: number | null) =>
-    value != null ? new Intl.NumberFormat().format(value) : null;
-
-  const formatBytes = (bytes: number | undefined) => {
-    if (bytes === undefined) return '0 B';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  const formatFileSize = (bytes?: number, mb?: number) => {
+    if (typeof bytes === 'number') {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+    if (typeof mb === 'number') return `${mb.toFixed(1)} MB`;
+    return null;
   };
 
-  const modelNames: Record<string, string> = {
-    original: 'Original',
-    turbo: 'Turbo',
-    multilingual: 'Multilingual',
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) {
+      return { date: 'Unknown', time: '' };
+    }
+    return {
+      date: date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      }),
+      time: date.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    };
   };
 
-  const loading = activeTab === 'all' ? newHistoryLoading
-    : activeTab === 'tts' ? ttsLoading
-    : transcriptionsLoading;
+  const sanitizeFilename = (value: string) =>
+    value.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_').slice(0, 80);
 
-  const total = activeTab === 'all' ? newHistoryTotal
-    : activeTab === 'tts' ? ttsTotal
-    : transcriptionsTotal;
-
-  // Filter and sort transcriptions
-  const filteredTranscriptions = transcriptions
-    .filter(job => statusFilter === 'all' || job.status === statusFilter)
-    .sort((a, b) => {
-      const dateA = new Date(a.created_at).getTime();
-      const dateB = new Date(b.created_at).getTime();
-      return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
-    });
-
-  const statusCounts = {
-    all: transcriptions.length,
-    completed: transcriptions.filter(j => j.status === 'completed').length,
-    paused: transcriptions.filter(j => j.status === 'paused').length,
-    interrupted: transcriptions.filter(j => j.status === 'interrupted').length,
-    error: transcriptions.filter(j => j.status === 'error').length,
-    cancelled: transcriptions.filter(j => j.status === 'cancelled').length,
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
-  const handleRefresh = () => {
-    if (activeTab === 'all') {
-      loadNewHistory();
-      loadStats();
-    } else if (activeTab === 'tts') {
-      loadTtsHistory();
-    } else {
-      loadTranscriptionHistory();
+  const downloadFromUrl = async (url: string, filename: string) => {
+    const headers: HeadersInit = {};
+    const token = typeof window !== 'undefined' ? window.electronAPI?.authToken : undefined;
+    const trimmed = typeof token === 'string' ? token.trim() : '';
+    if (trimmed) {
+      headers['Authorization'] = `Bearer ${trimmed}`;
+    }
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      throw new Error(`Download failed (${response.status})`);
+    }
+    const blob = await response.blob();
+    downloadBlob(blob, filename);
+  };
+
+  const resolveEntryText = (entry: NewHistoryEntry) =>
+    entry.output_text || entry.input_text || entry.text || '';
+
+  const resolveAudioPath = (entry: NewHistoryEntry) =>
+    entry.output_audio_path || entry.audio_path || entry.input_audio_path || '';
+
+  const resolveVideoPath = (entry: NewHistoryEntry) => entry.output_video_path || '';
+
+  const stopPlayback = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setPlayingEntryId(null);
+  }, []);
+
+  useEffect(() => {
+    return () => stopPlayback();
+  }, [stopPlayback]);
+
+  const handleDelete = async (entry: NewHistoryEntry) => {
+    if (!confirm('Delete this entry?')) return;
+    try {
+      try {
+        await deleteNewHistoryEntry(entry.id);
+      } catch {
+        await deleteHistoryEntry(entry.id, true);
+      }
+      toast.success('Deleted', 'Entry removed');
+      loadEntries();
+      loadModules();
+    } catch {
+      toast.error('Delete failed', 'Unable to delete entry');
+    }
+  };
+
+  const handleView = (entry: NewHistoryEntry) => {
+    const route = MODULE_ROUTE_MAP[entry.module];
+    const jobId = entry.metadata?.job_id || entry.metadata?.transcription_id || entry.metadata?.jobId;
+    if (entry.module === 'transcribe' && jobId) {
+      router.push(`/transcribe?job=${jobId}`);
+      return;
+    }
+    if (route) {
+      router.push(route);
+    }
+  };
+
+  const handlePlayAudio = async (entry: NewHistoryEntry) => {
+    const audioPath = resolveAudioPath(entry);
+    if (!audioPath) {
+      toast.warning('No audio available', 'This entry does not include audio output.');
+      return;
+    }
+
+    if (playingEntryId === entry.id) {
+      stopPlayback();
+      return;
+    }
+
+    stopPlayback();
+
+    try {
+      const audio = new Audio(getAudioUrl(audioPath));
+      audioRef.current = audio;
+      setPlayingEntryId(entry.id);
+      audio.onended = () => setPlayingEntryId(null);
+      audio.onerror = () => {
+        setPlayingEntryId(null);
+        toast.error('Playback failed', 'Unable to play audio.');
+      };
+      await audio.play();
+    } catch {
+      setPlayingEntryId(null);
+      toast.error('Playback failed', 'Unable to play audio.');
+    }
+  };
+
+  const handleCopyText = async (entry: NewHistoryEntry) => {
+    const text = resolveEntryText(entry);
+    if (!text) {
+      toast.warning('No text available', 'This entry does not include text output.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied', 'Text copied to clipboard.');
+    } catch {
+      toast.error('Copy failed', 'Unable to copy text.');
+    }
+  };
+
+  const handleDownloadEntry = async (entry: NewHistoryEntry, kind?: 'text' | 'audio' | 'video') => {
+    const title = sanitizeFilename(entry.title || entry.file_path || entry.input_text || entry.output_text || entry.text || 'output');
+    const jobId = entry.metadata?.job_id || entry.metadata?.transcription_id || entry.metadata?.jobId;
+    const textContent = resolveEntryText(entry);
+    const audioPath = resolveAudioPath(entry);
+    const videoPath = resolveVideoPath(entry);
+
+    try {
+      if (kind === 'text' || (!kind && PREFER_TEXT_MODULES.has(entry.module))) {
+        if (entry.module === 'transcribe' && jobId) {
+          const blob = await exportTranscript(jobId, 'txt', true, true);
+          downloadBlob(blob, `${title}.txt`);
+          return;
+        }
+        if (!textContent) {
+          toast.warning('No text available', 'This entry does not include text output.');
+          return;
+        }
+        downloadBlob(new Blob([textContent], { type: 'text/plain;charset=utf-8' }), `${title}.txt`);
+        return;
+      }
+
+      if (kind === 'video' || (!kind && (PREFER_VIDEO_MODULES.has(entry.module) || (!!videoPath && !audioPath)))) {
+        if (!videoPath) {
+          toast.warning('No video available', 'This entry does not include video output.');
+          return;
+        }
+        const extension = videoPath.split('.').pop() || 'mp4';
+        const url = getHistoryFileDownloadUrl(entry.id, 'output_video');
+        await downloadFromUrl(url, `${title}.${extension}`);
+        return;
+      }
+
+      if (kind === 'audio' || (!kind && (PREFER_AUDIO_MODULES.has(entry.module) || !!audioPath))) {
+        if (!audioPath) {
+          toast.warning('No audio available', 'This entry does not include audio output.');
+          return;
+        }
+        const extension = audioPath.split('.').pop() || 'mp3';
+        const fileType = entry.output_audio_path ? 'output_audio' : 'input_audio';
+        const url = getHistoryFileDownloadUrl(entry.id, fileType);
+        await downloadFromUrl(url, `${title}.${extension}`);
+        return;
+      }
+
+      if (textContent) {
+        downloadBlob(new Blob([textContent], { type: 'text/plain;charset=utf-8' }), `${title}.txt`);
+        return;
+      }
+    } catch {
+      toast.error('Download failed', 'Unable to download this file.');
     }
   };
 
   return (
-    <div className="space-y-8 animate-slide-up">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gradient flex items-center gap-3">
-            <History className="w-7 h-7" />
-            History
-          </h1>
-          <p className="mt-2 text-foreground-secondary">
-            {activeTab === 'transcriptions' && statusFilter !== 'all'
-              ? `${filteredTranscriptions.length} of ${total} entries`
-              : `${total} ${total === 1 ? 'entry' : 'entries'} saved`}
-          </p>
+    <div className="min-h-screen bg-background text-foreground flex flex-col overflow-x-hidden page-premium">
+      <header className="sticky top-0 z-50 flex items-center justify-between whitespace-nowrap border-b border-white/5 bg-background/90 backdrop-blur-md px-10 py-3">
+        <div className="flex items-center gap-4 text-foreground">
+          <div className="size-8 flex items-center justify-center rounded-lg bg-accent-primary/20 text-accent-primary">
+            <FileAudio className="w-4 h-4" />
+          </div>
+          <h2 className="text-foreground text-base font-semibold leading-tight tracking-tight">Whisperall AI</h2>
         </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={handleRefresh}
-            className="btn btn-secondary"
-          >
-            <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-            Refresh
-          </button>
-          {activeTab === 'all' && newHistory.length > 0 && !selectionMode && (
-            <button
-              onClick={() => setSelectionMode(true)}
-              className="btn btn-secondary"
-            >
-              <CheckSquare className="w-4 h-4" />
-              Select
-            </button>
-          )}
-          {activeTab !== 'all' && ((activeTab === 'tts' && ttsHistory.length > 0) || (activeTab === 'transcriptions' && transcriptions.length > 0)) && (
-            <button
-              onClick={handleClearAll}
-              className="btn btn-danger"
-            >
-              <Trash2 className="w-4 h-4" />
-              Clear All
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Selection Action Bar */}
-      {selectionMode && (
-        <div className="flex items-center justify-between p-4 bg-surface-2 rounded-xl border border-border">
+        <div className="flex flex-1 justify-end gap-8 items-center">
+          <div className="hidden md:flex items-center gap-9">
+            <Link className="text-foreground-muted hover:text-foreground transition-colors text-xs font-medium uppercase tracking-wide" href="/dictate">Dashboard</Link>
+            <Link className="text-foreground text-xs font-medium uppercase tracking-wide border-b border-accent-primary pb-0.5" href="/history">History</Link>
+            <Link className="text-foreground-muted hover:text-foreground transition-colors text-xs font-medium uppercase tracking-wide" href="/settings">Settings</Link>
+          </div>
           <div className="flex items-center gap-4">
-            <button
-              onClick={handleSelectAll}
-              className="flex items-center gap-2 text-sm hover:text-accent-primary transition-colors"
-            >
-              {selectedIds.size === newHistory.length ? (
-                <>
-                  <CheckSquare className="w-4 h-4" />
-                  Deselect All
-                </>
-              ) : (
-                <>
-                  <Square className="w-4 h-4" />
-                  Select All ({newHistory.length})
-                </>
-              )}
-            </button>
-            <span className="text-sm text-foreground-muted">
-              {selectedIds.size} selected
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleBulkDelete}
-              disabled={selectedIds.size === 0 || bulkDeleting}
-              className={cn(
-                'btn btn-danger',
-                (selectedIds.size === 0 || bulkDeleting) && 'opacity-50 cursor-not-allowed'
-              )}
-            >
-              {bulkDeleting ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <Trash2 className="w-4 h-4" />
-              )}
-              Delete ({selectedIds.size})
-            </button>
-            <button
-              onClick={handleExitSelectionMode}
-              className="btn btn-secondary"
-            >
-              <X className="w-4 h-4" />
-              Cancel
-            </button>
+            <Link className="hidden sm:flex h-9 cursor-pointer items-center justify-center rounded-lg bg-accent-primary px-4 text-white text-xs font-bold leading-normal tracking-wide hover:bg-accent-primary/90 transition-colors shadow-lg shadow-accent-primary/20" href="/transcribe">
+              New Transcription
+            </Link>
+            <div className="bg-surface-2 border border-surface-3 rounded-full h-9 w-9" />
           </div>
         </div>
-      )}
+      </header>
 
-      {/* Stats Summary */}
-      {activeTab === 'all' && stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="card p-4 rounded-xl">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-accent-primary/10">
-                <LayoutGrid className="w-5 h-5 text-accent-primary" />
+      <main className="flex-1 flex flex-col items-center px-6 md:px-12 py-12">
+        <div className="w-full max-w-[1280px] flex flex-col gap-10">
+          <div className="flex flex-wrap justify-between items-end gap-4 pb-4 border-b border-white/5">
+            <div className="flex flex-col gap-1">
+              <h1 className="text-foreground text-2xl font-bold tracking-tight">History</h1>
+              <p className="text-foreground-muted text-sm font-normal">Manage your audio processing tasks.</p>
+            </div>
+            <div className="flex gap-8 text-xs text-foreground-muted font-medium uppercase tracking-wider">
+              <div className="flex items-center gap-2">
+                <span className="text-foreground font-bold">{completedCount}</span> Completed
               </div>
-              <div>
-                <p className="text-2xl font-bold">{stats.total_entries}</p>
-                <p className="text-xs text-foreground-muted">Total Entries</p>
+              <div className="flex items-center gap-2">
+                <span className="text-accent-primary font-bold">{processingCount}</span> Processing
               </div>
             </div>
           </div>
-          <div className="card p-4 rounded-xl">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-emerald-500/10">
-                <Clock className="w-5 h-5 text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{formatDuration(stats.total_duration_seconds)}</p>
-                <p className="text-xs text-foreground-muted">Total Duration</p>
-              </div>
-            </div>
-          </div>
-          <div className="card p-4 rounded-xl">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-500/10">
-                <FileText className="w-5 h-5 text-blue-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{(stats.total_characters ?? 0).toLocaleString()}</p>
-                <p className="text-xs text-foreground-muted">Characters</p>
-              </div>
-            </div>
-          </div>
-          <div className="card p-4 rounded-xl">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-amber-500/10">
-                <BarChart3 className="w-5 h-5 text-amber-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{formatBytes(stats.storage_bytes)}</p>
-                <p className="text-xs text-foreground-muted">Storage Used</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Tabs */}
-      <div className="flex gap-2 border-b border-border pb-2">
-        <button
-          onClick={() => setActiveTab('all')}
-          className={cn(
-            "px-4 py-2 rounded-t-lg flex items-center gap-2 transition-colors",
-            activeTab === 'all'
-              ? "bg-surface-2 text-foreground"
-              : "text-foreground-secondary hover:text-foreground"
-          )}
-        >
-          <LayoutGrid className="w-4 h-4" />
-          All Modules
-          {newHistoryTotal > 0 && (
-            <span className="text-xs bg-accent-primary/20 text-accent-primary px-2 py-0.5 rounded-full">{newHistoryTotal}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab('tts')}
-          className={cn(
-            "px-4 py-2 rounded-t-lg flex items-center gap-2 transition-colors",
-            activeTab === 'tts'
-              ? "bg-surface-2 text-foreground"
-              : "text-foreground-secondary hover:text-foreground"
-          )}
-        >
-          <Mic className="w-4 h-4" />
-          TTS (Legacy)
-          {ttsTotal > 0 && (
-            <span className="text-xs bg-surface-3 px-2 py-0.5 rounded-full">{ttsTotal}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab('transcriptions')}
-          className={cn(
-            "px-4 py-2 rounded-t-lg flex items-center gap-2 transition-colors",
-            activeTab === 'transcriptions'
-              ? "bg-surface-2 text-foreground"
-              : "text-foreground-secondary hover:text-foreground"
-          )}
-        >
-          <FileText className="w-4 h-4" />
-          Transcriptions
-          {transcriptionsTotal > 0 && (
-            <span className="text-xs bg-surface-3 px-2 py-0.5 rounded-full">{transcriptionsTotal}</span>
-          )}
-        </button>
-      </div>
-
-      {/* New History Filters */}
-      {activeTab === 'all' && (
-        <HistoryFilters
-          filters={filters}
-          onFiltersChange={handleFiltersChange}
-        />
-      )}
-
-      {/* Transcription Filters */}
-      {activeTab === 'transcriptions' && transcriptions.length > 0 && (
-        <div className="flex flex-wrap items-center gap-4">
-          {/* Status Filter */}
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-foreground-muted" />
-            <div className="flex flex-wrap gap-1">
-              {(['all', 'completed', 'paused', 'interrupted', 'error'] as TranscriptionStatus[]).map((status) => (
-                statusCounts[status] > 0 && (
-                  <button
-                    key={status}
-                    onClick={() => setStatusFilter(status)}
-                    className={cn(
-                      "px-3 py-1 text-xs rounded-full transition-colors",
-                      statusFilter === status
-                        ? status === 'completed' ? "bg-emerald-500/30 text-emerald-300"
-                          : status === 'paused' ? "bg-blue-500/30 text-blue-300"
-                          : status === 'interrupted' ? "bg-amber-500/30 text-amber-300"
-                          : status === 'error' ? "bg-red-500/30 text-red-300"
-                          : "bg-surface-3 text-foreground"
-                        : "bg-surface-2 text-foreground-secondary hover:bg-surface-3"
-                    )}
-                  >
-                    {status === 'all' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
-                    <span className="ml-1 opacity-70">({statusCounts[status]})</span>
-                  </button>
-                )
-              ))}
-            </div>
-          </div>
-
-          {/* Sort Order */}
-          <button
-            onClick={() => setSortOrder(sortOrder === 'newest' ? 'oldest' : 'newest')}
-            className="flex items-center gap-1 px-3 py-1 text-xs rounded-full bg-surface-2 text-foreground-secondary hover:bg-surface-3 transition-colors"
-          >
-            {sortOrder === 'newest' ? (
-              <>
-                <ArrowDown className="w-3 h-3" />
-                Newest first
-              </>
-            ) : (
-              <>
-                <ArrowUp className="w-3 h-3" />
-                Oldest first
-              </>
-            )}
-          </button>
-        </div>
-      )}
-
-      {/* Loading State with Skeletons */}
-      {loading && activeTab === 'all' && (
-        <div className="space-y-4">
-          {!stats && <SkeletonStatsGrid />}
-          <SkeletonHistoryEntry />
-          <SkeletonHistoryEntry />
-          <SkeletonHistoryEntry />
-          <SkeletonHistoryEntry />
-        </div>
-      )}
-      
-      {loading && activeTab !== 'all' && (
-        <div className="flex items-center justify-center min-h-[200px]">
-          <RefreshCw className="w-8 h-8 animate-spin text-foreground-muted" />
-        </div>
-      )}
-
-      {/* New History (All Modules) */}
-      {activeTab === 'all' && !loading && (
-        newHistory.length === 0 ? (
-          <div className="text-center py-16 text-foreground-muted">
-            <LayoutGrid className="w-16 h-16 mx-auto mb-4 opacity-50" />
-            <p className="text-lg">No history yet</p>
-            <p className="text-sm mt-2">Your activity across all modules will appear here</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {newHistory.map((entry) => (
-              <HistoryEntryCard
-                key={entry.id}
-                entry={entry}
-                onUpdate={handleEntryUpdate}
-                onDelete={handleEntryDelete}
-                onRegenerate={handleRegenerate}
-                selectionMode={selectionMode}
-                selected={selectedIds.has(entry.id)}
-                onSelectionChange={handleSelectionChange}
-              />
-            ))}
-
-            {/* Load More */}
-            {newHistory.length < newHistoryTotal && (
-              <div className="text-center pt-4">
-                <button
-                  onClick={() => setFilters(prev => ({ ...prev, limit: (prev.limit || 50) + 50 }))}
-                  className="btn btn-secondary"
-                >
-                  Load More ({newHistory.length} of {newHistoryTotal})
-                </button>
-              </div>
-            )}
-          </div>
-        )
-      )}
-
-      {/* TTS History (Legacy) */}
-      {activeTab === 'tts' && !loading && (
-        ttsHistory.length === 0 ? (
-          <div className="text-center py-16 text-foreground-muted">
-            <FileAudio className="w-16 h-16 mx-auto mb-4 opacity-50" />
-            <p className="text-lg">No TTS history yet</p>
-            <p className="text-sm mt-2">Your TTS generations will show up here</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {ttsHistory.map((entry) => (
-              <div
-                key={entry.id}
+          <div className="flex flex-wrap gap-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveModule(tab.id)}
                 className={cn(
-                  'card p-4 rounded-xl flex items-start gap-4',
-                  !entry.file_exists && 'opacity-60'
+                  'px-4 py-2 rounded-full text-xs font-semibold uppercase tracking-wider transition-colors',
+                  activeModule === tab.id
+                    ? 'bg-accent-primary/20 text-accent-primary border border-accent-primary/30'
+                    : 'bg-surface-2 text-foreground-muted hover:text-foreground'
                 )}
               >
-                <button
-                  onClick={() => handlePlay(entry)}
-                  disabled={!entry.file_exists}
-                  className={cn(
-                    'w-12 h-12 rounded-full flex items-center justify-center transition-colors flex-shrink-0',
-                    entry.file_exists
-                      ? playingId === entry.id
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-surface-2 text-foreground hover:bg-surface-3'
-                      : 'bg-surface-1 text-foreground-muted cursor-not-allowed'
-                  )}
-                >
-                  {playingId === entry.id ? (
-                    <Pause className="w-5 h-5" />
-                  ) : (
-                    <Play className="w-5 h-5 ml-0.5" />
-                  )}
+                {tab.label}
+                <span className="ml-2 text-[10px] opacity-70">{tab.count}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-col xl:flex-row gap-6 justify-between items-center">
+            <div className="flex flex-col md:flex-row gap-6 w-full md:w-auto items-center">
+              <div className="relative group min-w-[320px]">
+                <div className="absolute inset-y-0 left-0 flex items-center pl-0 pointer-events-none text-foreground-muted group-focus-within:text-foreground transition-colors">
+                  <Search className="w-4 h-4" />
+                </div>
+                <input
+                  className="block w-full py-2 pl-8 pr-4 text-sm text-foreground bg-transparent border-0 border-b border-surface-3 focus:ring-0 focus:border-white placeholder:text-foreground-muted/50 transition-colors"
+                  placeholder="Search filename..."
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-6 items-center">
+                <button className="text-xs font-medium text-foreground flex items-center gap-1 hover:text-accent-primary transition-colors">
+                  Status: All
+                  <ChevronDown className="w-4 h-4" />
                 </button>
-
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-foreground line-clamp-2">{entry.text}</p>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                    <span className="badge">{(entry.model && modelNames[entry.model]) || entry.model || 'unknown'}</span>
-                    <span className="badge">{(entry.language || 'en').toUpperCase()}</span>
-                    <span className="badge">T:{entry.temperature ?? '-'} E:{entry.exaggeration ?? '-'}</span>
-                    {entry.billing?.value != null && (
-                      <span
-                        className="badge badge-info"
-                        title={entry.billing.details ?? undefined}
-                      >
-                        {formatBillingValue(entry.billing.value)} {entry.billing.unit ?? 'units'}
-                      </span>
-                    )}
-                    {entry.file_size_mb && (
-                      <span className="badge">{entry.file_size_mb} MB</span>
-                    )}
-                    {!entry.file_exists && (
-                      <span className="badge badge-error">File missing</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-3 text-right">
-                  <div className="text-xs text-foreground-muted flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {formatDate(entry.created_at)}
-                  </div>
-                  <div className="flex gap-2">
-                    {entry.file_exists && (
-                      <button
-                        onClick={() => handleDownloadTts(entry)}
-                        className="btn btn-secondary btn-icon"
-                        title="Download"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDeleteTts(entry)}
-                      className="btn btn-ghost btn-icon"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
+                <button className="text-xs font-medium text-foreground-muted flex items-center gap-1 hover:text-foreground transition-colors">
+                  Date Range
+                  <Calendar className="w-4 h-4" />
+                </button>
               </div>
-            ))}
-          </div>
-        )
-      )}
-
-      {/* Transcription History */}
-      {activeTab === 'transcriptions' && !loading && (
-        transcriptions.length === 0 ? (
-          <div className="text-center py-16 text-foreground-muted">
-            <FileText className="w-16 h-16 mx-auto mb-4 opacity-50" />
-            <p className="text-lg">No transcriptions yet</p>
-            <p className="text-sm mt-2">Your transcriptions will show up here</p>
-          </div>
-        ) : filteredTranscriptions.length === 0 ? (
-          <div className="text-center py-16 text-foreground-muted">
-            <Filter className="w-16 h-16 mx-auto mb-4 opacity-50" />
-            <p className="text-lg">No transcriptions match this filter</p>
-            <button
-              onClick={() => setStatusFilter('all')}
-              className="mt-4 btn btn-secondary"
-            >
-              Show all
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filteredTranscriptions.map((job) => (
-              <div
-                key={job.job_id}
-                className="card p-4 rounded-xl cursor-pointer hover:border-border-hover transition-colors"
-                onClick={() => router.push(`/transcribe?job=${job.job_id}`)}
+            </div>
+            <div className="flex items-center gap-4 justify-end w-full md:w-auto">
+              <button
+                className="flex items-center gap-2 text-xs font-medium text-foreground-muted hover:text-foreground transition-colors"
+                onClick={loadEntries}
               >
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-5 h-5 text-foreground-muted" />
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">
-                      {job.filename || 'Untitled'}
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                      <span className={cn(
-                        "badge",
-                        job.status === 'completed' && "badge-success",
-                        job.status === 'error' && "badge-error",
-                        job.status === 'interrupted' && "bg-amber-500/20 text-amber-400",
-                        job.status === 'paused' && "bg-blue-500/20 text-blue-400",
-                        job.status === 'cancelled' && "bg-gray-500/20 text-gray-400"
-                      )}>
-                        {job.status}
-                      </span>
-                      {(job.status === 'interrupted' || job.status === 'paused') && job.segments?.length && job.segments.length > 0 && (
-                        <span className="badge bg-blue-500/10 text-blue-300">
-                          {job.segments.length} segments saved
-                        </span>
-                      )}
-                      {(job.status === 'interrupted' || job.status === 'paused') && (job.progress ?? 0) > 0 && (
-                        <span className="badge bg-blue-500/10 text-blue-300">
-                          {(job.progress ?? 0).toFixed(0)}% done
-                        </span>
-                      )}
-                      {(job.speakers_detected ?? 0) > 0 && (
-                        <span className="badge flex items-center gap-1">
-                          <Users className="w-3 h-3" />
-                          {job.speakers_detected} speakers
-                        </span>
-                      )}
-                      {(job.total_duration ?? 0) > 0 && (
-                        <span className="badge">
-                          {formatDuration(job.total_duration)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-3 text-right">
-                    <div className="text-xs text-foreground-muted flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {formatDate(job.created_at)}
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteTranscription(job);
-                      }}
-                      className="btn btn-ghost btn-icon"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+                <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
+                Refresh
+              </button>
+              <button className="flex items-center gap-2 text-xs font-medium text-foreground-muted hover:text-foreground transition-colors">
+                <Download className="w-4 h-4" />
+                Export CSV
+              </button>
+            </div>
           </div>
-        )
-      )}
+
+          <div className="w-full">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="text-xs font-medium uppercase tracking-widest text-foreground-muted border-b border-white/5">
+                  <th className="px-4 py-6 font-medium w-[45%]" scope="col">Filename</th>
+                  <th className="px-4 py-6 font-medium" scope="col">Date</th>
+                  <th className="px-4 py-6 font-medium" scope="col">Duration</th>
+                  <th className="px-4 py-6 font-medium" scope="col">Status</th>
+                  <th className="px-4 py-6 font-medium text-right w-[15%]" scope="col"></th>
+                </tr>
+              </thead>
+              <tbody className="text-[13px] md:text-[14px]">
+                {loading ? (
+                  <tr>
+                    <td className="px-4 py-8 text-foreground-muted" colSpan={5}>
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading history...
+                      </div>
+                    </td>
+                  </tr>
+                ) : entries.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-8 text-foreground-muted" colSpan={5}>
+                      No history yet.
+                    </td>
+                  </tr>
+                ) : (
+                  entries.map((entry) => {
+                    const config = MODULE_CONFIG[entry.module];
+                    const Icon = config?.icon || FileAudio;
+                    const { date, time } = formatDateTime(entry.created_at);
+                    const title = entry.title || entry.file_path || entry.input_audio_path || entry.output_audio_path || entry.output_video_path || entry.input_text || entry.output_text || entry.text || 'Untitled';
+                    const duration = entry.duration_seconds ?? entry.duration;
+                    const fileSizeLabel = formatFileSize(entry.metadata?.file_size_bytes, entry.metadata?.file_size_mb);
+                    const status = entry.status || (entry.error_message ? 'failed' : 'completed');
+                    const isProcessing = processingStatuses.has(status);
+                    const isFailed = status === 'failed' || status === 'error' || status === 'cancelled';
+                    const statusLabel = isProcessing ? 'Processing' : isFailed ? 'Failed' : 'Completed';
+                    const statusClass = isProcessing
+                      ? 'text-blue-400'
+                      : isFailed
+                        ? 'text-red-400'
+                        : 'text-emerald-400';
+                    const jobId = entry.metadata?.job_id || entry.metadata?.transcription_id || entry.metadata?.jobId;
+                    const textContent = resolveEntryText(entry);
+                    const audioPath = resolveAudioPath(entry);
+                    const videoPath = resolveVideoPath(entry);
+                    const hasAudio = Boolean(audioPath);
+                    const hasVideo = Boolean(videoPath);
+                    const hasText = Boolean(textContent);
+                    const preferText = PREFER_TEXT_MODULES.has(entry.module);
+                    const preferVideo = PREFER_VIDEO_MODULES.has(entry.module);
+                    const preferAudio = PREFER_AUDIO_MODULES.has(entry.module);
+                    const downloadKind: 'text' | 'audio' | 'video' | null = preferText
+                      ? jobId || hasText
+                        ? 'text'
+                        : null
+                      : preferVideo
+                        ? hasVideo
+                          ? 'video'
+                          : null
+                        : preferAudio
+                          ? hasAudio
+                            ? 'audio'
+                            : null
+                          : hasAudio
+                            ? 'audio'
+                            : hasVideo
+                              ? 'video'
+                              : hasText
+                                ? 'text'
+                                : null;
+                    const isPlaying = playingEntryId === entry.id;
+
+                    return (
+                      <tr key={entry.id} className="group border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                        <td className="px-4 py-6">
+                          <div className="flex items-start gap-4">
+                            <div className={cn('mt-1 opacity-80', config?.accent || 'text-foreground-muted')}>
+                              <Icon className="w-4 h-4" />
+                            </div>
+                            <div className="flex flex-col gap-1 min-w-0">
+                              <span
+                                className="text-foreground font-medium group-hover:text-accent-primary transition-colors cursor-pointer truncate"
+                                onClick={() => handleView(entry)}
+                              >
+                                {title}
+                              </span>
+                              <span className="text-xs text-foreground-muted">
+                                {config?.label || entry.module}
+                                {fileSizeLabel ? ` • ${fileSizeLabel}` : ''}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-6 whitespace-nowrap text-foreground-muted">
+                          {date} <span className="text-xs opacity-50 ml-1">{time}</span>
+                        </td>
+                        <td className="px-4 py-6 text-foreground-muted font-mono">
+                          {formatDuration(duration)}
+                        </td>
+                        <td className="px-4 py-6">
+                          <div className="flex items-center gap-2">
+                            {isProcessing && (
+                              <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400/70 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-400" />
+                              </span>
+                            )}
+                            <span className={cn('font-medium text-xs', statusClass)}>{statusLabel}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-6 text-right">
+                          <div className="flex items-center justify-end gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              className="text-foreground-muted hover:text-foreground transition-colors"
+                              title="View details"
+                              onClick={() => handleView(entry)}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            {hasAudio && (
+                              <button
+                                className="text-foreground-muted hover:text-accent-primary transition-colors"
+                                title={isPlaying ? 'Pause audio' : 'Play audio'}
+                                onClick={() => handlePlayAudio(entry)}
+                              >
+                                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                              </button>
+                            )}
+                            {hasText && (
+                              <button
+                                className="text-foreground-muted hover:text-foreground transition-colors"
+                                title="Copy text"
+                                onClick={() => handleCopyText(entry)}
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                            )}
+                            {downloadKind && (
+                              <button
+                                className="text-foreground-muted hover:text-accent-primary transition-colors"
+                                title={`Download ${downloadKind}`}
+                                onClick={() => handleDownloadEntry(entry, downloadKind)}
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              className="text-foreground-muted hover:text-red-400 transition-colors"
+                              title="Delete"
+                              onClick={() => handleDelete(entry)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-between pt-8">
+            <p className="text-xs text-foreground-muted">
+              Showing <span className="font-medium text-foreground">1-{Math.min(entries.length, total)}</span> of{' '}
+              <span className="font-medium text-foreground">{total}</span>
+            </p>
+            <div className="flex gap-6">
+              <button className="text-xs font-medium text-foreground-muted hover:text-foreground disabled:opacity-30 transition-colors" disabled>
+                Previous
+              </button>
+              <button className="text-xs font-medium text-foreground-muted hover:text-foreground transition-colors">
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }

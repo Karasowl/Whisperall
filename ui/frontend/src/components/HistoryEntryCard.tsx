@@ -224,7 +224,7 @@ export function HistoryEntryCard({
       items.push({ label: 'Provider', value: entry.provider });
     }
     if (entry.model) {
-      items.push({ label: 'Model', value: entry.model });
+      items.push({ label: 'Quality', value: entry.model });
     }
     if (entry.metadata?.voice_name) {
       items.push({ label: 'Voice', value: entry.metadata.voice_name });

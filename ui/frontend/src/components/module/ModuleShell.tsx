@@ -73,7 +73,7 @@ interface ModuleShellProps {
 // Layout configuration
 const LAYOUT_CONFIG = {
   default: {
-    wrapper: 'grid grid-cols-1 lg:grid-cols-3 gap-6',
+    wrapper: 'grid grid-cols-1 lg:grid-cols-3 gap-10 xl:gap-16',
     settingsLeft: 'lg:col-span-1 order-2 lg:order-1',
     settingsRight: 'lg:col-span-1 order-2 lg:order-3',
     main: 'lg:col-span-2 order-1 lg:order-2',
@@ -223,19 +223,21 @@ export function ModuleShell({
       {/* Settings content */}
       {settings && (
         <div className="glass-card p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">{settingsTitle}</h2>
-            {settingsCollapsible && (
-              <button
-                onClick={handleToggleSettings}
-                className="lg:hidden text-foreground-muted hover:text-foreground"
-                title="Hide Settings"
-                aria-label="Hide Settings"
-              >
-                <Settings2 className="w-4 h-4" aria-hidden="true" />
-              </button>
-            )}
-          </div>
+          {(settingsTitle || settingsCollapsible) && (
+            <div className="flex items-center justify-between">
+              {settingsTitle && <h2 className="section-label">{settingsTitle}</h2>}
+              {settingsCollapsible && (
+                <button
+                  onClick={handleToggleSettings}
+                  className="lg:hidden text-foreground-muted hover:text-foreground"
+                  title="Hide Settings"
+                  aria-label="Hide Settings"
+                >
+                  <Settings2 className="w-4 h-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          )}
           {settings}
         </div>
       )}
@@ -255,7 +257,7 @@ export function ModuleShell({
   );
 
   return (
-    <div className={cn('space-y-6 animate-slide-up', className)}>
+    <div className={cn('space-y-8 animate-slide-up', className)}>
       {/* Header */}
       <ModuleHeader
         title={title}

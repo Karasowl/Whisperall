@@ -36,10 +36,25 @@ import {
   ActionBar,
   SidebarPanel,
 } from '@/components/module';
+import { PlanGate } from '@/components/PlanGate';
 import { Slider } from '@/components/Slider';
 import { Toggle } from '@/components/Toggle';
 
 export default function VoiceChangerPage() {
+  return (
+    <PlanGate
+      requiredPlan="pro"
+      title="Voice Changer"
+      description="Transform audio using voice conversion."
+      icon={Wand2}
+      feature="Voice Changer"
+    >
+      <VoiceChangerProPage />
+    </PlanGate>
+  );
+}
+
+function VoiceChangerProPage() {
   // Providers
   const [providers, setProviders] = useState<VoiceChangerProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('elevenlabs');
@@ -454,7 +469,7 @@ export default function VoiceChangerPage() {
             {/* Model variant selector */}
             {providerModels.length > 1 && (
               <div className="mt-4 pt-4 border-t border-glass-border">
-                <label className="label text-sm mb-2">Model</label>
+                <label className="label text-sm mb-2">Quality</label>
                 <div className="flex gap-2 flex-wrap">
                   {providerModels.map((model) => (
                     <button
@@ -500,7 +515,7 @@ export default function VoiceChangerPage() {
                   <Volume2 className="w-5 h-5 text-accent-primary" />
                   <h3 className="text-lg font-semibold">Converted Audio</h3>
                 </div>
-                <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400">
+                <span className="px-2 py-1 rounded-full text-xs font-medium bg-success/10 text-success">
                   Completed
                 </span>
               </div>
@@ -557,7 +572,7 @@ export default function VoiceChangerPage() {
               ? [
                 { label: 'Provider', value: currentProviderInfo.name },
                 {
-                  label: 'Model',
+                  label: 'Quality',
                   value: providerModels.find((m) => m.id === selectedModel)?.name || selectedModel,
                 },
                 ...(currentProviderInfo.quota_minutes

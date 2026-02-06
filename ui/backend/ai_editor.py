@@ -84,7 +84,32 @@ class AIEditService:
             try:
                 return self._edit_with_provider(provider_id, text, command)
             except AuthenticationError as e:
-                # Convert to user-friendly message
+                # If the selected provider isn't configured (missing key), try a cheap fallback provider.
+                # This supports the "no BYOK by default" direction by allowing env-managed keys later.
+                fallback_order = [
+                    "deepinfra",
+                    "deepseek",
+                    "openai",
+                    "gemini",
+                    "claude",
+                    "ollama",
+                ]
+
+                for alt in fallback_order:
+                    if alt == provider_id or alt not in available:
+                        continue
+                    try:
+                        edited, meta = self._edit_with_provider(alt, text, command)
+                        meta = dict(meta or {})
+                        meta["fallback_from"] = provider_id
+                        meta["provider"] = alt
+                        return edited, meta
+                    except AuthenticationError:
+                        continue
+                    except Exception:
+                        continue
+
+                # Convert to user-friendly message if no fallback worked
                 log_error("ai_edit", "edit", str(e), error_code=ErrorCode.AI_API_KEY_INVALID, exception=e)
                 raise RuntimeError(str(e)) from e
             except RateLimitError as e:

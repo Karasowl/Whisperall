@@ -1,0 +1,12 @@
+name: api-deploy
+on:
+  push:
+    paths:
+      - 'apps/api/**'
+      - 'supabase/**'
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "TODO: configure Vercel deployment"

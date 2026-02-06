@@ -2,23 +2,20 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { useDropzone } from "react-dropzone";
 import {
-  Upload,
   FileAudio,
   Loader2,
   AlertCircle,
-  Users,
-  Sparkles,
   Thermometer,
   Shield,
-  CheckCircle2,
-  Wand2,
   XCircle,
   Eye,
   Pause,
   Play,
-  Link2,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  Zap,
 } from "lucide-react";
 import {
   uploadForTranscription,
@@ -51,63 +48,49 @@ import ImportLinkModal from "@/components/ImportLinkModal";
 import PyannoteSetupWizard from "@/components/PyannoteSetupWizard";
 import { SelectMenu } from "@/components/SelectMenu";
 import { UnifiedProviderSelector } from "@/components/UnifiedProviderSelector";
+import { ActionBar, Dropzone, ModuleShell } from "@/components/module";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
+import { useDevMode } from "@/components/DevModeProvider";
+import { Toggle } from "@/components/Toggle";
+import {
+  DIARIZATION_MODE_OPTIONS,
+  LANGUAGE_OPTIONS,
+  PREVIEW_SEGMENT_LIMIT,
+  SAFETY_DEVICE_OPTIONS,
+  SAFETY_MODE_OPTIONS,
+  WHISPER_MODEL_OPTIONS,
+} from "@/features/transcribe/options";
+import type {
+  DiarizationDevice,
+  DiarizationSafetyMode,
+  DiarizationSafetySettings,
+} from "@/features/transcribe/types";
+import {
+  formatDuration,
+  formatEta,
+  formatFileSize,
+  formatLinkLabel,
+} from "@/features/transcribe/format";
 
 const API_BASE =
+  (typeof window !== "undefined" ? window.electronAPI?.backendUrl : undefined) ||
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== "undefined" ? window.location.origin : "http://localhost:8080");
 
-const LANGUAGE_OPTIONS = [
-  { value: "auto", label: "Auto-detect" },
-  { value: "en", label: "English" },
-  { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" },
-  { value: "it", label: "Italian" },
-  { value: "pt", label: "Portuguese" },
-  { value: "ru", label: "Russian" },
-  { value: "zh", label: "Chinese" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "ar", label: "Arabic" },
-  { value: "hi", label: "Hindi" },
+const SUPPORTED_MEDIA_EXTENSIONS = [
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".ogg",
+  ".flac",
+  ".aac",
+  ".mp4",
+  ".mkv",
+  ".webm",
+  ".avi",
+  ".mov",
 ];
-
-const WHISPER_MODEL_OPTIONS = [
-  { value: "tiny", label: "Tiny", description: "Fastest, less accurate" },
-  { value: "base", label: "Base", description: "Good balance" },
-  { value: "small", label: "Small", description: "Better accuracy" },
-  { value: "medium", label: "Medium", description: "High accuracy" },
-  { value: "large-v3", label: "Large V3", description: "Best accuracy" },
-  { value: "distil-large-v3", label: "Distil Large V3", description: "Near-large accuracy, faster" },
-];
-
-const DIARIZATION_MODE_OPTIONS: { value: DiarizationMode; label: string; description: string }[] = [
-  {
-    value: "auto",
-    label: "Auto",
-    description: "Prefer AI if available, otherwise use basic clustering",
-  },
-  {
-    value: "pyannote",
-    label: "AI (pyannote)",
-    description: "Best accuracy, requires HuggingFace access",
-  },
-  {
-    value: "basic",
-    label: "Basic",
-    description: "No HuggingFace token required",
-  },
-];
-
-type DiarizationSafetyMode = "safe" | "balanced" | "performance";
-type DiarizationDevice = "cpu" | "gpu" | "auto";
-
-type DiarizationSafetySettings = {
-  mode: DiarizationSafetyMode;
-  device: DiarizationDevice;
-};
 
 type GpuTelemetry = {
   available: boolean;
@@ -144,77 +127,11 @@ type AudioCacheStatus = {
   path?: string;
 };
 
-const SAFETY_MODE_OPTIONS: { value: DiarizationSafetyMode; label: string; description: string }[] = [
-  { value: "safe", label: "Laptop-safe", description: "Cooler, slower, lower spikes" },
-  { value: "balanced", label: "Balanced", description: "Moderate load and speed" },
-  { value: "performance", label: "Performance", description: "Fastest, hottest" },
-];
-
-const SAFETY_DEVICE_OPTIONS: { value: DiarizationDevice; label: string; description: string }[] = [
-  { value: "cpu", label: "CPU only", description: "Lowest GPU heat" },
-  { value: "gpu", label: "GPU", description: "Faster, hotter" },
-  { value: "auto", label: "Auto", description: "Let backend decide" },
-];
-
-const PREVIEW_SEGMENT_LIMIT = 200;
-
-function formatDuration(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  }
-  return `${minutes}:${secs.toString().padStart(2, "0")}`;
-}
-
-function formatEta(seconds: number): string {
-  if (seconds < 60) {
-    return `~${seconds}s`;
-  }
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) {
-    return `~${hours}h ${minutes}min`;
-  }
-  return `~${minutes} min`;
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function formatLinkLabel(url: string): string {
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.replace(/^www\./, "");
-    const pathParts = parsed.pathname.split("/").filter(Boolean);
-    const last = pathParts[pathParts.length - 1];
-    if (last) {
-      return `${host}/${last}`;
-    }
-    return host || "Imported link";
-  } catch {
-    return "Imported link";
-  }
-}
-
-function isAbsolutePath(filePath: string): boolean {
-  if (filePath.startsWith("/") || filePath.startsWith("\\")) {
-    return true;
-  }
-  return /^[a-zA-Z]:[\\/]/.test(filePath);
-}
-
 function TranscribePageContent() {
   const searchParams = useSearchParams();
   const toast = useToast();
+  const { devMode: devModeEnabled } = useDevMode();
+  const showEngineSelector = devModeEnabled;
 
   // File state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -230,6 +147,10 @@ function TranscribePageContent() {
   const [minSpeakers, setMinSpeakers] = useState(1);
   const [maxSpeakers, setMaxSpeakers] = useState(10);
   const [enableAICleanup, setEnableAICleanup] = useState(false);
+  const [includeTimestamps, setIncludeTimestamps] = useState(true);
+  const [contextPrompt, setContextPrompt] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showSystemDetails, setShowSystemDetails] = useState(false);
   const [safetySettings, setSafetySettings] = useState<DiarizationSafetySettings>({
     mode: "safe",
     device: "cpu",
@@ -242,17 +163,26 @@ function TranscribePageContent() {
   // Provider settings
   const [sttProvider, setSttProvider] = useState("faster-whisper");
   const [sttProviderInfo, setSttProviderInfo] = useState<ServiceProviderInfo | null>(null);
+  const [sttProviderConfig, setSttProviderConfig] = useState<Record<string, any>>({});
+  const [sttProviderModel, setSttProviderModel] = useState("");
   const didLoadProviderRef = useRef(false);
+  const prevProviderRef = useRef<string | null>(null);
   const [sttModelInstalled, setSttModelInstalled] = useState<Record<string, boolean>>({});
+  const isApiProvider = sttProviderInfo?.type === "api";
 
   // Job state
   const [currentJob, setCurrentJob] = useState<TranscriptionJob | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
+  const [uploadSpeedBps, setUploadSpeedBps] = useState<number | null>(null);
+  const [uploadEtaSeconds, setUploadEtaSeconds] = useState<number | null>(null);
+  const uploadStartRef = useRef<number | null>(null);
+  const uploadLastRef = useRef<{ time: number; bytes: number } | null>(null);
   const [isRediarizing, setIsRediarizing] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const [showFullPreview, setShowFullPreview] = useState(false);
+  const [showPreview, setShowPreview] = useState(true);
 
   // ETA tracking based on real performance
   const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
@@ -261,6 +191,13 @@ function TranscribePageContent() {
   // Audio player
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  const formatSpeed = (bps: number | null) => {
+    if (!bps || bps <= 0) return null;
+    if (bps >= 1024 * 1024) return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`;
+    if (bps >= 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
+    return `${bps.toFixed(0)} B/s`;
+  };
 
   // Export modal
   const [showExportModal, setShowExportModal] = useState(false);
@@ -331,10 +268,25 @@ function TranscribePageContent() {
       return {
         ...option,
         disabled: true,
-        description: `${option.description} - Install in Models`,
+        description: `${option.description} · Install required components`,
       };
     });
   }, [engine, sttModelInstalled, sttProvider, sttProviderInfo]);
+
+  const modelPrecisionOptions = useMemo(() => {
+    const preferred = new Set(["tiny", "base", "large-v3"]);
+    const labelMap: Record<string, string> = {
+      tiny: "Nano",
+      base: "Base",
+      "large-v3": "Large",
+    };
+    return whisperModelOptions
+      .filter((option) => preferred.has(option.value))
+      .map((option) => ({
+        ...option,
+        label: labelMap[option.value] || option.label,
+      }));
+  }, [whisperModelOptions]);
 
   const jobEngine = currentJob?.engine || engine;
   const engineLabel =
@@ -348,15 +300,52 @@ function TranscribePageContent() {
       : jobDiarizationMode === "basic"
       ? "Basic (clustering)"
       : "Auto";
-  const diarizationMethodLabel =
-    currentJob?.diarization_method === "pyannote"
-      ? "AI (pyannote)"
-      : currentJob?.diarization_method === "clustering"
-      ? "Basic (clustering)"
-      : currentJob?.diarization_method === "none"
-      ? "None"
-      : null;
   const progressValue = typeof currentJob?.progress === "number" ? currentJob.progress : null;
+  const phaseInfo = useMemo(() => {
+    if (!currentJob) return null;
+    const status = currentJob.status;
+    const step = (currentJob.current_step || "").toLowerCase();
+    const progress = typeof currentJob.progress === "number" ? currentJob.progress : 0;
+    const isDownloading = status === "downloading" || step.includes("download");
+    const isExtracting = step.includes("extract") || (progress >= 2 && progress < 10);
+    const isTranscribing = status === "transcribing" || step.includes("transcrib");
+    const isDiarizing = status === "diarizing" || step.includes("speaker") || step.includes("diariz");
+    const isCleaning = status === "cleaning" || step.includes("clean");
+    const isPending = status === "pending";
+
+    const clamp = (value: number) => Math.max(0, Math.min(100, value));
+    let phaseProgress: number | null = null;
+    if (isDownloading) {
+      phaseProgress = clamp((progress / 2) * 100);
+    } else if (isExtracting) {
+      phaseProgress = clamp(((progress - 2) / 8) * 100);
+    } else if (isTranscribing) {
+      phaseProgress = clamp(((progress - 10) / 70) * 100);
+    } else if (isDiarizing) {
+      phaseProgress = clamp(((progress - 80) / 15) * 100);
+    } else if (isCleaning) {
+      phaseProgress = clamp(((progress - 95) / 5) * 100);
+    }
+
+    let phaseLabel = "Preparing";
+    if (isDownloading) phaseLabel = "Downloading";
+    else if (isExtracting) phaseLabel = "Extracting audio";
+    else if (isTranscribing) phaseLabel = "Transcribing";
+    else if (isDiarizing) phaseLabel = "Identifying speakers";
+    else if (isCleaning) phaseLabel = "Cleaning up";
+    else if (isPending) phaseLabel = "Preparing";
+
+    return {
+      phaseLabel,
+      phaseProgress,
+      isDownloading,
+      isExtracting,
+      isTranscribing,
+      isDiarizing,
+      isCleaning,
+      isPending,
+    };
+  }, [currentJob]);
 
   const canRediarize = diarizationMode !== "pyannote" || canUsePyannote;
   const rediarizeLabel =
@@ -367,9 +356,9 @@ function TranscribePageContent() {
       : "Re-diarize (Auto)";
   const rediarizeTitle =
     diarizationMode === "pyannote"
-      ? canUsePyannote
+        ? canUsePyannote
         ? "Re-run AI speaker detection (pyannote)"
-        : (pyannoteError || "Pyannote AI not configured. Go to Models page to set up.")
+        : (pyannoteError || "Pyannote AI not configured. Add a HuggingFace token in Settings.")
       : diarizationMode === "basic"
       ? "Re-run speaker clustering (no AI required)"
       : "Auto: use AI if available, otherwise basic clustering";
@@ -388,10 +377,10 @@ function TranscribePageContent() {
     diarizationMode === "basic"
       ? "bg-amber-500/10 text-amber-400"
       : canUsePyannote
-      ? "bg-emerald-500/10 text-emerald-400"
+      ? "bg-success/10 text-success"
       : "bg-amber-500/10 text-amber-400";
   const diarizationStatusDot =
-    diarizationMode === "basic" || !canUsePyannote ? "bg-amber-400" : "bg-emerald-400";
+    diarizationMode === "basic" || !canUsePyannote ? "bg-amber-400" : "bg-success";
   const showPyannoteSetup = diarizationMode !== "basic" && !canUsePyannote;
 
   const derivedSpeakersDetected = useMemo(() => {
@@ -411,6 +400,14 @@ function TranscribePageContent() {
     }
     return Math.max(speakerIds.size, speakerLabels.size);
   }, [currentJob?.segments]);
+
+  const isVideoFile = useMemo(() => {
+    const name = (currentJob?.filename || selectedFile?.name || "").toLowerCase();
+    if (!name) return false;
+    return [".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv"].some((ext) =>
+      name.endsWith(ext)
+    );
+  }, [currentJob?.filename, selectedFile?.name]);
 
   const effectiveSpeakersDetected = useMemo(() => {
     if (!currentJob || currentJob.enable_diarization === false) {
@@ -462,7 +459,7 @@ function TranscribePageContent() {
         ? "text-red-400"
         : hotspot >= 85
         ? "text-amber-400"
-        : "text-emerald-400"
+        : "text-success"
       : "text-slate-400";
 
   // Load job from URL parameter (e.g., from history page)
@@ -523,18 +520,28 @@ function TranscribePageContent() {
   }, []);
 
   const fetchJson = useCallback(async (url: string, options: RequestInit = {}) => {
+    const token = typeof window !== "undefined" ? window.electronAPI?.authToken : undefined;
+    const headers = new Headers(options.headers || {});
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+
     if (typeof window !== "undefined" && window.electronAPI?.netFetch) {
+      const headersObj: Record<string, string> = {};
+      headers.forEach((value, key) => {
+        headersObj[key] = value;
+      });
       const response = await window.electronAPI.netFetch(url, {
         method: options.method || "GET",
-        headers: options.headers as Record<string, string> | undefined,
-        body: options.body as string | undefined,
+        headers: headersObj,
+        body: typeof options.body === "string" ? options.body : undefined,
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
       return response.body ? JSON.parse(response.body) : {};
     }
-    const response = await fetch(url, options);
+    const response = await fetch(url, { ...options, headers });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -619,6 +626,8 @@ function TranscribePageContent() {
       try {
         const selection = await getProviderSelection("stt");
         setSttProvider(selection.selected || "faster-whisper");
+        setSttProviderConfig(selection.config || {});
+        setSttProviderModel(selection.config?.model || "");
       } catch {
         // Keep defaults if settings are missing.
       } finally {
@@ -628,12 +637,39 @@ function TranscribePageContent() {
     loadProviderSelection();
   }, []);
 
+  useEffect(() => {
+    if (!didLoadProviderRef.current) return;
+    const previous = prevProviderRef.current;
+    if (previous && previous !== sttProvider) {
+      setSttProviderConfig({});
+      setSttProviderModel("");
+    }
+    prevProviderRef.current = sttProvider;
+  }, [sttProvider]);
+
+  // Ensure API provider model is valid
+  useEffect(() => {
+    if (!sttProviderInfo || sttProviderInfo.type !== "api") return;
+    const models = sttProviderInfo.models || [];
+    if (!models.length) return;
+    const modelIds = models.map((model) => model.id);
+    const candidate =
+      sttProviderConfig?.model || sttProviderInfo.default_model || modelIds[0];
+    const nextModel = modelIds.includes(sttProviderModel) ? sttProviderModel : candidate;
+    if (nextModel && nextModel !== sttProviderModel) {
+      setSttProviderModel(nextModel);
+    }
+  }, [sttProviderInfo, sttProviderConfig, sttProviderModel]);
+
   // Persist STT provider selection
   useEffect(() => {
     if (!didLoadProviderRef.current) return;
     if (!sttProvider) return;
-    setProvider("stt", sttProvider).catch(() => {});
-  }, [sttProvider]);
+    const config = sttProviderInfo?.type === "api"
+      ? { ...sttProviderConfig, model: sttProviderModel || sttProviderConfig?.model }
+      : sttProviderConfig;
+    setProvider("stt", sttProvider, config).catch(() => {});
+  }, [sttProvider, sttProviderInfo, sttProviderConfig, sttProviderModel]);
 
   useEffect(() => {
     if (sttProvider !== "faster-whisper") return;
@@ -649,6 +685,13 @@ function TranscribePageContent() {
       setWhisperModel(fallback.value);
     }
   }, [sttModelInstalled, sttProvider, whisperModel]);
+
+  useEffect(() => {
+    if (!isApiProvider) return;
+    if (engine !== "fast") {
+      setEngine("fast");
+    }
+  }, [isApiProvider, engine]);
 
   useEffect(() => {
     if (!currentJob || !["downloading", "pending", "transcribing", "diarizing", "cleaning"].includes(currentJob.status)) {
@@ -676,62 +719,57 @@ function TranscribePageContent() {
     };
   }, [currentJob?.status, currentJob?.job_id, fetchJson]);
 
-  // Dropzone
-  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: any[], event: any) => {
+  const isSupportedMediaFile = useCallback((file: File) => {
+    if (file.type) {
+      return file.type.startsWith("audio/") || file.type.startsWith("video/");
+    }
+    const lower = file.name.toLowerCase();
+    return SUPPORTED_MEDIA_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  }, []);
+
+  const handleFileSelect = useCallback((file: File) => {
     setUploadError(null);
 
-    // Debug logging
-    console.log("[Dropzone] Accepted files:", acceptedFiles.length);
-    console.log("[Dropzone] Rejected files:", rejectedFiles.length);
-
-    if (rejectedFiles.length > 0) {
-      console.log("[Dropzone] Rejection reasons:", rejectedFiles.map(r => r.errors));
-      const errorMsg = rejectedFiles[0]?.errors?.[0]?.message || "Unknown error";
-      setUploadError(`File rejected: ${errorMsg}`);
-      toast.error('File rejected', errorMsg);
+    if (!isSupportedMediaFile(file)) {
+      const msg = "Unsupported file type. Use audio or video files (MP3, WAV, M4A, MP4, MKV).";
+      setUploadError(msg);
+      toast.error("Unsupported file", msg);
       return;
     }
 
-    if (acceptedFiles.length > 0) {
-      let file = acceptedFiles[0];
-      const isElectron = typeof window !== "undefined" && !!window.electronAPI?.isElectron;
-      const rawFile = event?.dataTransfer?.files?.[0] || event?.target?.files?.[0];
-      if (isElectron && rawFile?.path && isAbsolutePath(rawFile.path) && rawFile.name === file.name) {
-        file = rawFile;
-      }
-      console.log("[Dropzone] File selected:", file.name, "Size:", file.size, "Type:", file.type);
-
-      // Check if file size is readable
-      if (file.size === 0) {
-        const msg = "Cannot read file size. Try dragging the file instead of clicking.";
-        setUploadError(msg);
-        toast.warning('File issue', msg);
-        return;
-      }
-
-      // Max 4GB
-      if (file.size > 4 * 1024 * 1024 * 1024) {
-        setUploadError("File too large. Maximum size is 4GB.");
-        toast.error('File too large', 'Maximum file size is 4GB');
-        return;
-      }
-      setSelectedFile(file);
-      // Create audio URL for player
-      const url = URL.createObjectURL(file);
-      setAudioUrl(url);
+    if (file.size === 0) {
+      const msg = "Cannot read file size. Try dragging the file instead of clicking.";
+      setUploadError(msg);
+      toast.warning("File issue", msg);
+      return;
     }
-  }, []);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: {
-      "audio/*": [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac"],
-      "video/*": [".mp4", ".mkv", ".webm", ".avi", ".mov"],
-    },
-    maxFiles: 1,
-    disabled: isUploading || isImporting || (currentJob?.status === "transcribing" || currentJob?.status === "diarizing"),
-    useFsAccessApi: false,  // Required for Electron - fixes 0 bytes issue with large files
-  });
+    if (file.size > 4 * 1024 * 1024 * 1024) {
+      setUploadError("File too large. Maximum size is 4GB.");
+      toast.error("File too large", "Maximum file size is 4GB");
+      return;
+    }
+
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+    }
+
+    setSelectedFile(file);
+    setUploadProgress(0);
+    setUploadedBytes(0);
+    setUploadSpeedBps(null);
+    setUploadEtaSeconds(null);
+    uploadStartRef.current = null;
+    uploadLastRef.current = null;
+    const url = URL.createObjectURL(file);
+    setAudioUrl(url);
+  }, [audioUrl, isSupportedMediaFile, toast]);
+
+  const dropzoneDisabled =
+    isUploading ||
+    isImporting ||
+    currentJob?.status === "transcribing" ||
+    currentJob?.status === "diarizing";
 
   // Poll for job status using IPC in Electron (all network calls broken in renderer after large uploads)
   useEffect(() => {
@@ -745,7 +783,9 @@ function TranscribePageContent() {
 
           // Use IPC in Electron - renderer networking is broken after large uploads
           if (window.electronAPI?.netFetch) {
-            const response = await window.electronAPI.netFetch(url, { method: 'GET' });
+            const token = window.electronAPI?.authToken;
+            const headers: Record<string, string> | undefined = token ? { Authorization: `Bearer ${token}` } : undefined;
+            const response = await window.electronAPI.netFetch(url, { method: 'GET', headers });
             if (!response.ok) {
               throw new Error(`HTTP ${response.status}`);
             }
@@ -846,12 +886,8 @@ function TranscribePageContent() {
         try {
           console.log(`[Upload] Fallback poll attempt ${i + 1}...`);
 
-          // Use native fetch instead of axios - axios is broken in Electron after large uploads
-          const response = await fetch(`${API_BASE}/api/transcribe/history`);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          const data = await response.json();
+          // Use fetchJson (routes via IPC netFetch in Electron when available)
+          const data = await fetchJson(`${API_BASE}/api/transcribe/history`);
           const jobs = data.jobs || [];
           console.log(`[Upload] Found ${jobs.length} jobs in history`);
 
@@ -896,9 +932,30 @@ function TranscribePageContent() {
         enableAICleanup,
         diarizationMode,
         engine,
+        sttProvider,
+        isApiProvider ? sttProviderModel : undefined,
         (progress, loaded) => {
           setUploadProgress(progress);
           setUploadedBytes(loaded);
+          const now = Date.now();
+          if (!uploadStartRef.current) {
+            uploadStartRef.current = now;
+          }
+          const last = uploadLastRef.current;
+          if (last && now > last.time) {
+            const deltaBytes = loaded - last.bytes;
+            const deltaTime = (now - last.time) / 1000;
+            if (deltaBytes > 0 && deltaTime > 0) {
+              const speed = deltaBytes / deltaTime;
+              setUploadSpeedBps(speed);
+              if (selectedFile && selectedFile.size > 0) {
+                const remaining = Math.max(0, selectedFile.size - loaded);
+                const eta = speed > 0 ? remaining / speed : null;
+                setUploadEtaSeconds(eta ? Math.round(eta) : null);
+              }
+            }
+          }
+          uploadLastRef.current = { time: now, bytes: loaded };
           if (progress >= 100 && !uploadReached100At) {
             uploadReached100At = Date.now();
             console.log("[Upload] Progress reached 100%, waiting for server response...");
@@ -923,6 +980,8 @@ function TranscribePageContent() {
         // Reset ETA tracking for new job
         progressHistoryRef.current = [];
         setEtaSeconds(null);
+        setUploadSpeedBps(null);
+        setUploadEtaSeconds(null);
         setCurrentJob({
           job_id,
           status: "pending",
@@ -950,6 +1009,8 @@ function TranscribePageContent() {
       console.error("[Upload] Failed:", error);
       setUploadError(error instanceof Error ? error.message : "Upload failed");
       setIsUploading(false);
+      setUploadSpeedBps(null);
+      setUploadEtaSeconds(null);
     }
   };
 
@@ -962,6 +1023,10 @@ function TranscribePageContent() {
     setSelectedFile(null);
     setUploadProgress(0);
     setUploadedBytes(0);
+    setUploadSpeedBps(null);
+    setUploadEtaSeconds(null);
+    uploadStartRef.current = null;
+    uploadLastRef.current = null;
 
     try {
       const { job_id } = await importTranscriptionFromLink(
@@ -973,7 +1038,9 @@ function TranscribePageContent() {
         whisperModel,
         enableAICleanup,
         diarizationMode,
-        engine
+        engine,
+        sttProvider,
+        isApiProvider ? sttProviderModel : undefined
       );
 
       progressHistoryRef.current = [];
@@ -1041,6 +1108,10 @@ function TranscribePageContent() {
     setIsImporting(false);
     setShowImportModal(false);
     setEtaSeconds(null);
+    setUploadSpeedBps(null);
+    setUploadEtaSeconds(null);
+    uploadStartRef.current = null;
+    uploadLastRef.current = null;
     progressHistoryRef.current = [];
     if (audioUrl) {
       URL.revokeObjectURL(audioUrl);
@@ -1174,388 +1245,446 @@ function TranscribePageContent() {
   };
 
   const isProcessing = currentJob?.status === "downloading" || currentJob?.status === "pending" || currentJob?.status === "transcribing" || currentJob?.status === "diarizing" || currentJob?.status === "cleaning";
+  const showUploadView = !currentJob || currentJob.status === "error";
 
-  return (
-    <div className="space-y-8 animate-slide-up">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gradient">Transcription</h1>
-        <p className="mt-2 text-slate-400">
-          Upload audio or video files, or import a public link for transcription with speaker identification
-        </p>
+  const uploadActions = showUploadView ? (
+    <ActionBar
+      primary={{
+        label: "Transcribe Audio",
+        icon: Zap,
+        onClick: handleStartTranscription,
+        disabled: !selectedFile || isUploading,
+      }}
+      loading={isUploading}
+      loadingText={`Uploading... ${uploadProgress}%`}
+      pulse={!!selectedFile && !isUploading}
+    />
+  ) : undefined;
+
+  const engineSelector = showUploadView && showEngineSelector ? (
+    <UnifiedProviderSelector
+      service="stt"
+      selected={sttProvider}
+      onSelect={setSttProvider}
+      selectedModel={sttProviderModel}
+      onModelChange={setSttProviderModel}
+      onProviderInfoChange={(info) => setSttProviderInfo(info as ServiceProviderInfo | null)}
+      variant="dropdown"
+      allowedTypes={["local", "api"]}
+      showModelSelector={isApiProvider}
+      label="STT Engine"
+    />
+  ) : undefined;
+
+  const settingsContent = showUploadView ? (
+    <div className="space-y-8">
+      <div className="space-y-6">
+        <h3 className="text-[11px] uppercase tracking-[0.2em] text-foreground-muted/70 font-semibold pl-1">
+          Configuration
+        </h3>
+
+        <SelectMenu
+          label="Source Language"
+          value={language}
+          onChange={setLanguage}
+          options={LANGUAGE_OPTIONS}
+          className="space-y-2"
+          buttonClassName="h-12 rounded-lg bg-surface-2/60 border border-surface-3 text-sm tracking-wide"
+        />
+
+        {!isApiProvider && showEngineSelector && modelPrecisionOptions.length > 0 && (
+          <div className="space-y-3">
+            <label className="block text-foreground-muted text-sm pl-1">Model Precision</label>
+            <div className="grid grid-cols-3 gap-3">
+              {modelPrecisionOptions.map((option) => {
+                const isSelected = whisperModel === option.value;
+                const isDisabled = "disabled" in option ? option.disabled : false;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setWhisperModel(option.value)}
+                    disabled={isDisabled}
+                    className={cn(
+                      "rounded-lg border border-surface-3 bg-surface-2/60 py-3 text-center text-xs font-medium tracking-wide transition-all",
+                      isSelected
+                        ? "border-accent-primary/50 bg-accent-primary/5 text-accent-primary shadow-glow"
+                        : "text-foreground-muted hover:border-surface-2",
+                      isDisabled && "opacity-50 cursor-not-allowed"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <label className="block text-foreground-muted text-sm pl-1">Engine</label>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => setEngine("fast")}
+              disabled={isApiProvider}
+              className={cn(
+                "rounded-lg border border-surface-3 bg-surface-2/60 px-3 py-3 text-left text-xs tracking-wide transition-all",
+                engine === "fast"
+                  ? "border-accent-primary/50 bg-accent-primary/5 text-accent-primary shadow-glow"
+                  : "text-foreground-muted hover:border-surface-2",
+                isApiProvider && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <div className="font-medium text-sm">Fast</div>
+              <div className="text-[11px] opacity-70">Segment-level speakers</div>
+            </button>
+            <button
+              onClick={() => setEngine("accurate")}
+              disabled={isApiProvider || !engineStatus?.engines?.accurate?.available}
+              className={cn(
+                "rounded-lg border border-surface-3 bg-surface-2/60 px-3 py-3 text-left text-xs tracking-wide transition-all",
+                engine === "accurate"
+                  ? "border-accent-secondary/50 bg-accent-secondary/5 text-accent-secondary shadow-glow"
+                  : "text-foreground-muted hover:border-surface-2",
+                (isApiProvider || !engineStatus?.engines?.accurate?.available) &&
+                  "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <div className="font-medium text-sm">Accurate</div>
+              <div className="text-[11px] opacity-70">Word-level speakers</div>
+            </button>
+          </div>
+          {isApiProvider && (
+            <p className="text-xs text-foreground-muted/80">
+              API provider selected. Engine selection is disabled for cloud transcription.
+            </p>
+          )}
+          {engine === "accurate" && (
+            <p className="text-xs text-accent-secondary/80">
+              Uses WhisperX for precise word alignment and per-word speaker detection
+            </p>
+          )}
+          {!isApiProvider && !engineStatus?.engines?.accurate?.available && (
+            <p className="text-xs text-foreground-muted/70">
+              WhisperX not available. Enable advanced packages in Settings.
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* Main content */}
-      {!currentJob || currentJob.status === "error" ? (
-        // Upload & Settings View
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Dropzone */}
-          <div className="lg:col-span-2">
-            <div
-              {...getRootProps()}
-              className={cn(
-                "border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors",
-                isDragActive
-                  ? "border-emerald-400 bg-emerald-500/10"
-                  : selectedFile
-                    ? "border-emerald-400/40 bg-emerald-500/5"
-                    : "border-white/10 hover:border-white/20",
-                isUploading && "pointer-events-none opacity-50"
-              )}
-            >
-              <input {...getInputProps()} />
-              {selectedFile ? (
-                <div className="space-y-4">
-                  <div className="w-16 h-16 mx-auto rounded-full bg-emerald-500/20 flex items-center justify-center">
-                    <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="text-lg font-medium text-slate-100">{selectedFile.name}</p>
-                    <p className="text-sm text-slate-400">{formatFileSize(selectedFile.size)}</p>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleReset();
-                    }}
-                    className="text-sm text-slate-400 hover:text-slate-100 transition-colors"
-                  >
-                    Choose different file
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <Upload className="w-12 h-12 mx-auto text-slate-400" />
-                  <div>
-                    <p className="text-lg text-slate-400">
-                      {isDragActive ? "Drop file here" : "Drop audio/video file or click to browse"}
-                    </p>
-                    <p className="text-sm text-slate-400 mt-2">
-                      MP3, WAV, M4A, MP4, MKV up to 4GB (5 hours max)
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
+      <div className="h-px bg-surface-3/60 w-full" />
 
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="space-y-5">
+        <h3 className="text-[11px] uppercase tracking-[0.2em] text-foreground-muted/70 font-semibold pl-1">
+          Processing Options
+        </h3>
+
+        <div className="flex items-center justify-between py-1">
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-foreground">Speaker Diarization</span>
+            <span className="text-xs text-foreground-muted">Identify individual speakers</span>
+          </div>
+          <Toggle enabled={enableDiarization} onChange={setEnableDiarization} size="sm" />
+        </div>
+
+        {enableDiarization && diarizationStatus && (
+          <div className={cn("text-xs px-2 py-1.5 rounded", diarizationStatusTone)}>
+            <div className="flex items-center gap-1.5">
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", diarizationStatusDot)} />
+              {diarizationStatusText}
+            </div>
+            {showPyannoteSetup && (
               <button
-                type="button"
-                onClick={() => {
-                  setImportError(null);
-                  setShowImportModal(true);
-                }}
-                disabled={isUploading || isImporting}
-                className="btn btn-secondary text-sm"
+                onClick={() => setShowPyannoteWizard(true)}
+                className="mt-1.5 text-[11px] text-amber-300 hover:text-amber-200 underline underline-offset-2 transition-colors"
               >
-                <Link2 className="w-4 h-4" />
-                Import from link
+                Setup AI detection for better accuracy
               </button>
-              <span className="text-xs text-slate-400">
-                YouTube, Dropbox, Google Drive, Vimeo, X, and direct URLs
-              </span>
-            </div>
-
-            {uploadError && (
-              <div className="glass-card mt-4 p-4 border-red-500/30 bg-red-500/10 text-red-300 flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                <p>{uploadError}</p>
-              </div>
-            )}
-
-            {currentJob?.status === "error" && (
-              <div className="glass-card mt-4 p-4 border-red-500/30 bg-red-500/10 text-red-300">
-                <div className="flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                  <div>
-                    <p className="font-medium">Transcription failed</p>
-                    <p className="text-red-300/70 text-sm">{currentJob.error || "Unknown error"}</p>
-                  </div>
-                </div>
-              </div>
             )}
           </div>
+        )}
 
-          {/* Settings Panel */}
-          <div className="glass-card p-4 space-y-4">
-            <h3 className="font-medium text-slate-100 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-emerald-400" />
-              Settings
-            </h3>
+        {enableDiarization && (
+          <SelectMenu
+            label="Diarization mode"
+            value={diarizationMode}
+            options={diarizationModeOptions}
+            onChange={(value) => setDiarizationMode(value as DiarizationMode)}
+            buttonClassName="py-2 text-sm"
+          />
+        )}
 
-            {/* STT Provider */}
-            <UnifiedProviderSelector
-              service="stt"
-              selected={sttProvider}
-              onSelect={setSttProvider}
-              onProviderInfoChange={(info) => setSttProviderInfo(info as ServiceProviderInfo | null)}
-              variant="dropdown"
-              allowedTypes={['local']}
-              label="STT Engine"
-            />
+        <div className="flex items-center justify-between py-1">
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-foreground">Smart Formatting</span>
+            <span className="text-xs text-foreground-muted">Auto-punctuation & casing</span>
+          </div>
+          <Toggle enabled={enableAICleanup} onChange={setEnableAICleanup} size="sm" />
+        </div>
 
-            {/* Language */}
-            <SelectMenu
-              label="Language"
-              value={language}
-              onChange={setLanguage}
-              options={LANGUAGE_OPTIONS}
-            />
+        <div className="flex items-center justify-between py-1">
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-foreground">Time Stamps</span>
+            <span className="text-xs text-foreground-muted">Include timecodes</span>
+          </div>
+          <Toggle enabled={includeTimestamps} onChange={setIncludeTimestamps} size="sm" />
+        </div>
+      </div>
 
-            {/* Model */}
-            <SelectMenu
-              label="Model"
-              value={whisperModel}
-              onChange={setWhisperModel}
-              options={whisperModelOptions}
-            />
+      <div className="h-px bg-surface-3/60 w-full" />
 
-            {/* Engine Selector */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-slate-400">
-                Engine
-              </label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setEngine("fast")}
-                  className={cn(
-                    "flex-1 px-3 py-2 rounded-lg text-sm transition-colors text-left",
-                    engine === "fast"
-                      ? "bg-emerald-500/20 border border-emerald-500/50 text-emerald-400"
-                      : "bg-white/5 border border-white/10 text-slate-400 hover:border-white/20"
-                  )}
-                >
-                  <div className="font-medium">Fast</div>
-                  <div className="text-xs opacity-70">Segment-level speakers</div>
-                </button>
-                <button
-                  onClick={() => setEngine("accurate")}
-                  disabled={!engineStatus?.engines?.accurate?.available}
-                  className={cn(
-                    "flex-1 px-3 py-2 rounded-lg text-sm transition-colors text-left",
-                    engine === "accurate"
-                      ? "bg-purple-500/20 border border-purple-500/50 text-purple-400"
-                      : "bg-white/5 border border-white/10 text-slate-400 hover:border-white/20",
-                    !engineStatus?.engines?.accurate?.available && "opacity-50 cursor-not-allowed"
-                  )}
-                >
-                  <div className="font-medium">Accurate</div>
-                  <div className="text-xs opacity-70">Word-level speakers</div>
-                </button>
+      <div className="space-y-3">
+        <label className="text-foreground-muted text-sm pl-1 flex items-center justify-between">
+          <span>Context Prompt</span>
+          <span className="text-[11px] text-foreground-muted/60">Optional</span>
+        </label>
+        <textarea
+          className="w-full rounded-lg border border-surface-3 bg-surface-2/60 px-4 py-3 text-foreground placeholder:text-foreground-muted/50 focus:border-accent-primary focus:ring-0 focus:bg-surface-2/80 text-sm tracking-wide min-h-[100px] resize-none transition-colors"
+          placeholder="Add specific technical terms, names, or formatting instructions..."
+          value={contextPrompt}
+          onChange={(e) => setContextPrompt(e.target.value)}
+        />
+      </div>
+
+      <div className="pt-2">
+        <button
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="flex items-center justify-between w-full text-left"
+        >
+          <span className="text-sm font-medium text-foreground">Advanced settings</span>
+          {showAdvanced ? (
+            <ChevronUp className="w-4 h-4 text-foreground-muted" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-foreground-muted" />
+          )}
+        </button>
+
+        {showAdvanced && (
+          <div className="mt-4 space-y-4">
+            {enableDiarization && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-foreground-muted mb-1">Min speakers</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={maxSpeakers}
+                    value={minSpeakers}
+                    onChange={(e) => setMinSpeakers(parseInt(e.target.value) || 1)}
+                    className="input w-full text-sm py-1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-foreground-muted mb-1">Max speakers</label>
+                  <input
+                    type="number"
+                    min={minSpeakers}
+                    max={20}
+                    value={maxSpeakers}
+                    onChange={(e) => setMaxSpeakers(parseInt(e.target.value) || 10)}
+                    className="input w-full text-sm py-1"
+                  />
+                </div>
               </div>
-              {engine === "accurate" && (
-                <p className="text-xs text-purple-400/80">
-                  Uses WhisperX for precise word alignment and per-word speaker detection
-                </p>
-              )}
-              {!engineStatus?.engines?.accurate?.available && (
-                <p className="text-xs text-slate-400/60">
-                  WhisperX not available. Visit the Models page for installation options.
-                </p>
-              )}
+            )}
+
+            <div className="grid grid-cols-1 gap-3">
+              <SelectMenu
+                label="Thermal mode"
+                value={safetySettings.mode}
+                options={SAFETY_MODE_OPTIONS}
+                onChange={(value) =>
+                  saveSafetySettings({
+                    ...safetySettings,
+                    mode: value as DiarizationSafetyMode,
+                  })
+                }
+                buttonClassName="py-2 text-sm"
+              />
+              <SelectMenu
+                label="Device"
+                value={safetySettings.device}
+                options={SAFETY_DEVICE_OPTIONS}
+                onChange={(value) =>
+                  saveSafetySettings({
+                    ...safetySettings,
+                    device: value as DiarizationDevice,
+                  })
+                }
+                buttonClassName="py-2 text-sm"
+              />
             </div>
 
-            {/* Diarization */}
-            <div className="space-y-3">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={enableDiarization}
-                  onChange={(e) => setEnableDiarization(e.target.checked)}
-                  className="w-5 h-5 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
-                />
-                <span className="text-slate-400 flex items-center gap-2">
-                  <Users className="w-4 h-4" />
-                  Speaker identification
-                </span>
-              </label>
+            <p className="text-xs text-foreground-muted">
+              {safetySettings.device === "gpu"
+                ? "GPU diarization is enabled. Use at your own risk."
+                : "GPU diarization is off by default for stability. Enable at your own risk."}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  ) : undefined;
 
-              {enableDiarization && (
-                <div className="pl-8 space-y-3">
-                  {/* Diarization status indicator */}
-                  {diarizationStatus && (
-                    <div className={cn(
-                      "text-xs px-2 py-1.5 rounded",
-                      diarizationStatusTone
-                    )}>
-                      <div className="flex items-center gap-1.5">
-                        <div className={cn(
-                          "w-1.5 h-1.5 rounded-full flex-shrink-0",
-                          diarizationStatusDot
-                        )} />
-                        {diarizationStatusText}
+  return (
+    <>
+      <div className="px-8 lg:px-16 py-12 page-premium">
+      <ModuleShell
+        title="New Transcription"
+        description="Audio processing suite v2.4"
+        layout={showUploadView ? "default" : "wide"}
+        settingsPosition="right"
+        settingsTitle=""
+        engineSelector={engineSelector}
+        settings={settingsContent}
+        actions={uploadActions}
+        main={
+          <div className="space-y-8">
+            {showUploadView ? (
+              <div className="space-y-6">
+                <Dropzone
+                  onFile={handleFileSelect}
+                  accept="audio/*,video/*"
+                  fileType="any"
+                  maxSize={2 * 1024 * 1024 * 1024}
+                  uploading={isUploading}
+                  uploadProgress={uploadProgress}
+                  error={uploadError}
+                  disabled={dropzoneDisabled}
+                  title="Drop audio files to upload"
+                  subtitle="MP3, WAV, M4A, FLAC (Max 2GB)"
+                  variant="bare"
+                  className="p-0"
+                />
+
+                {selectedFile && (
+                  <div className="group relative pl-4 border-l border-surface-3/60 hover:border-accent-primary/60 transition-colors py-2">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-4">
+                        <div className="bg-surface-2/80 w-10 h-10 flex items-center justify-center rounded-lg text-accent-primary border border-surface-3">
+                          <FileAudio className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-foreground text-sm font-medium tracking-wide">{selectedFile.name}</p>
+                          <p className="text-foreground-muted text-xs tracking-wide opacity-60 mt-0.5">
+                            {formatFileSize(selectedFile.size)}
+                          </p>
+                        </div>
                       </div>
-                      {showPyannoteSetup && (
-                        <button
-                          onClick={() => setShowPyannoteWizard(true)}
-                          className="mt-1.5 text-[11px] text-amber-300 hover:text-amber-200 underline underline-offset-2 transition-colors"
-                        >
-                          Setup AI detection for better accuracy
-                        </button>
-                      )}
+                      <button
+                        onClick={handleReset}
+                        className="text-foreground-muted hover:text-red-400 transition-colors text-sm opacity-70 hover:opacity-100"
+                        aria-label="Remove file"
+                      >
+                        <XCircle className="w-4 h-4" />
+                      </button>
                     </div>
-                  )}
-
-                  <SelectMenu
-                    label="Diarization mode"
-                    value={diarizationMode}
-                    options={diarizationModeOptions}
-                    onChange={(value) => setDiarizationMode(value as DiarizationMode)}
-                    buttonClassName="py-2 text-sm"
-                  />
-
-                  <div className="grid grid-cols-1 gap-3">
-                    <SelectMenu
-                      label="Thermal mode"
-                      value={safetySettings.mode}
-                      options={SAFETY_MODE_OPTIONS}
-                      onChange={(value) =>
-                        saveSafetySettings({
-                          ...safetySettings,
-                          mode: value as DiarizationSafetyMode,
-                        })
-                      }
-                      buttonClassName="py-2 text-sm"
-                    />
-                    <SelectMenu
-                      label="Device"
-                      value={safetySettings.device}
-                      options={SAFETY_DEVICE_OPTIONS}
-                      onChange={(value) =>
-                        saveSafetySettings({
-                          ...safetySettings,
-                          device: value as DiarizationDevice,
-                        })
-                      }
-                      buttonClassName="py-2 text-sm"
-                    />
+                    <div className="flex items-center gap-4">
+                      <div className="flex-1 h-[2px] bg-surface-3/60 overflow-hidden rounded-full">
+                        <div
+                          className="h-full bg-accent-primary shadow-glow transition-all duration-300"
+                          style={{ width: `${uploadProgress || 0}%` }}
+                        />
+                      </div>
+                      <span className="text-foreground-muted text-xs font-mono opacity-70">
+                        {uploadProgress || 0}%
+                      </span>
+                    </div>
+                    {(uploadSpeedBps || uploadEtaSeconds) && (
+                      <div className="flex justify-between text-[11px] text-foreground-muted/70 mt-2">
+                        <span>{formatSpeed(uploadSpeedBps) || "Calculating speed..."}</span>
+                        {uploadEtaSeconds ? <span>ETA {formatEta(uploadEtaSeconds)}</span> : <span />}
+                      </div>
+                    )}
+                    {uploadProgress >= 100 && (
+                      <div className="flex items-center gap-2 text-[11px] text-amber-300 pt-2">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <span>Server processing file... (large files may take several minutes)</span>
+                      </div>
+                    )}
+                    <div className="absolute -left-[5px] top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-background border border-accent-primary rounded-full hidden group-hover:block" />
                   </div>
-                  <p className="text-xs text-slate-400">
-                    {safetySettings.device === "gpu"
-                      ? "GPU diarization is enabled. Use at your own risk."
-                      : "GPU diarization is off by default for stability. Enable at your own risk."}
-                  </p>
+                )}
 
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1">
-                      <label className="block text-xs text-slate-400 mb-1">Min speakers</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={maxSpeakers}
-                        value={minSpeakers}
-                        onChange={(e) => setMinSpeakers(parseInt(e.target.value) || 1)}
-                        className="input w-full text-sm py-1"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <label className="block text-xs text-slate-400 mb-1">Max speakers</label>
-                      <input
-                        type="number"
-                        min={minSpeakers}
-                        max={20}
-                        value={maxSpeakers}
-                        onChange={(e) => setMaxSpeakers(parseInt(e.target.value) || 10)}
-                        className="input w-full text-sm py-1"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* AI Cleanup */}
-            <div className="space-y-2">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={enableAICleanup}
-                  onChange={(e) => setEnableAICleanup(e.target.checked)}
-                  className="w-5 h-5 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
-                />
-                <span className="text-slate-400 flex items-center gap-2">
-                  <Wand2 className="w-4 h-4" />
-                  Clean up with AI
-                </span>
-              </label>
-              {enableAICleanup && (
-                <p className="text-xs text-slate-400 pl-8">
-                  Improves punctuation, grammar, and paragraph structure while preserving meaning
-                </p>
-              )}
-            </div>
-
-            {/* Start Button */}
-            <button
-              onClick={handleStartTranscription}
-              disabled={!selectedFile || isUploading}
-              className="btn btn-primary w-full"
-            >
-              {isUploading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Uploading... {uploadProgress}%
-                </>
-              ) : (
-                <>
-                  <FileAudio className="w-5 h-5" />
-                  Start Transcription
-                </>
-              )}
-            </button>
-
-            {/* Upload progress bar */}
-            {isUploading && (
-              <div className="mt-3 space-y-2">
-                <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 transition-all duration-300"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
-                </div>
-                <div className="flex justify-between text-xs text-slate-400">
-                  <span>
-                    {formatFileSize(uploadedBytes)} / {selectedFile ? formatFileSize(selectedFile.size) : '?'}
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportError(null);
+                      setShowImportModal(true);
+                    }}
+                    disabled={isUploading || isImporting}
+                    className="text-xs tracking-[0.2em] uppercase font-medium text-accent-primary hover:text-white transition-colors"
+                  >
+                    Import from link
+                  </button>
+                  <span className="text-xs text-foreground-muted">
+                    YouTube, Dropbox, Google Drive, Vimeo, X, and direct URLs
                   </span>
-                  <span>{uploadProgress}%</span>
                 </div>
-                {uploadProgress >= 100 && (
-                  <div className="flex items-center justify-center gap-2 text-xs text-amber-400 pt-1">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>Server processing file... (large files may take several minutes)</span>
+
+                <details className="group open:bg-transparent" open>
+                  <summary className="flex cursor-pointer items-center gap-3 text-sm text-foreground-muted hover:text-foreground transition-colors select-none mb-4 list-none outline-none">
+                    <ChevronRight className="w-4 h-4 transition-transform group-open:rotate-90" />
+                    <span className="font-medium tracking-wide">Live Audio Analysis</span>
+                  </summary>
+                  <div className="h-32 w-full rounded-xl bg-surface-2/40 border border-surface-3/60 flex items-center justify-center relative overflow-hidden backdrop-blur-sm">
+                    <div className="flex items-center justify-center gap-1 h-16 w-full px-8 opacity-60">
+                      {[4, 8, 6, 10, 5, 3, 8, 12, 6, 4, 8, 6, 10, 5, 3, 8, 16, 6, 4, 8, 6, 10, 5, 3, 8, 12, 6, 4, 8, 6, 10, 5, 3, 8, 12, 6].map((height, idx) => (
+                        <div
+                          key={`bar-${idx}`}
+                          className="w-0.5 bg-accent-primary rounded-full opacity-70"
+                          style={{ height: `${height}px` }}
+                        />
+                      ))}
+                    </div>
+                    <div className="absolute bottom-3 right-4 text-[10px] text-foreground-muted/50 font-mono">
+                      44.1kHz • Stereo
+                    </div>
+                  </div>
+                </details>
+
+                {currentJob?.status === "error" && (
+                  <div className="glass-card p-4 border-red-500/30 bg-red-500/10 text-red-300">
+                    <div className="flex items-center gap-3">
+                      <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                      <div>
+                        <p className="font-medium">Transcription failed</p>
+                        <p className="text-red-300/70 text-sm">{currentJob.error || "Unknown error"}</p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        </div>
-      ) : isProcessing || currentJob?.status === "cancelled" || currentJob?.status === "paused" ? (
+            ) : isProcessing || currentJob?.status === "cancelled" || currentJob?.status === "paused" ? (
         // Processing View with Live Preview
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-6">
           {/* Progress Panel */}
           <div className="glass-card p-6">
-            <div className="text-center space-y-5">
-              <div className="w-16 h-16 mx-auto rounded-full bg-emerald-500/20 flex items-center justify-center">
-                {currentJob?.status === "cancelled" ? (
-                  <XCircle className="w-8 h-8 text-amber-400" />
-                ) : currentJob?.status === "paused" ? (
-                  <Pause className="w-8 h-8 text-blue-400" />
-                ) : (
-                  <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
-                )}
-              </div>
+            <div className="space-y-5">
+              <div className="flex items-start gap-4">
+                <div className="w-14 h-14 rounded-full bg-accent-primary/15 flex items-center justify-center flex-shrink-0">
+                  {currentJob?.status === "cancelled" ? (
+                    <XCircle className="w-7 h-7 text-amber-400" />
+                  ) : currentJob?.status === "paused" ? (
+                    <Pause className="w-7 h-7 text-blue-400" />
+                  ) : (
+                    <Loader2 className="w-7 h-7 text-accent-primary animate-spin" />
+                  )}
+                </div>
 
-              <div>
-                <h2 className="text-lg font-semibold text-slate-100 mb-1">
-                  {currentJob?.status === "downloading" && "Downloading..."}
-                  {currentJob?.status === "pending" && "Preparing..."}
-                  {currentJob?.status === "transcribing" && "Transcribing..."}
-                  {currentJob?.status === "diarizing" && "Identifying speakers..."}
-                  {currentJob?.status === "cleaning" && "Cleaning up with AI..."}
-                  {currentJob?.status === "cancelled" && "Cancelled"}
-                  {currentJob?.status === "paused" && "Paused"}
-                </h2>
-                <p className="text-sm text-slate-400">{currentJob?.current_step || "Processing audio..."}</p>
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-100 mb-1">
+                    {currentJob?.status === "downloading" && "Downloading..."}
+                    {currentJob?.status === "pending" && "Preparing..."}
+                    {currentJob?.status === "transcribing" && "Transcribing..."}
+                    {currentJob?.status === "diarizing" && "Identifying speakers..."}
+                    {currentJob?.status === "cleaning" && "Cleaning up with AI..."}
+                    {currentJob?.status === "cancelled" && "Cancelled"}
+                    {currentJob?.status === "paused" && "Paused"}
+                  </h2>
+                  <p className="text-sm text-slate-400">{currentJob?.current_step || "Processing audio..."}</p>
+                </div>
               </div>
 
               {/* Progress bar */}
@@ -1567,11 +1696,26 @@ function TranscribePageContent() {
                       ? "bg-amber-500"
                       : currentJob?.status === "paused"
                       ? "bg-blue-500"
-                      : "bg-gradient-to-r from-emerald-500 to-teal-500"
+                      : "bg-gradient-to-r from-accent-primary to-accent-secondary"
                   )}
                   style={{ width: `${currentJob?.progress || 0}%` }}
                 />
               </div>
+
+              {phaseInfo && phaseInfo.phaseProgress !== null && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-slate-400">
+                    <span>{phaseInfo?.phaseLabel} progress</span>
+                    <span>{phaseInfo?.phaseProgress?.toFixed(0)}%</span>
+                  </div>
+                  <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="h-full bg-accent-primary/80 transition-all duration-500"
+                      style={{ width: `${phaseInfo?.phaseProgress || 0}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-between text-xs text-slate-400">
                 <span>{typeof currentJob?.progress === 'number' ? currentJob.progress.toFixed(1) : currentJob?.progress}%</span>
@@ -1580,7 +1724,7 @@ function TranscribePageContent() {
                     <span>Elapsed {formatDuration(currentJob.elapsed_seconds)}</span>
                   )}
                   {etaSeconds !== null && etaSeconds > 0 && currentJob?.status !== "cancelled" && (
-                    <span className="text-emerald-400">{formatEta(etaSeconds)}</span>
+                    <span className="text-accent-primary">{formatEta(etaSeconds)}</span>
                   )}
                   {(() => {
                     const totalDuration = currentJob?.total_duration;
@@ -1592,78 +1736,27 @@ function TranscribePageContent() {
                 </span>
               </div>
 
-              <div className="flex flex-wrap justify-center gap-2 text-[10px] text-slate-400">
-                <span className="px-2 py-0.5 rounded-full bg-white/10">
-                  Engine: {engineLabel}
-                </span>
-                {currentJob?.enable_diarization === false ? (
-                  <span className="px-2 py-0.5 rounded-full bg-white/10">Diarization: Off</span>
-                ) : (
-                  <span className="px-2 py-0.5 rounded-full bg-white/10">
-                    Diarization: {diarizationModeLabel}
-                  </span>
-                )}
-                {diarizationMethodLabel && (
-                  <span className="px-2 py-0.5 rounded-full bg-white/10">
-                    Method: {diarizationMethodLabel}
-                  </span>
-                )}
+              <div className="text-xs text-slate-400">
+                <span className="text-slate-200">Engine:</span> {engineLabel}
+                <span className="mx-2 text-slate-500">•</span>
+                <span className="text-slate-200">Speakers:</span>{" "}
+                {currentJob?.enable_diarization === false ? "Off" : diarizationModeLabel}
                 {effectiveSpeakersDetected > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-white/10">
-                    Speakers: {effectiveSpeakersDetected}
-                  </span>
+                  <>
+                    <span className="mx-2 text-slate-500">•</span>
+                    <span className="text-slate-200">Detected:</span> {effectiveSpeakersDetected}
+                  </>
                 )}
-              </div>
-
-              <div className="flex flex-wrap justify-center gap-2 text-[10px] text-slate-400">
-                <span className="px-2 py-0.5 rounded-full bg-white/10 flex items-center gap-1">
-                  <Thermometer className="w-3 h-3 text-emerald-400" />
-                  <span>{hotspotLabel}:</span>
-                  <span className={hotspotTone}>
-                    {typeof hotspot === "number" ? `${hotspot.toFixed(0)}°C` : "N/A"}
-                  </span>
-                </span>
-                {primaryGpu?.temperature?.core_c != null && (
-                  <span className="px-2 py-0.5 rounded-full bg-white/10">
-                    GPU {primaryGpu.temperature.core_c.toFixed(0)}°C
-                  </span>
-                )}
-                {primaryGpu?.temperature?.memory_c != null && (
-                  <span className="px-2 py-0.5 rounded-full bg-white/10">
-                    VRAM {primaryGpu.temperature.memory_c.toFixed(0)}°C
-                  </span>
-                )}
-              </div>
-
-              {/* Processing steps indicator */}
-              <div className="flex justify-center gap-1.5 pt-1">
-                <div className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 ${
-                  progressValue !== null && progressValue >= 2 && progressValue < 10 ? "bg-emerald-500/30 text-emerald-300" :
-                  progressValue !== null && progressValue >= 10 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
-                }`}>
-                  {progressValue !== null && progressValue >= 2 && progressValue < 10 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                  Extract
-                </div>
-                <div className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 ${
-                  progressValue !== null && progressValue >= 10 && progressValue < 80 ? "bg-emerald-500/30 text-emerald-300" :
-                  progressValue !== null && progressValue >= 80 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
-                }`}>
-                  {progressValue !== null && progressValue >= 10 && progressValue < 80 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                  Transcribe
-                </div>
-                <div className={`px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 ${
-                  progressValue !== null && progressValue >= 80 && progressValue < 95 ? "bg-emerald-500/30 text-emerald-300" :
-                  progressValue !== null && progressValue >= 95 ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-slate-400"
-                }`}>
-                  {progressValue !== null && progressValue >= 80 && progressValue < 95 && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                  Speakers
-                </div>
               </div>
 
               {/* File info */}
               <div className="pt-3 border-t border-white/10 text-xs text-slate-400">
-                <span className="text-slate-100">{currentJob?.filename}</span>
-                {currentJob?.file_size_bytes && <span> ({formatFileSize(currentJob.file_size_bytes)})</span>}
+                <span className="text-slate-100">
+                  {currentJob?.filename}
+                  {currentJob?.file_size_bytes && (
+                    <span className="text-slate-400"> ({formatFileSize(currentJob.file_size_bytes)})</span>
+                  )}
+                </span>
               </div>
 
               {/* Pause / Resume / Cancel buttons */}
@@ -1720,9 +1813,9 @@ function TranscribePageContent() {
           </div>
 
           {/* Live Preview Panel */}
-          <div className="glass-card p-4 flex flex-col max-h-[600px]">
-            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/10">
-              <Eye className="w-4 h-4 text-emerald-400" />
+          <div className="glass-card p-4">
+            <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+              <Eye className="w-4 h-4 text-accent-primary" />
               <span className="text-sm font-medium text-slate-100">Live Preview</span>
               <div className="ml-auto flex items-center gap-2">
                 {previewTotal > 0 && (
@@ -1732,7 +1825,7 @@ function TranscribePageContent() {
                       : `${previewTotal} segments`}
                   </span>
                 )}
-                {previewTotal > PREVIEW_SEGMENT_LIMIT && (
+                {previewTotal > PREVIEW_SEGMENT_LIMIT && showPreview && (
                   <button
                     onClick={() => setShowFullPreview(!showFullPreview)}
                     className="text-xs text-slate-400 hover:text-slate-100 transition-colors"
@@ -1740,52 +1833,63 @@ function TranscribePageContent() {
                     {showFullPreview ? "Show less" : "Show all"}
                   </button>
                 )}
+                <button
+                  onClick={() => setShowPreview(!showPreview)}
+                  className="text-xs text-slate-400 hover:text-slate-100 transition-colors flex items-center gap-1"
+                >
+                  {showPreview ? "Hide" : "Show"}
+                  {showPreview ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-              {(!currentJob?.segments || currentJob.segments.length === 0) ? (
-                <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                  <div className="flex gap-1 mb-2">
-                    <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-pulse" />
-                    <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-pulse delay-75" />
-                    <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-pulse delay-150" />
-                  </div>
-                  <p className="text-sm">Waiting for transcription...</p>
-                  <p className="text-xs mt-1 opacity-60">Text will appear here as it's transcribed</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {/* Transcribed text as flowing paragraphs - easy to select and copy */}
-                  <div className="text-sm text-slate-100 leading-relaxed select-text">
-                    {previewText}
-                  </div>
-
-                  {currentJob?.status === "diarizing" && (
-                    <p className="text-xs text-slate-400">
-                      Speaker labels appear as diarization assigns them. The preview refreshes during this step.
-                    </p>
-                  )}
-
-                  {/* Encrypted/pending indicator - separate element, not selectable */}
-                  {currentJob?.status === "transcribing" && progressValue !== null && progressValue < 80 && (
-                    <div className="select-none pointer-events-none">
-                      <div className="inline-flex items-center gap-1 text-emerald-400/60 animate-pulse">
-                        <Loader2 className="w-3 h-3 animate-spin" />
+            {showPreview && (
+              <div className="mt-3 flex flex-col max-h-[420px]">
+                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                  {(!currentJob?.segments || currentJob.segments.length === 0) ? (
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                      <div className="flex gap-1 mb-2">
+                        <div className="w-2 h-2 bg-accent-primary/40 rounded-full animate-pulse" />
+                        <div className="w-2 h-2 bg-accent-primary/40 rounded-full animate-pulse delay-75" />
+                        <div className="w-2 h-2 bg-accent-primary/40 rounded-full animate-pulse delay-150" />
                       </div>
-                      <span className="ml-2 font-mono text-sm tracking-wider select-none" style={{
-                        background: "linear-gradient(90deg, rgba(52,211,153,0.3) 0%, rgba(52,211,153,0.1) 50%, transparent 100%)",
-                        WebkitBackgroundClip: "text",
-                        WebkitTextFillColor: "transparent",
-                        filter: "blur(1px)"
-                      }}>
-                        ████████ ██████ ████ ██████████ ███████ ████ ██████ █████████...
-                      </span>
+                      <p className="text-sm">Waiting for transcription...</p>
+                      <p className="text-xs mt-1 opacity-60">Text will appear here as it's transcribed</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {/* Transcribed text as flowing paragraphs - easy to select and copy */}
+                      <div className="text-sm text-slate-100 leading-relaxed select-text">
+                        {previewText}
+                      </div>
+
+                      {currentJob?.status === "diarizing" && (
+                        <p className="text-xs text-slate-400">
+                          Speaker labels appear as diarization assigns them. The preview refreshes during this step.
+                        </p>
+                      )}
+
+                      {/* Encrypted/pending indicator - separate element, not selectable */}
+                      {currentJob?.status === "transcribing" && progressValue !== null && progressValue < 80 && (
+                        <div className="select-none pointer-events-none">
+                          <div className="inline-flex items-center gap-1 text-accent-primary/70 animate-pulse">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          </div>
+                          <span className="ml-2 font-mono text-sm tracking-wider select-none" style={{
+                            background: "linear-gradient(90deg, rgba(108,168,255,0.35) 0%, rgba(108,168,255,0.15) 50%, transparent 100%)",
+                            WebkitBackgroundClip: "text",
+                            WebkitTextFillColor: "transparent",
+                            filter: "blur(1px)"
+                          }}>
+                            ████████ ██████ ████ ██████████ ███████ ████ ██████ █████████...
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       ) : currentJob.status === "completed" || currentJob.status === "interrupted" ? (
@@ -1898,98 +2002,112 @@ function TranscribePageContent() {
             </span>
           </div>
 
-          <div className="glass-card p-4 flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Thermometer className="w-4 h-4 text-emerald-400" />
-              <span className="text-sm text-slate-400">{hotspotLabel}</span>
-              <span className={cn("text-sm font-semibold", hotspotTone)}>
-                {typeof hotspot === "number" ? `${hotspot.toFixed(1)}°C` : "N/A"}
-              </span>
-              {primaryGpu?.temperature?.core_c != null && (
-                <span className="text-xs text-slate-400">
-                  Core {primaryGpu.temperature.core_c.toFixed(0)}°C
-                </span>
+          <div className="glass-card p-4">
+            <button
+              type="button"
+              onClick={() => setShowSystemDetails(!showSystemDetails)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <span className="text-sm font-medium text-slate-200">System & cache</span>
+              {showSystemDetails ? (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
               )}
-              {primaryGpu?.temperature?.memory_c != null && (
-                <span className="text-xs text-slate-400">
-                  Mem {primaryGpu.temperature.memory_c.toFixed(0)}°C
-                </span>
-              )}
-              {telemetry?.gpu?.available === false && (
-                <span className="text-xs text-slate-400">
-                  {telemetry.gpu.reason || "Telemetry unavailable"}
-                </span>
-              )}
-              {telemetryError && telemetry?.gpu?.available !== false && (
-                <span className="text-xs text-slate-400">{telemetryError}</span>
-              )}
-            </div>
+            </button>
 
-            <div className="flex items-center gap-3 ml-auto">
-              <div className="min-w-[200px]">
-                <SelectMenu
-                  label="Thermal mode"
-                  value={safetySettings.mode}
-                  options={SAFETY_MODE_OPTIONS}
-                  onChange={(value) =>
-                    saveSafetySettings({
-                      ...safetySettings,
-                      mode: value as DiarizationSafetyMode,
-                    })
-                  }
-                  buttonClassName="py-2 text-sm"
-                />
-              </div>
-              <div className="min-w-[180px]">
-                <SelectMenu
-                  label="Device"
-                  value={safetySettings.device}
-                  options={SAFETY_DEVICE_OPTIONS}
-                  onChange={(value) =>
-                    saveSafetySettings({
-                      ...safetySettings,
-                      device: value as DiarizationDevice,
-                    })
-                  }
-                  buttonClassName="py-2 text-sm"
-                />
-              </div>
-              <div className="flex items-center gap-2 text-xs text-slate-400">
-                <Shield className="w-4 h-4 text-emerald-400" />
-                <span>Thermal guard</span>
-              </div>
-            </div>
-            <div className="text-xs text-slate-400 ml-auto">
-              {safetySettings.device === "gpu"
-                ? "GPU diarization is enabled. Use at your own risk."
-                : "GPU diarization is off by default for stability. Enable at your own risk."}
-            </div>
+            {showSystemDetails && (
+              <div className="mt-4 space-y-4">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  <Thermometer className="w-4 h-4 text-accent-primary" />
+                  <span className="text-sm text-slate-400">{hotspotLabel}</span>
+                  <span className={cn("text-sm font-semibold", hotspotTone)}>
+                    {typeof hotspot === "number" ? `${hotspot.toFixed(1)}°C` : "N/A"}
+                  </span>
+                  {primaryGpu?.temperature?.core_c != null && (
+                    <span className="text-xs text-slate-400">
+                      Core {primaryGpu.temperature.core_c.toFixed(0)}°C
+                    </span>
+                  )}
+                  {primaryGpu?.temperature?.memory_c != null && (
+                    <span className="text-xs text-slate-400">
+                      Mem {primaryGpu.temperature.memory_c.toFixed(0)}°C
+                    </span>
+                  )}
+                  {telemetry?.gpu?.available === false && (
+                    <span className="text-xs text-slate-400">
+                      {telemetry.gpu.reason || "Telemetry unavailable"}
+                    </span>
+                  )}
+                  {telemetryError && telemetry?.gpu?.available !== false && (
+                    <span className="text-xs text-slate-400">{telemetryError}</span>
+                  )}
+                </div>
 
-            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 w-full">
-              <span>
-                Audio cache:{" "}
-                {audioCacheStatus
-                  ? `${audioCacheStatus.total_gb} GB (${audioCacheStatus.count} files)`
-                  : "Loading..."}
-              </span>
-              {audioCacheStatus && (
-                <span>
-                  Auto-prune: {audioCacheStatus.max_age_days} days / {audioCacheStatus.max_size_gb} GB
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={handleClearAudioCache}
-                disabled={isClearingCache}
-                className="btn btn-secondary text-xs py-1 px-2"
-              >
-                {isClearingCache ? "Clearing..." : "Clear cache"}
-              </button>
-            </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <SelectMenu
+                    label="Thermal mode"
+                    value={safetySettings.mode}
+                    options={SAFETY_MODE_OPTIONS}
+                    onChange={(value) =>
+                      saveSafetySettings({
+                        ...safetySettings,
+                        mode: value as DiarizationSafetyMode,
+                      })
+                    }
+                    buttonClassName="py-2 text-sm"
+                  />
+                  <SelectMenu
+                    label="Device"
+                    value={safetySettings.device}
+                    options={SAFETY_DEVICE_OPTIONS}
+                    onChange={(value) =>
+                      saveSafetySettings({
+                        ...safetySettings,
+                        device: value as DiarizationDevice,
+                      })
+                    }
+                    buttonClassName="py-2 text-sm"
+                  />
+                </div>
 
-            {telemetry?.gpu?.available === false && (
-              <div className="text-xs text-amber-300 w-full">
-                GPU telemetry unavailable. Thermal guard forces CPU-only safe mode.
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <Shield className="w-4 h-4 text-accent-primary" />
+                  <span>Thermal guard</span>
+                </div>
+                <div className="text-xs text-slate-400">
+                  {safetySettings.device === "gpu"
+                    ? "GPU diarization is enabled. Use at your own risk."
+                    : "GPU diarization is off by default for stability. Enable at your own risk."}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                  <span>
+                    Audio cache:{" "}
+                    {audioCacheStatus
+                      ? `${audioCacheStatus.total_gb} GB (${audioCacheStatus.count} files)`
+                      : "Loading..."}
+                  </span>
+                  {audioCacheStatus && (
+                    <span>
+                      Auto-prune: {audioCacheStatus.max_age_days} days / {audioCacheStatus.max_size_gb} GB
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleClearAudioCache}
+                    disabled={isClearingCache}
+                    className="btn btn-secondary text-xs py-1 px-2"
+                  >
+                    {isClearingCache ? "Clearing..." : "Clear cache"}
+                  </button>
+                </div>
+
+                {telemetry?.gpu?.available === false && (
+                  <div className="text-xs text-amber-300">
+                    GPU telemetry unavailable. Thermal guard forces CPU-only safe mode.
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2023,6 +2141,10 @@ function TranscribePageContent() {
 
         </div>
       ) : null}
+          </div>
+        }
+      />
+      </div>
 
       {/* Import Link Modal */}
       {showImportModal && (
@@ -2046,7 +2168,7 @@ function TranscribePageContent() {
           initialStatus={diarizationStatus}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -2055,7 +2177,7 @@ export default function TranscribePage() {
   return (
     <Suspense fallback={
       <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+        <Loader2 className="w-8 h-8 animate-spin text-accent-primary" />
       </div>
     }>
       <TranscribePageContent />

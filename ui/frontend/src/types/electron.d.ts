@@ -9,6 +9,8 @@ declare global {
     electronAPI?: {
       isElectron: boolean;
       platform: string;
+      backendUrl?: string;
+      authToken?: string | null;
       onHotkey: (callback: (action: string) => void) => () => void;
       updateHotkeys: (hotkeys: Record<string, string>) => void;
       updateTraySettings: (settings: { minimizeToTray?: boolean; showNotifications?: boolean }) => void;
@@ -44,6 +46,11 @@ declare global {
       sendSubtitleMessage: (message: { type: string; text?: string;[key: string]: any }) => void;
       clearSubtitles: () => void;
       onSubtitleMessage: (callback: (message: any) => void) => () => void;
+      // Widget overlay (subset used by frontend)
+      showWidgetOverlay?: (module?: string) => void;
+      hideWidgetOverlay?: () => void;
+      toggleWidgetOverlay?: (module?: string) => void;
+      centerWidget?: () => void;
     };
     __lastHotkey?: string;
   }

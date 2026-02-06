@@ -27,6 +27,7 @@ import {
 import { cn } from '@/lib/utils';
 import { SelectMenu } from '@/components/SelectMenu';
 import { Toggle } from '@/components/Toggle';
+import { PlanGate } from '@/components/PlanGate';
 
 interface TranscriptEntry {
   id: string;
@@ -71,6 +72,20 @@ const languageOptions = [
 ];
 
 export default function LoopbackPage() {
+  return (
+    <PlanGate
+      requiredPlan="pro"
+      title="Live Capture"
+      description="Capture system audio and transcribe in real time."
+      icon={Radio}
+      feature="Live Capture"
+    >
+      <LoopbackProPage />
+    </PlanGate>
+  );
+}
+
+function LoopbackProPage() {
   const [status, setStatus] = useState<LoopbackStatus | null>(null);
   const [devices, setDevices] = useState<LoopbackDevice[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<number | null>(null);

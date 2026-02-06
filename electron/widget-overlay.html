@@ -1,32 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Whisperall Widget</title>
   <style>
     :root {
-      --bg-gradient-start: #1a1a1a;
-      --bg-gradient-end: #0d0d0d;
-      --border-color: rgba(255, 255, 255, 0.15);
-      --border-hover: rgba(255, 255, 255, 0.4);
-      --text-main: #ffffff;
-      --text-muted: #a0a0a0;
+      --bg: #0b0b0b;
+      --bg-strong: #0b0b0b;
+      --border: #121212;
+      --border-strong: #1f1f1f;
+      --surface-1: #111111;
+      --surface-2: #0b0b0b;
+      --shine: rgba(255, 255, 255, 0.08);
+      --text: rgba(255, 255, 255, 0.92);
+      --muted: rgba(255, 255, 255, 0.55);
+      --muted2: rgba(255, 255, 255, 0.42);
 
-      --accent-reader: #3b82f6;
-      --accent-record: #ef4444;
-      --accent-success: #10b981;
+      --accent: #3b82f6;
+      --danger: #ef4444;
+      --success: #10b981;
 
-      --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+      --ease-spring: cubic-bezier(0.2, 0, 0, 1);
     }
 
     * {
       box-sizing: border-box;
       user-select: none;
       -webkit-user-drag: none;
-      /* CRITICAL: No native drag, we use JS Pointer Events */
-      -webkit-app-region: no-drag !important;
-      cursor: default;
+      -webkit-app-region: no-drag;
     }
 
     html,
@@ -37,395 +38,836 @@
       height: 100%;
       background: transparent !important;
       overflow: hidden;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
     }
 
     #app {
-      display: flex;
-      align-items: center;
-      justify-content: center;
       width: 100%;
       height: 100%;
-      padding: 10px;
-    }
-
-    /* === WIDGET PILL === */
-    .widget-pill {
-      position: relative;
-      background: linear-gradient(180deg, var(--bg-gradient-start) 0%, var(--bg-gradient-end) 100%);
-      border: 1px solid var(--border-color);
-      border-radius: 9999px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
-
       display: flex;
       align-items: center;
       justify-content: center;
-
-      transition: width 0.3s var(--ease-out), height 0.3s var(--ease-out), border-color 0.2s;
-
-      /* Grabbable cursor to indicate JS Drag */
-      cursor: grab;
-      /* Ensure it catches all pointer events */
-      pointer-events: auto !important;
+      padding: 0; /* keep window tight to widget */
     }
 
-    .widget-pill:active {
+    /* ===================== */
+    /* Widget Container */
+    /* ===================== */
+    .widget {
+      position: relative;
+      width: 72px;
+      height: 12px;
+      border-radius: 9999px;
+      overflow: visible; /* allow tooltip to extend outside the pill */
+      cursor: grab;
+      touch-action: none; /* prevent browser gesture interference with pointer-drag */
+      will-change: width, height, border-radius;
+      transition:
+        width 140ms ease-out,
+        height 140ms ease-out,
+        border-radius 140ms ease-out,
+        border-color 140ms ease;
+    }
+
+    .widget[data-dragging="true"] {
+      transition: none;
+    }
+
+    .widget[data-dragging="true"] .bar,
+    .widget[data-dragging="true"] .panel {
+      transition: none;
+    }
+
+    .widget:active {
       cursor: grabbing;
     }
 
-    .widget-pill:hover {
-      border-color: var(--border-hover);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-
-    /* === CONTENT LAYER === */
-    .content {
-      position: relative;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      /* Let clicks pass through to PILL (unless button) */
-      pointer-events: none;
-    }
-
-    /* Views */
-    .view {
+    /* Surface holds the pill visuals so the widget can overflow for tooltips. */
+    .surface {
       position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      -webkit-app-region: drag;
+      background: linear-gradient(180deg, var(--surface-1) 0%, var(--surface-2) 100%);
+      border: 1px solid var(--border);
+      box-shadow:
+        inset 0 1px 0 var(--shine),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.95),
+        0 6px 12px rgba(0, 0, 0, 0.45),
+        0 0 0 1px rgba(255, 255, 255, 0.02);
+      overflow: hidden;
+      transition: border-color 180ms ease, background 180ms ease;
+    }
+
+    .surface::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.02) 60%, rgba(255, 255, 255, 0.0) 100%);
+      pointer-events: none;
+    }
+
+    .widget[data-mode="panel"] {
+      border-radius: 9999px;
+    }
+
+    .widget[data-mode="panel"] .surface {
+      background: linear-gradient(180deg, #121212 0%, #0b0b0b 100%);
+      border-color: var(--border-strong);
+    }
+
+    /* In panel mode, the pill sits at the bottom; the widget height includes tooltip area. */
+    .widget[data-mode="panel"] .surface {
+      top: auto;
+      bottom: 0;
+      height: 22px;
+    }
+
+    .widget[data-highlight="true"] .surface {
+      border-color: rgba(59, 130, 246, 0.65);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 0 0 1px rgba(59, 130, 246, 0.45),
+        0 18px 60px rgba(59, 130, 246, 0.15);
+    }
+
+    .widget[data-mode="bar"][data-hover="true"] .surface {
+      background: linear-gradient(180deg, #131313 0%, #0b0b0b 100%);
+      border-color: rgba(59, 130, 246, 0.38);
+    }
+
+    /* ===================== */
+    /* Wispr-like tooltip */
+    /* ===================== */
+    .wf-tooltip {
+      position: absolute;
+      left: 50%;
       top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      transform: translateX(-50%);
+      max-width: 180px;
+      padding: 6px 9px;
+      border-radius: 9999px;
+      background: linear-gradient(180deg, #121212 0%, #0a0a0a 100%);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: rgba(255, 255, 255, 0.92);
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.1;
+      letter-spacing: 0.1px;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 26px rgba(0, 0, 0, 0.55);
+      opacity: 0;
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: opacity 140ms ease, transform 220ms var(--ease-spring);
+      -webkit-app-region: no-drag;
+    }
+
+    .widget[data-mode="panel"] .wf-tooltip {
+      opacity: 1;
+      transform: translateX(-50%);
+    }
+
+    /* Crossfade between bar/panel without layout jumps */
+    .bar,
+    .panel {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      transition: opacity 120ms ease-out;
+    }
+
+    .widget[data-mode="bar"] .panel {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .widget[data-mode="panel"] .bar {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .widget[data-mode="panel"] .panel {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    /* ===================== */
+    /* Bar Mode */
+    /* ===================== */
+    .bar {
+      gap: 10px;
+      padding: 0 6px;
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .brand-dot {
+      display: none;
+      width: 10px;
+      height: 10px;
+      border-radius: 9999px;
+      background: radial-gradient(circle at 30% 30%, #22d3ee 0%, #3b82f6 50%, #0ea5e9 100%);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10), 0 8px 22px rgba(59, 130, 246, 0.22);
+      flex: 0 0 auto;
+    }
+
+    @keyframes pulseDot {
+      0% { transform: scale(1); filter: brightness(1); }
+      50% { transform: scale(1.18); filter: brightness(1.15); }
+      100% { transform: scale(1); filter: brightness(1); }
+    }
+
+    .widget[data-dictate="recording"] .brand-dot {
+      background: radial-gradient(circle at 30% 30%, #fca5a5 0%, #ef4444 60%, #b91c1c 100%);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 10px 26px rgba(239, 68, 68, 0.28);
+      animation: pulseDot 1.05s ease-in-out infinite;
+    }
+
+    .widget[data-reader="playing"] .brand-dot {
+      background: radial-gradient(circle at 30% 30%, #93c5fd 0%, #3b82f6 60%, #1d4ed8 100%);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 10px 26px rgba(59, 130, 246, 0.30);
+    }
+
+    .widget[data-reader="paused"] .brand-dot {
+      background: radial-gradient(circle at 30% 30%, #cbd5e1 0%, #64748b 60%, #334155 100%);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 10px 24px rgba(100, 116, 139, 0.25);
+    }
+
+    .bar-center {
+      flex: 1;
+      min-width: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      opacity: 0;
-      transition: opacity 0.2s ease;
-      pointer-events: none;
+      gap: 8px;
     }
 
-    .view.active {
-      opacity: 1;
-      /* Let pointer events fall through to pill */
-      pointer-events: none;
-    }
-
-    /* IDLE Bar */
-    .view-idle .bar {
-      width: 40px;
+    .bar-line {
+      display: none;
+      width: 36px;
       height: 4px;
-      background: rgba(255, 255, 255, 0.3);
-      border-radius: 2px;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.22);
+      flex: 0 0 auto;
     }
 
-    /* === INTERACTIVE ELEMENTS === */
-    .icon-btn,
-    .undo-btn,
-    .speed-badge,
-    .stop-btn {
-      pointer-events: auto !important;
-      /* Catch click */
-      cursor: pointer;
+    .widget[data-dictate="recording"] .bar-line {
+      background: rgba(239, 68, 68, 0.75);
     }
 
-    /* Separators etc - Pass through */
-    .separator,
-    .waveform,
-    .success-text {
-      pointer-events: none !important;
+    .widget[data-reader="playing"] .bar-line {
+      background: rgba(59, 130, 246, 0.70);
     }
 
-    .view-hover {
-      gap: 12px;
+    .bar-status {
+      display: none;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .bar-actions {
+      display: none;
+      gap: 5px;
+      flex: 0 0 auto;
+    }
+
+    .wf-dots {
+      display: flex;
+      gap: 3px;
+      align-items: center;
+      -webkit-app-region: no-drag;
+    }
+
+    .wf-dots span {
+      width: 4px;
+      height: 2px;
+      border-radius: 9999px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.18) 100%);
+      opacity: 0.6;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      transition: background 140ms ease, transform 140ms ease, opacity 140ms ease;
+    }
+
+    .widget[data-dictate="recording"] .wf-dots span {
+      background: linear-gradient(180deg, rgba(255, 120, 120, 0.95) 0%, rgba(239, 68, 68, 0.75) 100%);
+    }
+
+    .widget[data-reader="playing"] .wf-dots span,
+    .widget[data-reader="loading"] .wf-dots span {
+      background: linear-gradient(180deg, rgba(129, 174, 255, 0.95) 0%, rgba(59, 130, 246, 0.75) 100%);
+    }
+
+    /* ===================== */
+    /* Buttons */
+    /* ===================== */
+    button {
+      font: inherit;
+      color: inherit;
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
     }
 
     .icon-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      padding: 10px;
-      margin: -2px;
-      border-radius: 50%;
-      display: flex;
+      width: 26px;
+      height: 26px;
+      border-radius: 9999px;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.2s;
-      z-index: 100;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      cursor: pointer;
+      pointer-events: auto;
+      transition: transform 120ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease;
     }
 
     .icon-btn:hover {
-      background: rgba(255, 255, 255, 0.1);
-      color: var(--text-main);
-      transform: scale(1.1);
+      transform: translateY(-1px);
+      background: rgba(255, 255, 255, 0.10);
+      border-color: rgba(255, 255, 255, 0.18);
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .icon-btn.primary {
+      background: rgba(59, 130, 246, 0.18);
+      border-color: rgba(59, 130, 246, 0.24);
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .icon-btn.primary:hover {
+      background: rgba(59, 130, 246, 0.26);
+      border-color: rgba(59, 130, 246, 0.34);
+    }
+
+    .icon-btn.danger {
+      background: rgba(239, 68, 68, 0.14);
+      border-color: rgba(239, 68, 68, 0.22);
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .icon-btn.danger:hover {
+      background: rgba(239, 68, 68, 0.22);
+      border-color: rgba(239, 68, 68, 0.32);
+    }
+
+    /* Bar state highlighting */
+    .widget[data-dictate="recording"] #bar-btn-dictate {
+      background: rgba(239, 68, 68, 0.18);
+      border-color: rgba(239, 68, 68, 0.30);
+      color: rgba(255, 255, 255, 0.96);
+    }
+
+    .widget[data-dictate="transcribing"] #bar-btn-dictate {
+      background: rgba(59, 130, 246, 0.14);
+      border-color: rgba(59, 130, 246, 0.24);
+      color: rgba(255, 255, 255, 0.90);
+    }
+
+    .widget[data-reader="playing"] #bar-btn-reader {
+      background: rgba(59, 130, 246, 0.18);
+      border-color: rgba(59, 130, 246, 0.30);
+      color: rgba(255, 255, 255, 0.96);
     }
 
     .icon-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .btn-pill {
+      height: 30px;
+      padding: 0 12px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      background: rgba(59, 130, 246, 0.18);
+      border: 1px solid rgba(59, 130, 246, 0.22);
+      color: rgba(255, 255, 255, 0.92);
+      cursor: pointer;
+      transition: background 140ms ease, border-color 140ms ease, transform 120ms ease;
+      pointer-events: auto;
+    }
+
+    .btn-pill:hover {
+      transform: translateY(-1px);
+      background: rgba(59, 130, 246, 0.26);
+      border-color: rgba(59, 130, 246, 0.34);
+    }
+
+    .btn-pill.danger {
+      background: rgba(239, 68, 68, 0.14);
+      border-color: rgba(239, 68, 68, 0.22);
+    }
+
+    .btn-pill.danger:hover {
+      background: rgba(239, 68, 68, 0.22);
+      border-color: rgba(239, 68, 68, 0.32);
+    }
+
+    .badge {
+      height: 26px;
+      max-width: 120px;
+      padding: 0 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: auto;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+    }
+
+    .badge:hover {
+      color: rgba(255, 255, 255, 0.92);
+      background: rgba(255, 255, 255, 0.10);
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    .btn-link {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--muted2);
+      padding: 4px 8px;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      cursor: pointer;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+      pointer-events: auto;
+    }
+
+    .btn-link:hover {
+      color: rgba(255, 255, 255, 0.90);
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+
+    /* ===================== */
+    /* Panel Mode */
+    /* ===================== */
+    .panel {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 0;
+      gap: 0;
+    }
+
+    .panel-header {
+      padding: 0 10px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .segmented {
+      display: none; /* replaced by Wispr-like pill controls */
+      align-items: center;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 9999px;
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .seg {
+      height: 26px;
+      padding: 0 12px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 140ms ease, color 140ms ease, transform 120ms ease;
+      pointer-events: auto;
+    }
+
+    .seg:hover {
+      transform: translateY(-1px);
+      color: rgba(255, 255, 255, 0.90);
+    }
+
+    .seg.active {
+      background: rgba(59, 130, 246, 0.22);
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .panel-body {
+      display: none; /* keep markup for legacy JS hooks but hide from UI */
+      flex: 1;
+      min-height: 0;
+      position: relative;
+    }
+
+    .wf-pill-btn {
       width: 20px;
       height: 20px;
+      border-radius: 9999px;
+      display: grid;
+      place-items: center;
+      color: rgba(255, 255, 255, 0.88);
+      background: linear-gradient(180deg, #1b1b1b 0%, #0d0d0d 100%);
+      border: 1px solid #242424;
+      cursor: pointer;
+      pointer-events: auto;
+      -webkit-app-region: no-drag;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 2px 6px rgba(0, 0, 0, 0.45);
+      transition: transform 120ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
     }
 
-    .separator {
-      width: 1px;
-      height: 16px;
-      background: rgba(255, 255, 255, 0.1);
+    .wf-pill-btn:hover {
+      transform: translateY(-1px);
+      background: linear-gradient(180deg, #222222 0%, #111111 100%);
+      border-color: #2f2f2f;
+      color: rgba(255, 255, 255, 0.92);
     }
 
-    /* Recording State */
-    .view-recording {
-      gap: 12px;
-      color: var(--text-main);
-      font-size: 14px;
-      font-weight: 500;
+    .wf-pill-btn.primary {
+      background: linear-gradient(180deg, #2563eb 0%, #1e40af 100%);
+      border-color: rgba(59, 130, 246, 0.65);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.20),
+        0 4px 10px rgba(37, 99, 235, 0.35);
+    }
+
+    .wf-pill-btn.danger {
+      background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+      border-color: rgba(239, 68, 68, 0.65);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        0 4px 10px rgba(239, 68, 68, 0.35);
+    }
+
+    .wf-pill-btn svg {
+      width: 11px;
+      height: 11px;
+    }
+
+    .wf-center {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      justify-content: center;
+    }
+
+    .panel-tab {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 160ms ease, transform 220ms var(--ease-spring);
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .panel-tab.active {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    /* ===================== */
+    /* Dictate */
+    /* ===================== */
+    .dictate-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.10);
     }
 
     .waveform {
       display: flex;
       align-items: center;
       gap: 3px;
-      height: 16px;
+      width: 36px;
+      height: 18px;
+      flex: 0 0 auto;
+      opacity: 0.75;
     }
 
     .wave-bar {
       width: 3px;
-      background: var(--accent-record);
+      height: 10px;
+      background: rgba(239, 68, 68, 0.65);
       border-radius: 2px;
-      animation: wave 1s infinite ease-in-out;
+      transform: scaleY(0.6);
+      transition: transform 60ms ease-out, background 140ms ease;
     }
 
-    .wave-bar:nth-child(1) {
-      height: 6px;
-      animation-duration: 0.8s;
+    .widget[data-dictate="recording"] .wave-bar {
+      background: rgba(239, 68, 68, 0.9);
     }
 
-    .wave-bar:nth-child(2) {
-      height: 12px;
-      animation-duration: 1.1s;
+    .dictate-meta {
+      flex: 1;
+      min-width: 0;
     }
 
-    .wave-bar:nth-child(3) {
-      height: 8px;
-      animation-duration: 0.9s;
-    }
-
-    .wave-bar:nth-child(4) {
-      height: 14px;
-      animation-duration: 1.2s;
-    }
-
-    .wave-bar:nth-child(5) {
-      height: 6px;
-      animation-duration: 0.8s;
-    }
-
-    @keyframes wave {
-
-      0%,
-      100% {
-        transform: scaleY(1);
-      }
-
-      50% {
-        transform: scaleY(1.5);
-      }
-
-      50% {
-        transform: scaleY(1.5);
-      }
-    }
-
-    @keyframes rotate {
-      100% {
-        transform: rotate(360deg);
-      }
-    }
-
-    .stop-btn {
-      background: var(--accent-record);
-      color: white;
-      border: none;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .stop-btn:hover {
-      background: #dc2626;
-      transform: scale(1.05);
-    }
-
-    /* Remove animation during real visualization to avoid conflict */
-    .wave-bar.active-mic {
-      animation: none;
-      transition: transform 0.05s ease-out;
-    }
-
-    /* Reader State */
-    .view-reader {
-      gap: 8px;
-    }
-
-    .speed-badge {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-muted);
-      background: rgba(255, 255, 255, 0.1);
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-
-    .play-controls {
-      display: flex;
-      gap: 8px;
-    }
-
-    /* Complete State */
-    .view-complete {
-      gap: 10px;
-    }
-
-    .success-text {
-      color: var(--accent-success);
-      font-weight: 600;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .provider-label {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-left: 6px;
-    }
-
-    .undo-btn {
+    .dictate-title {
       font-size: 12px;
-      color: var(--text-muted);
-      background: rgba(255, 255, 255, 0.1);
-      padding: 4px 10px;
-      border-radius: 4px;
-      border: none;
+      font-weight: 800;
+      color: rgba(255, 255, 255, 0.92);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
-    .undo-btn:hover {
-      background: rgba(255, 255, 255, 0.2);
-      color: white;
+    .dictate-sub {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
-    .countdown-bar {
+    .dictate-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+
+    .dictate-footer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      position: relative;
+      padding-left: 2px;
+    }
+
+    .dictate-output {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      color: rgba(255, 255, 255, 0.90);
+      font-size: 12px;
+      line-height: 1.35;
+      max-height: 54px;
+      overflow: hidden;
+      display: none;
+    }
+
+    .done-bar {
       position: absolute;
-      bottom: 0;
       left: 0;
+      right: 0;
+      bottom: -2px;
       height: 2px;
-      background: var(--accent-success);
-      width: 100%;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.10);
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity 160ms ease;
+      pointer-events: none;
+    }
+
+    .done-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: rgba(16, 185, 129, 0.95);
+      border-radius: inherit;
+    }
+
+    .widget[data-dictate="done"] .done-bar {
+      opacity: 1;
+    }
+
+    /* ===================== */
+    /* Reader */
+    /* ===================== */
+    .reader-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    .reader-controls {
+      margin-left: auto;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .reader-progress {
+      height: 5px;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+      cursor: pointer;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    .reader-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: rgba(59, 130, 246, 0.92);
+      border-radius: inherit;
+      transition: width 80ms linear;
+    }
+
+    .reader-hint {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted2);
+      padding: 0 2px;
     }
   </style>
 </head>
 
 <body>
-
   <div id="app">
-    <div id="widget" class="widget-pill">
-      <div class="content">
+    <div id="widget" class="widget" data-mode="bar" data-tab="dictate" data-dictate="idle" data-reader="idle">
+      <div class="wf-tooltip" id="wf-tooltip">Press Alt+X to start dictating</div>
 
-        <!-- IDLE -->
-        <div id="view-idle" class="view view-idle">
-          <div class="bar"></div>
-        </div>
-
-        <!-- HOVER -->
-        <div id="view-hover" class="view view-hover">
-          <button class="icon-btn" id="btn-reader" title="Reader">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-            </svg>
-          </button>
-          <div class="separator"></div>
-          <button class="icon-btn" id="btn-dictate" title="Dictate">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-              <line x1="12" y1="19" x2="12" y2="23"></line>
-              <line x1="8" y1="23" x2="16" y2="23"></line>
-            </svg>
-          </button>
-        </div>
-
-        <!-- RECORDING -->
-        <div id="view-recording" class="view view-recording">
-          <div class="waveform">
-            <div class="wave-bar"></div>
-            <div class="wave-bar"></div>
-            <div class="wave-bar"></div>
-            <div class="wave-bar"></div>
-            <div class="wave-bar"></div>
+      <div class="surface" id="surface">
+        <!-- Bar -->
+        <div class="bar" id="bar">
+          <div class="bar-center">
+            <div class="wf-dots" id="wf-dots" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
           </div>
-          <span id="rec-duration">0:00</span>
-          <span id="stt-provider-recording" class="provider-label"></span>
-          <button class="stop-btn icon-btn" id="btn-stop-rec">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
-            </svg>
-          </button>
         </div>
 
-        <!-- TRANSCRIBING -->
-        <div id="view-transcribing" class="view view-recording">
-          <div style="display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 13px;">
-            <svg class="spinner" viewBox="0 0 50 50"
-              style="width: 16px; height: 16px; animation: rotate 2s linear infinite;">
-              <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="5" stroke-dasharray="80"
-                stroke-dashoffset="0"></circle>
-            </svg>
-            Transcribing...
-          </div>
-          <span id="stt-provider-transcribing" class="provider-label"></span>
-        </div>
-
-        <!-- COMPLETE -->
-        <div id="view-complete" class="view view-complete">
-          <div class="success-text">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
-              stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-            Done
-          </div>
-          <button class="undo-btn" id="btn-undo">Undo</button>
-          <div class="countdown-bar" id="countdown-bar"></div>
-        </div>
-
-        <!-- READER -->
-        <div id="view-reader" class="view view-reader">
-          <button class="icon-btn" id="btn-vol" title="Volume" style="margin-right: -4px;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-              <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-            </svg>
-          </button>
-          <div class="speed-badge" id="btn-speed">1.0x</div>
-          <div class="play-controls">
-            <button class="icon-btn" id="btn-pause-reader">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="4" width="4" height="16"></rect>
-                <rect x="14" y="4" width="4" height="16"></rect>
+        <!-- Panel -->
+        <div class="panel" id="panel">
+          <div class="panel-header">
+            <button class="wf-pill-btn" id="btn-collapse" title="Collapse" aria-label="Collapse" data-no-drag="true">
+              <!-- X -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
               </svg>
             </button>
-            <button class="stop-btn icon-btn" id="btn-stop-reader" style="background: var(--accent-reader);">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="2"></rect>
-              </svg>
-            </button>
+
+            <button class="wf-pill-btn" id="wf-mode" title="Toggle mode" aria-label="Toggle mode" data-no-drag="true"></button>
+
+            <div class="wf-center">
+              <div class="wf-dots" id="wf-dots-panel" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+            </div>
+
+            <button class="wf-pill-btn primary" id="wf-action" title="Action" aria-label="Action" data-no-drag="true"></button>
+          </div>
+
+          <div class="panel-body">
+            <!-- Dictate tab -->
+            <div id="panel-dictate" class="panel-tab active" role="tabpanel" aria-labelledby="tab-dictate">
+              <div class="dictate-row">
+                <div class="waveform" id="dictate-wave" aria-hidden="true">
+                  <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+              </div>
+              <div class="dictate-meta">
+                <div class="dictate-title" id="dictate-title">Ready</div>
+                <div class="dictate-sub" id="dictate-sub">Press Alt+X or click Start</div>
+              </div>
+              <div class="dictate-actions">
+                <button class="btn-pill" id="btn-dictate-toggle" data-no-drag="true">Start</button>
+                <button class="icon-btn danger" id="btn-dictate-stop" title="Stop" aria-label="Stop" data-no-drag="true">
+                  <!-- Stop square -->
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="dictate-footer">
+              <button class="btn-link" id="btn-live-capture" data-no-drag="true" title="Transcribe system audio">System audio</button>
+              <button class="btn-link" id="btn-undo" data-no-drag="true" title="Undo last paste">Undo</button>
+              <div class="done-bar" id="done-bar" aria-hidden="true">
+                <div class="done-bar-fill" id="done-bar-fill"></div>
+              </div>
+            </div>
+
+            <div class="dictate-output" id="dictate-output"></div>
+          </div>
+
+          <!-- Reader tab -->
+          <div id="panel-reader" class="panel-tab" role="tabpanel" aria-labelledby="tab-reader">
+            <div class="reader-row">
+              <button class="icon-btn primary" id="btn-read" title="Read clipboard" aria-label="Read clipboard" data-no-drag="true">
+                <!-- Play -->
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="7,4 20,12 7,20"></polygon>
+                </svg>
+              </button>
+              <button class="badge" id="btn-voice" title="Voice" data-no-drag="true">Voice</button>
+              <button class="badge" id="btn-speed" title="Speed" data-no-drag="true">1.0x</button>
+              <div class="reader-controls">
+                <button class="icon-btn" id="btn-vol" title="Volume" aria-label="Volume" data-no-drag="true">
+                  <!-- Volume -->
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                  </svg>
+                </button>
+                <button class="icon-btn" id="btn-pause-reader" title="Play/Pause" aria-label="Play/Pause" data-no-drag="true">
+                  <!-- Pause -->
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="4" width="4" height="16"></rect>
+                    <rect x="14" y="4" width="4" height="16"></rect>
+                  </svg>
+                </button>
+                <button class="icon-btn danger" id="btn-stop-reader" title="Stop" aria-label="Stop" data-no-drag="true">
+                  <!-- Stop -->
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="reader-progress" id="reader-progress" title="Seek" data-no-drag="true">
+              <div class="reader-progress-fill" id="reader-progress-fill"></div>
+            </div>
+            <div class="reader-hint" id="reader-hint">Reads clipboard text instantly.</div>
           </div>
         </div>
-
+      </div>
       </div>
     </div>
   </div>
@@ -435,508 +877,1102 @@
       const api = window.electronAPI;
       const widget = document.getElementById('widget');
 
-      // --- SETUP HOTKEY LISTENER EARLY ---
-      // Store pending actions until widget is fully initialized
+      // Store pending actions until widget is fully initialized.
       let widgetReady = false;
-      let pendingActions = [];
+      const pendingActions = [];
 
-      if (api?.onGlobalHotkey) {
-        api.onGlobalHotkey((action) => {
-          if (widgetReady) {
-            processHotkeyAction(action);
+      // -------------------------
+      // Click-through padding (Electron setIgnoreMouseEvents)
+      // -------------------------
+      let ignoreMouse = null;
+      function setIgnoreMouse(next) {
+        const nextBool = !!next;
+        if (ignoreMouse === nextBool) return;
+        ignoreMouse = nextBool;
+        try { api?.setWidgetIgnoreMouseEvents?.(nextBool); } catch { }
+      }
+
+      // -------------------------
+      // Layout / sizing
+      // -------------------------
+      const PADDING_W = 0;
+      const PADDING_H = 0;
+
+      const DIMS = {
+        // Wispr-like: tiny when idle; still compact on hover/recording.
+        bar: { w: 72, h: 12 },
+        panel: { w: 200, h: 46 },
+      };
+
+      let mode = 'bar'; // 'bar' | 'panel'
+      let pinned = false;
+      let activeTab = 'dictate'; // 'dictate' | 'reader'
+      let dictateState = 'idle'; // 'idle' | 'recording' | 'transcribing' | 'done'
+      let readerState = 'idle'; // 'idle' | 'loading' | 'playing' | 'paused'
+
+      // Wispr-like: tiny idle bar. On hover (and while recording/reading), expand to a compact panel.
+      let hoverOpenTimer = null;
+      let hoverCloseTimer = null;
+      let doneTimer = null;
+
+      function resizeTo(nextMode) {
+        mode = nextMode;
+        widget.dataset.mode = nextMode;
+
+        const dims = DIMS[nextMode];
+        if (dims) {
+          widget.style.width = dims.w + 'px';
+          widget.style.height = dims.h + 'px';
+          try {
+            api?.resizeWidget?.({ width: dims.w + PADDING_W, height: dims.h + PADDING_H });
+          } catch { }
+        }
+      }
+
+      function openPanel({ pin = false } = {}) {
+        if (pin) pinned = true;
+        clearTimeout(doneTimer);
+        resizeTo('panel');
+      }
+
+      function collapseToBar({ force = false } = {}) {
+        if (!force && pinned) return;
+        pinned = false;
+        resizeTo('bar');
+      }
+
+      // Hover expands unless pinned; collapses if nothing is active.
+      // Also makes the transparent padding click-through so the widget doesn't block the desktop.
+      let hoverExpandEnabled = true;
+      let isHovering = false;
+      setIgnoreMouse(true);
+
+      function isPointInWidget(x, y) {
+        if (!widget) return false;
+        const rect = widget.getBoundingClientRect();
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      }
+
+      function handleHoverChange(hovering) {
+        if (dragging) return;
+        if (!widget) return;
+        widget.dataset.hover = hovering ? 'true' : 'false';
+
+        if (hovering) {
+          setIgnoreMouse(false);
+          if (pinned) return;
+          if (!hoverExpandEnabled) return;
+          clearTimeout(hoverCloseTimer);
+          hoverOpenTimer = setTimeout(() => openPanel(), 40);
+          return;
+        }
+
+        setIgnoreMouse(true);
+        clearTimeout(hoverOpenTimer);
+        if (pinned) return;
+        if (!hoverExpandEnabled) return;
+        if (dictateState !== 'idle' || readerState !== 'idle') return;
+        hoverCloseTimer = setTimeout(() => collapseToBar({ force: true }), 80);
+      }
+
+      window.addEventListener('mousemove', (e) => {
+        const hovering = isPointInWidget(e.clientX, e.clientY);
+        if (hovering === isHovering) return;
+        isHovering = hovering;
+        handleHoverChange(hovering);
+      }, { passive: true });
+
+      // When the widget is hidden/shown, Electron may reset ignore-mouse state.
+      // Keep our local state in sync so the widget remains clickable on hover.
+      if (api?.onWidgetOverlayVisible) {
+        api.onWidgetOverlayVisible(() => {
+          ignoreMouse = null;
+          isHovering = false;
+          if (widget) widget.dataset.hover = 'false';
+          clearTimeout(hoverOpenTimer);
+          clearTimeout(hoverCloseTimer);
+          setIgnoreMouse(true);
+        });
+      }
+
+      if (api?.onWidgetHighlight) {
+        api.onWidgetHighlight(() => {
+          if (!widget) return;
+          widget.dataset.highlight = 'true';
+          openPanel();
+          updateWfControls();
+          setIgnoreMouse(false);
+          setTimeout(() => {
+            if (widget) widget.dataset.highlight = 'false';
+            if (!pinned && dictateState === 'idle' && readerState === 'idle') {
+              collapseToBar({ force: true });
+            }
+            setIgnoreMouse(true);
+          }, 2200);
+        });
+      }
+
+      // -------------------------
+      // Tabs
+      // -------------------------
+      const tabDictate = document.getElementById('tab-dictate');
+      const tabReader = document.getElementById('tab-reader');
+      const panelDictate = document.getElementById('panel-dictate');
+      const panelReader = document.getElementById('panel-reader');
+      const wfTooltip = document.getElementById('wf-tooltip');
+      const wfMode = document.getElementById('wf-mode');
+      const wfAction = document.getElementById('wf-action');
+
+      const ICONS = {
+        mic: `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+          </svg>
+        `.trim(),
+        book: `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+          </svg>
+        `.trim(),
+        record: `
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="12" r="5"></circle>
+          </svg>
+        `.trim(),
+        stop: `
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <rect x="7" y="7" width="10" height="10" rx="2"></rect>
+          </svg>
+        `.trim(),
+        play: `
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="8,5 20,12 8,19"></polygon>
+          </svg>
+        `.trim(),
+        pause: `
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <rect x="7" y="5" width="4" height="14"></rect>
+            <rect x="13" y="5" width="4" height="14"></rect>
+          </svg>
+        `.trim(),
+      };
+
+      function setBtnSvg(el, svg) {
+        if (!el) return;
+        el.innerHTML = svg || '';
+      }
+
+      function updateWfTooltip() {
+        if (!wfTooltip) return;
+        if (activeTab === 'reader') {
+          if (readerState === 'loading') wfTooltip.textContent = 'Generating audio...';
+          else if (readerState === 'playing') wfTooltip.textContent = 'Reading...';
+          else if (readerState === 'paused') wfTooltip.textContent = 'Paused';
+          else wfTooltip.textContent = 'Press Ctrl+Shift+R to read clipboard';
+          return;
+        }
+        if (dictateState === 'recording') wfTooltip.textContent = 'Dictating with Whisperall';
+        else if (dictateState === 'transcribing') wfTooltip.textContent = 'Transcribing...';
+        else if (dictateState === 'done') wfTooltip.textContent = 'Done';
+        else wfTooltip.textContent = 'Press Alt+X to start dictating';
+      }
+
+      function updateWfControls() {
+        setBtnSvg(wfMode, activeTab === 'dictate' ? ICONS.mic : ICONS.book);
+
+        if (wfAction) {
+          wfAction.classList.remove('danger');
+          wfAction.classList.add('primary');
+
+          if (activeTab === 'dictate') {
+            if (dictateState === 'recording' || dictateState === 'transcribing') {
+              wfAction.classList.remove('primary');
+              wfAction.classList.add('danger');
+              setBtnSvg(wfAction, ICONS.stop);
+            } else {
+              setBtnSvg(wfAction, ICONS.record);
+            }
           } else {
-            pendingActions.push(action);
-          }
-        });
-      }
-
-      if (api?.onWidgetStateUpdate) {
-        api.onWidgetStateUpdate((state) => {
-          console.log('[Widget] State update:', state);
-          if (state === 'transcribing') {
-            stopRecordingSim();
-            setState(STATES.TRANSCRIBING);
-          } else if (state === 'complete' || state === 'done') {
-            // Only show done/undo if we were transcribing
-            if (currentState === STATES.TRANSCRIBING) {
-              setState(STATES.COMPLETE);
-            } else if (currentState === STATES.RECORDING) {
-              // If we went related from recording to done (skip transcribing), show done
-              // This might happen if immediate mode
-              stopRecordingSim();
-              setState(STATES.COMPLETE);
-            }
-          } else if (state === 'idle') {
-            setState(STATES.IDLE);
-          } else if (state === 'listening' || state === 'recording') {
-            if (currentState !== STATES.RECORDING) {
-              setState(STATES.RECORDING);
-              startRecordingSim();
+            if (readerState === 'playing') {
+              setBtnSvg(wfAction, ICONS.pause);
+            } else if (readerState === 'paused') {
+              setBtnSvg(wfAction, ICONS.play);
+            } else if (readerState === 'loading') {
+              wfAction.classList.remove('primary');
+              wfAction.classList.add('danger');
+              setBtnSvg(wfAction, ICONS.stop);
+            } else {
+              setBtnSvg(wfAction, ICONS.play);
             }
           }
-        });
+        }
+
+        updateWfTooltip();
       }
 
+      function setTab(next) {
+        if (next !== 'dictate' && next !== 'reader') return;
+        activeTab = next;
+        widget.dataset.tab = next;
 
-      // --- JS DRAGGING WITH POINTER CAPTURE ---
-      // This solves the issue of losing the drag when mouse exits the tiny window
+        tabDictate?.classList.toggle('active', next === 'dictate');
+        tabReader?.classList.toggle('active', next === 'reader');
+        tabDictate?.setAttribute('aria-selected', next === 'dictate' ? 'true' : 'false');
+        tabReader?.setAttribute('aria-selected', next === 'reader' ? 'true' : 'false');
+
+        panelDictate?.classList.toggle('active', next === 'dictate');
+        panelReader?.classList.toggle('active', next === 'reader');
+
+        // Persist module selection (electron + backend)
+        const moduleName = next === 'dictate' ? 'stt' : 'reader';
+        try { api?.saveWidgetModule?.(moduleName); } catch { }
+        saveWidgetSettings({ currentModule: moduleName });
+
+        updateWfControls();
+      }
+
+      function setTabFromModule(moduleName) {
+        if (!moduleName) return;
+        if (moduleName === 'reader') setTab('reader');
+        else setTab('dictate');
+      }
+
+      // -------------------------
+      // Drag + click-to-pin
+      // -------------------------
+      let dragging = false;
+      let dragMoved = false;
+      let dragStartScreenX = 0;
+      let dragStartScreenY = 0;
+
+      function isNoDragTarget(target) {
+        if (!target) return false;
+        const el = target.closest ? target.closest('[data-no-drag="true"],button,a,input,textarea,select') : null;
+        return !!el;
+      }
 
       widget.addEventListener('pointerdown', (e) => {
-        // Capture pointer to track even if it leaves window
-        widget.setPointerCapture(e.pointerId);
-        widget.classList.add('grabbing');
-        // Store drag state on element to access in move
+        if (isNoDragTarget(e.target)) return;
+        e.preventDefault();
+        dragging = true;
+        dragMoved = false;
         widget.dataset.dragging = 'true';
-      });
-
-      widget.addEventListener('pointerup', (e) => {
-        widget.dataset.dragging = 'false';
-        widget.classList.remove('grabbing');
-        widget.releasePointerCapture(e.pointerId);
+        hoverExpandEnabled = false;
+        dragStartScreenX = e.screenX;
+        dragStartScreenY = e.screenY;
+        clearTimeout(hoverOpenTimer);
+        clearTimeout(hoverCloseTimer);
+        try { widget.setPointerCapture(e.pointerId); } catch { }
+        try { api?.startWidgetDrag?.(); } catch { }
+        setIgnoreMouse(false);
       });
 
       widget.addEventListener('pointermove', (e) => {
-        if (widget.dataset.dragging !== 'true') return;
-
-        const dx = e.movementX;
-        const dy = e.movementY;
-
-        if (dx === 0 && dy === 0) return;
-
-        // Use IPC to move window
-        if (api && api.moveWidget) {
-          api.moveWidget({ x: dx, y: dy });
-        }
+        if (!dragging) return;
+        e.preventDefault();
+        const dx = e.screenX - dragStartScreenX;
+        const dy = e.screenY - dragStartScreenY;
+        if (Math.abs(dx) + Math.abs(dy) > 1) dragMoved = true;
       });
 
+      function endDrag(e) {
+        if (!dragging) return;
+        if (e?.preventDefault) e.preventDefault();
+        dragging = false;
+        delete widget.dataset.dragging;
+        hoverExpandEnabled = true;
+        try { if (e?.pointerId != null) widget.releasePointerCapture(e.pointerId); } catch { }
+        try { api?.endWidgetDrag?.(); } catch { }
+        if (!isHovering) setIgnoreMouse(true);
+        // Ensure hover state resets cleanly after drag.
+        isHovering = false;
+        if (widget) widget.dataset.hover = 'false';
 
-      // --- REST OF LOGIC ---
-      const PADDING_W = 80;
-      const PADDING_H = 80;
+        // Tap on background toggles pin/expand.
+        if (!dragMoved) {
+          if (mode === 'bar') {
+            openPanel({ pin: true });
+          } else {
+            // In panel mode: if pinned, collapse. If not pinned, pin it.
+            if (pinned) collapseToBar({ force: true });
+            else openPanel({ pin: true });
+          }
+        }
+      }
 
-      const DIMS = {
-        IDLE: { w: 80, h: 12 },
-        HOVER: { w: 130, h: 44 },
-        RECORDING: { w: 220, h: 48 },
-        TRANSCRIBING: { w: 220, h: 48 },
-        COMPLETE: { w: 220, h: 48 },
-        READER: { w: 280, h: 48 },
-      };
+      widget.addEventListener('pointerup', endDrag);
+      widget.addEventListener('pointercancel', endDrag);
+      widget.addEventListener('lostpointercapture', endDrag);
 
-      const STATES = {
-        IDLE: 'IDLE',
-        HOVER: 'HOVER',
-        RECORDING: 'RECORDING',
-        TRANSCRIBING: 'TRANSCRIBING',
-        COMPLETE: 'COMPLETE',
-        READER: 'READER'
-      };
-
-      let currentState = STATES.IDLE;
-      let hoverTimeout = null;
-      let leaveTimeout = null;
-      let recordingTimer = null;
-      let completeTimer = null;
+      // -------------------------
+      // Dictate UI + state
+      // -------------------------
+      const barStatus = document.getElementById('bar-status');
+      const dictateTitle = document.getElementById('dictate-title');
+      const dictateSub = document.getElementById('dictate-sub');
+      const btnDictateToggle = document.getElementById('btn-dictate-toggle');
+      const btnUndo = document.getElementById('btn-undo');
+      const doneFill = document.getElementById('done-bar-fill');
+      const dictateOutput = document.getElementById('dictate-output');
+      let lastTranscript = '';
 
       let startTime = 0;
-      let isInteracting = false; // Locks the widget open while clicking/dragging
-
-      const views = {
-        IDLE: document.getElementById('view-idle'),
-        HOVER: document.getElementById('view-hover'),
-        RECORDING: document.getElementById('view-recording'),
-        TRANSCRIBING: document.getElementById('view-transcribing'),
-        COMPLETE: document.getElementById('view-complete'),
-        READER: document.getElementById('view-reader'),
-      };
-
-      function setState(newState) {
-        console.log(`State: ${currentState} -> ${newState}`);
-        currentState = newState;
-
-        Object.values(views).forEach(el => {
-          if (el) el.classList.remove('active');
-        });
-        if (views[newState]) views[newState].classList.add('active');
-
-        const target = DIMS[newState];
-        if (widget) {
-          widget.style.width = target.w + 'px';
-          widget.style.height = target.h + 'px';
-        }
-
-        if (api && api.resizeWidget) {
-          try {
-            api.resizeWidget({
-              width: target.w + PADDING_W,
-              height: target.h + PADDING_H
-            });
-          } catch (e) { }
-        }
-
-        if (newState === STATES.COMPLETE) startCountdown();
-        else stopCountdown();
-      }
-
-      const app = document.getElementById('app');
-      if (app) {
-        app.addEventListener('mouseenter', () => {
-          if (currentState === STATES.IDLE) {
-            clearTimeout(leaveTimeout);
-            hoverTimeout = setTimeout(() => {
-              setState(STATES.HOVER);
-            }, 80);
-          }
-        });
-
-        app.addEventListener('mouseleave', () => {
-          clearTimeout(hoverTimeout);
-          // Don't hide if we are interacting (clicking/dragging)
-          if (currentState === STATES.HOVER && !isInteracting) {
-            leaveTimeout = setTimeout(() => {
-              if (!isInteracting) setState(STATES.IDLE);
-            }, 250);
-          }
-        });
-      }
-
-      const bindClick = (id, fn) => {
-        const el = document.getElementById(id);
-        if (el) {
-          // Use pointerdown/up sequence to ensure reliable "click" feels
-          // avoiding issues with focus loss or drag interpretation
-          el.onpointerdown = (e) => {
-            e.stopPropagation(); // Stop drag
-            isInteracting = true; // Lock hover state
-            el.setPointerCapture(e.pointerId);
-          };
-          el.onpointerup = (e) => {
-            isInteracting = false;
-            el.releasePointerCapture(e.pointerId);
-            // Trigger action if we are still on the element
-            fn();
-          };
-          // Duplicate onclick just in case, but pointerup handles it mostly.
-          // el.onclick = fn; 
-        }
-      };
-
-      bindClick('btn-dictate', () => {
-        setState(STATES.RECORDING);
-        startRecordingSim();
-        if (api?.triggerWidgetAction) api.triggerWidgetAction('dictate-start');
-      });
-
-      bindClick('btn-reader', () => {
-        setState(STATES.READER);
-        handleReadClipboard();
-      });
-
-      bindClick('btn-stop-rec', () => {
-        stopRecordingSim();
-        setState(STATES.COMPLETE);
-        if (api?.triggerWidgetAction) api.triggerWidgetAction('dictate-stop');
-      });
-
-      bindClick('btn-stop-reader', () => {
-        stopAudio();
-        setState(STATES.HOVER);
-      });
-
-      bindClick('btn-undo', () => {
-        if (api?.undoPaste) api.undoPaste();
-        setState(STATES.HOVER);
-      });
-
-      function startRecordingSim() {
-        startTime = Date.now();
-        const durEl = document.getElementById('rec-duration');
-        if (recordingTimer) clearInterval(recordingTimer);
-        recordingTimer = setInterval(() => {
-          if (!durEl) return;
-          const diff = Math.floor((Date.now() - startTime) / 1000);
-          const m = Math.floor(diff / 60);
-          const s = diff % 60;
-          durEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
-        }, 1000);
-
-        startMicVisualizer();
-      }
-
-      function stopRecordingSim() {
-        if (recordingTimer) clearInterval(recordingTimer);
-        stopMicVisualizer();
-      }
-
-      // --- AUDIO VISUALIZER (driven by main process levels) ---
+      let recordingTimer = null;
+      const waveBars = Array.from(document.querySelectorAll('#dictate-wave .wave-bar'));
+      const wfDots = Array.from(document.querySelectorAll('#wf-dots span'));
+      const wfDotsPanel = Array.from(document.querySelectorAll('#wf-dots-panel span'));
       let isVisualizing = false;
-      const bars = document.querySelectorAll('.wave-bar');
+
+      function truncateOneLine(text, maxLen) {
+        const s = String(text || '').trim().replace(/\s+/g, ' ');
+        if (!s) return '';
+        if (s.length <= maxLen) return s;
+        return s.slice(0, Math.max(0, maxLen - 1)).trimEnd() + '…';
+      }
+
+      function setLastTranscript(text) {
+        lastTranscript = String(text || '').trim();
+        if (!dictateOutput) return;
+        if (!lastTranscript) {
+          dictateOutput.style.display = 'none';
+          dictateOutput.textContent = '';
+          return;
+        }
+        dictateOutput.textContent = lastTranscript;
+        dictateOutput.style.display = 'block';
+      }
+
+      function updateBarStatus() {
+        if (!barStatus) return;
+        if (dictateState === 'recording') {
+          barStatus.textContent = `Listening ${formatElapsed()}`;
+          return;
+        }
+        if (dictateState === 'transcribing') {
+          barStatus.textContent = 'Transcribing...';
+          return;
+        }
+        if (dictateState === 'done' && lastTranscript) {
+          barStatus.textContent = truncateOneLine(lastTranscript, 26);
+          return;
+        }
+        if (readerState === 'playing') {
+          barStatus.textContent = 'Reading';
+          return;
+        }
+        if (readerState === 'loading') {
+          barStatus.textContent = 'Loading...';
+          return;
+        }
+        if (readerState === 'paused') {
+          barStatus.textContent = 'Paused';
+          return;
+        }
+        barStatus.textContent = pinned ? 'Pinned' : 'Ready';
+      }
+
+      function formatElapsed() {
+        const diff = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+        const m = Math.floor(diff / 60);
+        const s = diff % 60;
+        return `${m}:${String(s).padStart(2, '0')}`;
+      }
 
       function applyAudioLevel(level) {
-        if (!isVisualizing) return;
-        const clamped = Math.max(0, Math.min(1, level || 0));
-        bars.forEach((bar, i) => {
-          const variance = 0.2 * (i / bars.length);
-          const scale = 0.6 + clamped * (2.2 - variance);
-          bar.style.transform = `scaleY(${scale})`;
-        });
+        const clamped = Math.max(0, Math.min(1, Number(level) || 0));
+        for (let i = 0; i < waveBars.length; i++) {
+          const variance = 0.18 * (i / Math.max(1, waveBars.length - 1));
+          const scale = 0.55 + clamped * (2.0 - variance);
+          waveBars[i].style.transform = `scaleY(${scale})`;
+        }
+        const applyDots = (dots) => {
+          if (!dots.length) return;
+          for (let i = 0; i < dots.length; i++) {
+            const t = i / Math.max(1, dots.length - 1);
+            const bump = 0.5 + clamped * (1.4 - t * 0.6);
+            dots[i].style.transform = `scaleY(${bump})`;
+            dots[i].style.opacity = String(0.4 + clamped * 0.6);
+          }
+        };
+        applyDots(wfDots);
+        applyDots(wfDotsPanel);
       }
 
       if (api?.onAudioLevel) {
-        api.onAudioLevel((level) => {
-          applyAudioLevel(level);
-        });
+        api.onAudioLevel((level) => applyAudioLevel(level));
       }
 
-      function startMicVisualizer() {
+      function startRecordingSim() {
+        startTime = Date.now();
         isVisualizing = true;
-        bars.forEach(b => b.classList.add('active-mic'));
+        if (recordingTimer) clearInterval(recordingTimer);
+        recordingTimer = setInterval(() => {
+          if (dictateState !== 'recording') return;
+          updateDictateSub();
+          updateBarStatus();
+        }, 500);
+        updateDictateSub();
+        updateBarStatus();
       }
 
-      function stopMicVisualizer() {
+      function stopRecordingSim() {
         isVisualizing = false;
-        bars.forEach(b => {
-          b.classList.remove('active-mic');
-          b.style.transform = 'scaleY(1)';
-        });
+        if (recordingTimer) clearInterval(recordingTimer);
+        recordingTimer = null;
+        for (const b of waveBars) {
+          b.style.transform = 'scaleY(0.6)';
+        }
+        const resetDots = (dots) => {
+          for (const d of dots) {
+            d.style.transform = 'scaleY(1)';
+            d.style.opacity = '0.6';
+          }
+        };
+        resetDots(wfDots);
+        resetDots(wfDotsPanel);
       }
 
-      function startCountdown() {
-        const bar = document.getElementById('countdown-bar');
-        if (!bar) return;
-        bar.style.width = '100%';
-        bar.offsetHeight;
-        bar.style.transition = 'width 5s linear';
-        requestAnimationFrame(() => { bar.style.width = '0%'; });
-        completeTimer = setTimeout(() => {
-          if (currentState === STATES.COMPLETE) setState(STATES.IDLE);
-        }, 5000);
+      function updateDictateSub() {
+        if (!dictateSub) return;
+        if (dictateState === 'recording') dictateSub.textContent = `Listening... ${formatElapsed()}`;
+        else if (dictateState === 'transcribing') dictateSub.textContent = 'Transcribing...';
+        else if (dictateState === 'done') dictateSub.textContent = 'Done. Use hotkey to paste.';
+        else dictateSub.textContent = 'Press Alt+X or click Start';
       }
 
-      function stopCountdown() {
-        clearTimeout(completeTimer);
-        const bar = document.getElementById('countdown-bar');
-        if (bar) {
-          bar.style.transition = 'none';
-          bar.style.width = '100%';
+      function startDoneCountdown() {
+        if (!doneFill) return;
+        doneFill.style.transition = 'none';
+        doneFill.style.width = '100%';
+        // Force reflow
+        void doneFill.offsetHeight;
+        doneFill.style.transition = 'width 4.5s linear';
+        requestAnimationFrame(() => { doneFill.style.width = '0%'; });
+      }
+
+      function resetDoneCountdown() {
+        if (!doneFill) return;
+        doneFill.style.transition = 'none';
+        doneFill.style.width = '0%';
+      }
+
+      function setDictateState(next) {
+        if (!next) return;
+        dictateState = next;
+        widget.dataset.dictate = next;
+
+        if (next === 'recording') startRecordingSim();
+        else stopRecordingSim();
+
+        if (next === 'done') {
+          startDoneCountdown();
+          clearTimeout(doneTimer);
+          doneTimer = setTimeout(() => {
+            setDictateState('idle');
+            if (!pinned && readerState === 'idle') collapseToBar({ force: true });
+          }, 4800);
+        } else {
+          resetDoneCountdown();
+          clearTimeout(doneTimer);
+        }
+
+        updateDictateUI();
+        updateBarStatus();
+        updateWfControls();
+      }
+
+      function updateDictateUI() {
+        if (!dictateTitle || !dictateSub || !btnDictateToggle || !btnUndo) return;
+
+        if (dictateState === 'recording') {
+          dictateTitle.textContent = 'Dictating';
+          btnDictateToggle.textContent = 'Stop';
+          btnDictateToggle.classList.add('danger');
+          btnUndo.style.display = 'none';
+          updateDictateSub();
+        } else if (dictateState === 'transcribing') {
+          dictateTitle.textContent = 'Transcribing';
+          btnDictateToggle.textContent = '...';
+          btnDictateToggle.classList.remove('danger');
+          btnUndo.style.display = 'none';
+          updateDictateSub();
+        } else if (dictateState === 'done') {
+          dictateTitle.textContent = 'Done';
+          btnDictateToggle.textContent = 'Start';
+          btnDictateToggle.classList.remove('danger');
+          btnUndo.style.display = 'inline-flex';
+          updateDictateSub();
+        } else {
+          dictateTitle.textContent = 'Ready';
+          btnDictateToggle.textContent = 'Start';
+          btnDictateToggle.classList.remove('danger');
+          btnUndo.style.display = 'none';
+          updateDictateSub();
         }
       }
 
-      // --- READER FUNCTIONALITY ---
+      function triggerDictateToggle() {
+        openPanel();
+        setTab('dictate');
+
+        if (dictateState === 'transcribing') return;
+        if (dictateState === 'recording') {
+          setDictateState('transcribing');
+        } else {
+          setDictateState('recording');
+        }
+
+        try { api?.triggerWidgetAction?.('dictate-toggle'); } catch { }
+      }
+
+      function triggerDictateStop() {
+        openPanel();
+        setTab('dictate');
+        if (dictateState !== 'recording') return;
+        setDictateState('transcribing');
+        try { api?.triggerWidgetAction?.('dictate-stop'); } catch { }
+      }
+
+      // -------------------------
+      // Reader (clipboard speak)
+      // -------------------------
       let currentAudio = null;
-      let isPaused = false;
-      let navVolume = 1.0; // 0.0 to 1.0
+      let readerSpeed = 1.0;
+      let readerLanguage = 'en';
+      let readerVoice = null; // voice id
+      let readerVoices = []; // [{id,name,language}]
+      let ttsProviderId = null;
+      let navVolume = 1.0;
+
       const fallbackOrigin = window.location.origin && window.location.origin.startsWith('http')
         ? window.location.origin
         : 'http://127.0.0.1:8080';
       const BACKEND_URL = api?.backendUrl || fallbackOrigin;
 
-      async function handleReadClipboard() {
+      function parseJsonResponse(response) {
+        if (!response) return null;
         try {
-          const text = api?.readClipboard ? await api.readClipboard() : '';
-          if (!text || !text.trim()) {
-            setState(STATES.HOVER);
-            return;
-          }
+          return typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+        } catch {
+          return null;
+        }
+      }
 
-          const response = await api.netFetch(`${BACKEND_URL}/api/reader/speak`, {
-            method: 'POST',
+      async function saveWidgetSettings(payload) {
+        try {
+          await api?.netFetch?.(`${BACKEND_URL}/api/widget/settings`, {
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: text.trim() })
+            body: JSON.stringify(payload || {}),
           });
-
-          if (!response.ok) {
-            console.error('[Widget] Reader API error:', response.status);
-            setState(STATES.HOVER);
-            return;
-          }
-
-          const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
-          if (data?.output_url) {
-            playAudioFromUrl(`${BACKEND_URL}${data.output_url}`);
-          } else {
-            setState(STATES.HOVER);
-          }
-        } catch (err) {
-          console.error('[Widget] Read clipboard failed:', err);
-          setState(STATES.HOVER);
+        } catch {
+          // Non-blocking.
         }
       }
 
-      function playAudioFromUrl(audioUrl) {
-        stopAudio();
+      async function loadWidgetSettings() {
         try {
-          currentAudio = new Audio(audioUrl);
-          currentAudio.volume = navVolume;
-          isPaused = false;
+          const response = await api?.netFetch?.(`${BACKEND_URL}/api/widget/settings`, { method: 'GET' });
+          if (!response?.ok) return;
+          const data = parseJsonResponse(response);
+          if (!data) return;
 
-          currentAudio.onended = () => {
-            currentAudio = null;
-            setState(STATES.HOVER);
-          };
-
-          currentAudio.onerror = (e) => {
-            console.error('[Widget] Audio playback error:', e);
-            currentAudio = null;
-            setState(STATES.HOVER);
-          };
-
-          currentAudio.play().catch(err => {
-            console.error('[Widget] Play failed:', err);
-            setState(STATES.HOVER);
-          });
-        } catch (err) {
-          console.error('[Widget] Failed to play audio:', err);
-          setState(STATES.HOVER);
+          if (data.currentModule) setTabFromModule(data.currentModule);
+          if (data.reader) {
+            if (typeof data.reader.speed === 'number') readerSpeed = data.reader.speed;
+            if (typeof data.reader.language === 'string') readerLanguage = data.reader.language;
+            if (typeof data.reader.voice === 'string' || data.reader.voice === null) readerVoice = data.reader.voice;
+          }
+        } catch {
+          // Non-blocking.
         }
       }
 
-      function stopAudio() {
-        if (currentAudio) {
-          currentAudio.pause();
-          currentAudio.src = '';
-          currentAudio = null;
+      async function loadTtsProviderSelection() {
+        try {
+          const response = await api?.netFetch?.(`${BACKEND_URL}/api/settings/providers/tts`, { method: 'GET' });
+          if (!response?.ok) return;
+          const data = parseJsonResponse(response);
+          if (!data) return;
+
+          ttsProviderId = data.selected || ttsProviderId;
+          const cfg = data.config || {};
+          if (!readerLanguage || readerLanguage === 'en') {
+            if (cfg.language) readerLanguage = cfg.language;
+          }
+          if (!readerVoice) {
+            readerVoice = cfg.preset_voice_id || cfg.voice_id || cfg.voice || null;
+          }
+        } catch {
+          // Non-blocking.
         }
-        isPaused = false;
       }
 
-      function togglePauseAudio() {
-        if (!currentAudio) return;
-        if (isPaused) {
-          currentAudio.play();
-          isPaused = false;
-        } else {
-          currentAudio.pause();
-          isPaused = true;
+      async function loadReaderVoices() {
+        if (!ttsProviderId) return;
+        try {
+          const query = readerLanguage ? `?language=${encodeURIComponent(readerLanguage)}` : '';
+          const response = await api?.netFetch?.(`${BACKEND_URL}/api/tts/providers/${ttsProviderId}/voices${query}`, { method: 'GET' });
+          if (!response?.ok) return;
+          const data = parseJsonResponse(response);
+          const voices = data?.voices || [];
+          if (Array.isArray(voices)) {
+            readerVoices = voices;
+          }
+          if (!readerVoice && readerVoices.length) {
+            readerVoice = readerVoices[0].id;
+          }
+        } catch {
+          // Some providers don't support preset voices.
         }
+      }
+
+      function resolveVoiceLabel() {
+        if (!readerVoice) return 'Default';
+        const match = readerVoices.find(v => v.id === readerVoice);
+        if (match?.name) return match.name;
+        return String(readerVoice);
+      }
+
+      const btnVoice = document.getElementById('btn-voice');
+      const btnSpeed = document.getElementById('btn-speed');
+      const readerHint = document.getElementById('reader-hint');
+      const btnVol = document.getElementById('btn-vol');
+      const btnPause = document.getElementById('btn-pause-reader');
+      const progressTrack = document.getElementById('reader-progress');
+      const progressFill = document.getElementById('reader-progress-fill');
+
+      function setReaderState(next) {
+        readerState = next;
+        if (widget) widget.dataset.reader = next;
         updatePauseButton();
+        updateBarStatus();
+        updateWfControls();
+      }
+
+      function updateVoiceBadge() {
+        if (!btnVoice) return;
+        btnVoice.textContent = resolveVoiceLabel();
+      }
+
+      function updateSpeedBadge() {
+        if (!btnSpeed) return;
+        btnSpeed.textContent = `${readerSpeed.toFixed(1)}x`;
+      }
+
+      function applyReaderPlaybackSettings() {
+        updateVoiceBadge();
+        updateSpeedBadge();
+        if (currentAudio) {
+          try { currentAudio.playbackRate = readerSpeed || 1.0; } catch { }
+          try { currentAudio.volume = navVolume; } catch { }
+        }
+      }
+
+      function cycleReaderSpeed() {
+        const speeds = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0];
+        const idx = speeds.findIndex(v => Math.abs(v - readerSpeed) < 0.01);
+        readerSpeed = speeds[(idx + 1) % speeds.length];
+        applyReaderPlaybackSettings();
+        saveWidgetSettings({ currentModule: 'reader', reader: { speed: readerSpeed, voice: readerVoice, language: readerLanguage } });
+      }
+
+      function cycleReaderVoice() {
+        if (!readerVoices.length) return;
+        const idx = readerVoices.findIndex(v => v.id === readerVoice);
+        const next = readerVoices[(idx + 1) % readerVoices.length];
+        readerVoice = next?.id || readerVoice;
+        applyReaderPlaybackSettings();
+        saveWidgetSettings({ currentModule: 'reader', reader: { speed: readerSpeed, voice: readerVoice, language: readerLanguage } });
+      }
+
+      function setReaderProgress(percent) {
+        if (!progressFill) return;
+        const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+        progressFill.style.width = `${clamped}%`;
+      }
+
+      function updateReaderProgress() {
+        if (!currentAudio || !Number.isFinite(currentAudio.duration) || currentAudio.duration <= 0) {
+          setReaderProgress(0);
+          return;
+        }
+        setReaderProgress((currentAudio.currentTime / currentAudio.duration) * 100);
+      }
+
+      function seekReaderToFraction(fraction) {
+        if (!currentAudio || !Number.isFinite(currentAudio.duration) || currentAudio.duration <= 0) return;
+        const clamped = Math.max(0, Math.min(1, Number(fraction) || 0));
+        currentAudio.currentTime = clamped * currentAudio.duration;
+        updateReaderProgress();
+      }
+
+      function bindReaderProgress() {
+        if (!progressTrack) return;
+
+        const seekFromClientX = (clientX) => {
+          const rect = progressTrack.getBoundingClientRect();
+          const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+          const fraction = rect.width ? x / rect.width : 0;
+          seekReaderToFraction(fraction);
+        };
+
+        progressTrack.onpointerdown = (e) => {
+          e.stopPropagation();
+          try { progressTrack.setPointerCapture(e.pointerId); } catch { }
+          seekFromClientX(e.clientX);
+        };
+
+        progressTrack.onpointermove = (e) => {
+          try {
+            if (!progressTrack.hasPointerCapture(e.pointerId)) return;
+          } catch {
+            // Ignore.
+          }
+          seekFromClientX(e.clientX);
+        };
+
+        progressTrack.onpointerup = (e) => {
+          try { progressTrack.releasePointerCapture(e.pointerId); } catch { }
+        };
       }
 
       function updatePauseButton() {
-        const btn = document.getElementById('btn-pause-reader');
-        if (!btn) return;
-        if (isPaused) {
-          btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"></polygon></svg>`;
-        } else {
-          btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`;
-        }
+        if (!btnPause) return;
+        const isPaused = readerState === 'paused';
+        btnPause.innerHTML = isPaused
+          ? `<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7,4 20,12 7,20"></polygon></svg>`
+          : `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`;
       }
 
-      bindClick('btn-pause-reader', togglePauseAudio);
-
-      bindClick('btn-vol', toggleVolume);
+      function updateVolumeIcon() {
+        if (!btnVol) return;
+        let iconHtml = '';
+        if (navVolume >= 1.0) {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+        } else if (navVolume > 0) {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+        } else {
+          iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+        }
+        btnVol.innerHTML = iconHtml;
+      }
 
       function toggleVolume() {
-        // Cycle: 1.0 (High) -> 0.5 (Low) -> 0.0 (Mute) -> 1.0
         if (navVolume >= 1.0) navVolume = 0.5;
         else if (navVolume > 0.0) navVolume = 0.0;
         else navVolume = 1.0;
-
         if (currentAudio) currentAudio.volume = navVolume;
         updateVolumeIcon();
       }
 
-      function updateVolumeIcon() {
-        const btn = document.getElementById('btn-vol');
-        if (!btn) return;
+      function stopAudio() {
+        if (currentAudio) {
+          try { currentAudio.pause(); } catch { }
+          currentAudio.src = '';
+          currentAudio = null;
+        }
+        setReaderState('idle');
+        setReaderProgress(0);
+        updatePauseButton();
+        updateBarStatus();
+        if (readerHint) readerHint.textContent = 'Reads clipboard text instantly.';
+      }
 
-        let iconHtml = '';
-        if (navVolume >= 1.0) {
-          // High vol
-          iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
-        } else if (navVolume > 0) {
-          // Low vol
-          iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>`;
+      function togglePauseAudio() {
+        if (!currentAudio) return;
+        if (readerState === 'paused') {
+          currentAudio.play().catch(() => { });
+          setReaderState('playing');
         } else {
-          // Mute
-          iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>`;
+          currentAudio.pause();
+          setReaderState('paused');
         }
-        btn.innerHTML = iconHtml;
+        updatePauseButton();
+        updateBarStatus();
       }
 
-      async function updateSttProviderLabel() {
+      function playAudioFromUrl(url) {
+        stopAudio();
         try {
-          const response = await api.netFetch(`${BACKEND_URL}/api/settings/providers/stt`, {
-            method: 'GET',
-          });
-          if (!response.ok) return;
-          const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
-          const providerId = data?.selected || 'unknown';
-          const config = data?.config || {};
-          const model = config?.model || '';
-          const providerNames = {
-            'elevenlabs': 'ElevenLabs',
-            'openai': 'OpenAI',
-            'groq': 'Groq',
-            'deepgram': 'Deepgram',
-            'deepinfra': 'DeepInfra',
-            'faster-whisper': 'Local Whisper',
+          currentAudio = new Audio(url);
+          setReaderState('loading');
+          applyReaderPlaybackSettings();
+          updatePauseButton();
+          updateBarStatus();
+          if (readerHint) readerHint.textContent = 'Playing...';
+
+          currentAudio.onloadedmetadata = () => updateReaderProgress();
+          currentAudio.ontimeupdate = () => updateReaderProgress();
+          currentAudio.onplay = () => {
+            setReaderState('playing');
+            if (readerHint) readerHint.textContent = 'Playing...';
           };
-          const providerName = providerNames[providerId] || providerId;
-          let billing = '';
-          if (providerId === 'elevenlabs') billing = 'STT API hours';
-          else if (providerId === 'faster-whisper') billing = 'Local (free)';
-          const label = `STT: ${providerName}${model ? ` • ${model}` : ''}${billing ? ` • ${billing}` : ''}`;
-          const recEl = document.getElementById('stt-provider-recording');
-          const transEl = document.getElementById('stt-provider-transcribing');
-          if (recEl) recEl.textContent = label;
-          if (transEl) transEl.textContent = label;
-        } catch (err) {
-          // Ignore label update failures
+          currentAudio.onpause = () => {
+            if (readerState !== 'idle') {
+              setReaderState('paused');
+              if (readerHint) readerHint.textContent = 'Paused.';
+            }
+          };
+
+          currentAudio.onended = () => {
+            stopAudio();
+            if (!pinned && dictateState === 'idle') collapseToBar({ force: true });
+          };
+          currentAudio.onerror = () => {
+            stopAudio();
+            if (!pinned && dictateState === 'idle') collapseToBar({ force: true });
+          };
+
+          // Autoplay can be blocked when triggered via global hotkey (no user gesture).
+          // Keep audio loaded and show a "Click Play" hint instead of failing silently.
+          currentAudio.play().catch(() => {
+            setReaderState('paused');
+            updatePauseButton();
+            if (readerHint) readerHint.textContent = 'Click Play to start.';
+          });
+        } catch {
+          stopAudio();
         }
       }
 
-      // --- PROCESS HOTKEY ACTIONS ---
+      async function handleReadClipboard() {
+        openPanel();
+        setTab('reader');
+        try {
+          setReaderState('loading');
+          if (readerHint) readerHint.textContent = 'Generating...';
+          const text = api?.readClipboard ? await api.readClipboard() : '';
+          if (!text || !text.trim()) {
+            setReaderState('idle');
+            if (!pinned && dictateState === 'idle') collapseToBar({ force: true });
+            return;
+          }
+
+          const response = await api?.netFetch?.(`${BACKEND_URL}/api/reader/speak`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: text.trim(),
+              language: readerLanguage,
+              voice: readerVoice,
+            }),
+          });
+
+          if (!response?.ok) {
+            if (readerHint) readerHint.textContent = 'Reader failed.';
+            setReaderState('idle');
+            return;
+          }
+
+          const data = parseJsonResponse(response);
+          if (data?.output_url) {
+            playAudioFromUrl(`${BACKEND_URL}${data.output_url}`);
+          } else {
+            if (readerHint) readerHint.textContent = 'No audio returned.';
+            setReaderState('idle');
+          }
+        } catch {
+          if (readerHint) readerHint.textContent = 'Reader failed.';
+          setReaderState('idle');
+        }
+      }
+
+      // -------------------------
+      // Button bindings (safe click)
+      // -------------------------
+      function bindClick(id, fn) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.onpointerdown = (e) => {
+          e.stopPropagation();
+          try { el.setPointerCapture(e.pointerId); } catch { }
+        };
+        el.onpointerup = (e) => {
+          e.stopPropagation();
+          try { el.releasePointerCapture(e.pointerId); } catch { }
+          fn();
+        };
+      }
+
+      bindClick('tab-dictate', () => setTab('dictate'));
+      bindClick('tab-reader', () => setTab('reader'));
+      bindClick('btn-collapse', () => {
+        // Behave like Wispr Flow's "X": stop any active action, then collapse.
+        if (dictateState === 'recording' || dictateState === 'transcribing') {
+          triggerDictateStop();
+        }
+        if (readerState !== 'idle') {
+          stopAudio();
+        }
+        collapseToBar({ force: true });
+      });
+
+      bindClick('wf-mode', () => {
+        openPanel();
+        setTab(activeTab === 'dictate' ? 'reader' : 'dictate');
+      });
+
+      bindClick('wf-action', () => {
+        if (activeTab === 'dictate') {
+          if (dictateState === 'recording' || dictateState === 'transcribing') {
+            triggerDictateStop();
+          } else {
+            triggerDictateToggle();
+          }
+          return;
+        }
+
+        // Reader mode
+        if (readerState === 'playing' || readerState === 'paused') {
+          togglePauseAudio();
+          return;
+        }
+        if (readerState === 'loading') {
+          stopAudio();
+          return;
+        }
+        handleReadClipboard();
+      });
+
+      bindClick('bar-btn-dictate', triggerDictateToggle);
+      bindClick('bar-btn-reader', handleReadClipboard);
+
+      bindClick('btn-dictate-toggle', triggerDictateToggle);
+      bindClick('btn-dictate-stop', triggerDictateStop);
+
+      bindClick('btn-undo', () => {
+        try { api?.undoPaste?.(); } catch { }
+        collapseToBar({ force: true });
+      });
+
+      bindClick('btn-live-capture', () => {
+        // Optional: open the main window Live Capture module for system audio transcription.
+        try { api?.triggerWidgetAction?.('open-loopback'); } catch { }
+      });
+
+      bindClick('btn-read', handleReadClipboard);
+      bindClick('btn-speed', cycleReaderSpeed);
+      bindClick('btn-voice', cycleReaderVoice);
+      bindClick('btn-vol', toggleVolume);
+      bindClick('btn-pause-reader', togglePauseAudio);
+      bindClick('btn-stop-reader', () => {
+        stopAudio();
+        if (!pinned && dictateState === 'idle') collapseToBar({ force: true });
+      });
+      bindReaderProgress();
+
+      // Initialize Wispr-like controls/icons.
+      updateWfControls();
+
+      // -------------------------
+      // Hotkeys + state updates
+      // -------------------------
       function processHotkeyAction(action) {
         if (action === 'read-clipboard') {
-          setState(STATES.READER);
           handleReadClipboard();
-        } else if (action === 'dictate-toggle') {
-          // Toggle logic: If recording, stop. If idle/complete/hover, start.
-          if (currentState === STATES.RECORDING) {
-            stopRecordingSim();
-            // Go to transcribing immediately, don't show done yet
-            setState(STATES.TRANSCRIBING);
-          } else if (currentState === STATES.TRANSCRIBING) {
-            // Ignore toggle while transcribing? Or cancel? Let's ignore.
-            return;
-          } else {
-            setState(STATES.RECORDING);
-            startRecordingSim();
-            updateSttProviderLabel();
+          return;
+        }
+        if (action === 'dictate-toggle') {
+          triggerDictateToggle();
+          return;
+        }
+        if (action === 'dictate-start') {
+          openPanel();
+          setTab('dictate');
+          if (dictateState !== 'recording') {
+            setDictateState('recording');
+            try { api?.triggerWidgetAction?.('dictate-start'); } catch { }
           }
-          // Relay dictate-toggle to frontend to handle logic
-          if (api?.triggerWidgetAction) api.triggerWidgetAction('dictate-toggle');
-        } else if (action === 'dictate-start') {
-          // Only start if not already recording
-          if (currentState !== STATES.RECORDING && currentState !== STATES.TRANSCRIBING) {
-            setState(STATES.RECORDING);
-            startRecordingSim();
-            updateSttProviderLabel();
-            if (api?.triggerWidgetAction) api.triggerWidgetAction('dictate-start');
-          }
-        } else if (action === 'dictate-stop') {
-          // Only stop if currently recording
-          if (currentState === STATES.RECORDING) {
-            stopRecordingSim();
-            setState(STATES.TRANSCRIBING);
-            if (api?.triggerWidgetAction) api.triggerWidgetAction('dictate-stop');
-          }
-        } else if (action === 'stop') {
+          return;
+        }
+        if (action === 'dictate-stop') {
+          triggerDictateStop();
+          return;
+        }
+        if (action === 'stop') {
           stopAudio();
-          setState(STATES.HOVER);
+          setDictateState('idle');
+          if (!pinned) collapseToBar({ force: true });
         }
       }
 
-      // Initial
-      setTimeout(() => {
-        setState(STATES.IDLE);
+      if (api?.onGlobalHotkey) {
+        api.onGlobalHotkey((action) => {
+          if (widgetReady) processHotkeyAction(action);
+          else pendingActions.push(action);
+        });
+      }
+
+      if (api?.onWidgetStateUpdate) {
+        api.onWidgetStateUpdate((state) => {
+          // States sent by electron/main.js via "stt-overlay-state".
+          if (state === 'transcribing') {
+            openPanel();
+            setTab('dictate');
+            setDictateState('transcribing');
+          } else if (state === 'complete' || state === 'done') {
+            openPanel();
+            setTab('dictate');
+            setDictateState('done');
+          } else if (state === 'idle') {
+            setDictateState('idle');
+            if (!pinned && readerState === 'idle') collapseToBar({ force: true });
+          } else if (state === 'listening' || state === 'recording') {
+            openPanel();
+            setTab('dictate');
+            setDictateState('recording');
+          }
+        });
+      }
+
+      if (api?.onSttTranscript) {
+        api.onSttTranscript((text) => {
+          setLastTranscript(text);
+          updateBarStatus();
+        });
+      }
+
+      if (api?.onWidgetSwitchModule) {
+        api.onWidgetSwitchModule((moduleName) => {
+          setTabFromModule(moduleName);
+          openPanel();
+        });
+      }
+
+      async function init() {
+        // Restore last tab from electron state (window position persistence).
+        try {
+          if (api?.getWidgetState) {
+            const state = await api.getWidgetState();
+            if (state?.lastModule) setTabFromModule(state.lastModule);
+          }
+        } catch { }
+
+        await loadWidgetSettings();
+        await loadTtsProviderSelection();
+        await loadReaderVoices();
+        applyReaderPlaybackSettings();
+        updateVolumeIcon();
+        updatePauseButton();
+        updateDictateUI();
+        updateBarStatus();
+
+        // Start in bar mode.
+        resizeTo('bar');
+
         widgetReady = true;
-        pendingActions.forEach(action => processHotkeyAction(action));
-        pendingActions = [];
-      }, 50);
+        while (pendingActions.length) {
+          processHotkeyAction(pendingActions.shift());
+        }
+      }
+
+      setTimeout(() => { init(); }, 30);
     });
   </script>
 </body>
-
 </html>

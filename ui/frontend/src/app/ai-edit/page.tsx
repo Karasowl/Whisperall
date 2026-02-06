@@ -5,6 +5,8 @@ import { Sparkles, Copy, Check, Wand2 } from 'lucide-react';
 import { aiEdit, ServiceProviderInfo, getProviderSelection, setProvider } from '@/lib/api';
 import { SelectMenu } from '@/components/SelectMenu';
 import { UnifiedProviderSelector } from '@/components/UnifiedProviderSelector';
+import { usePlan } from '@/components/PlanProvider';
+import { useDevMode } from '@/components/DevModeProvider';
 import {
   ModuleShell,
   ActionBar,
@@ -23,6 +25,10 @@ const commandOptions = [
 ].map((option) => ({ value: option, label: option }));
 
 export default function AIEditPage() {
+  const { hasPro } = usePlan();
+  const { devMode } = useDevMode();
+  const showEngineSelector = devMode;
+
   const [text, setText] = useState('');
   const [command, setCommand] = useState(commandOptions[0].value);
   const [customCommand, setCustomCommand] = useState('');
@@ -120,17 +126,19 @@ export default function AIEditPage() {
       settingsTitle="Command Settings"
       // Engine selector
       engineSelector={
-        <UnifiedProviderSelector
-          service="ai_edit"
-          selected={provider}
-          onSelect={updateProvider}
-          selectedModel={providerModel}
-          onModelChange={setProviderModel}
-          onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
-          variant="dropdown"
-          showModelSelector
-          label="AI Provider"
-        />
+        showEngineSelector ? (
+          <UnifiedProviderSelector
+            service="ai_edit"
+            selected={provider}
+            onSelect={updateProvider}
+            selectedModel={providerModel}
+            onModelChange={setProviderModel}
+            onProviderInfoChange={(info) => setProviderInfo(info as ServiceProviderInfo | null)}
+            variant="dropdown"
+            showModelSelector
+            label="AI Provider"
+          />
+        ) : undefined
       }
       // Settings panel (left side)
       settings={
@@ -230,10 +238,10 @@ export default function AIEditPage() {
             'Copy result directly to clipboard',
           ]}
           metadata={
-            providerInfo
+            showEngineSelector && providerInfo
               ? [
                   { label: 'Provider', value: providerInfo.name },
-                  { label: 'Model', value: providerModel || providerInfo.default_model || 'Default' },
+                  { label: 'Quality', value: providerModel || providerInfo.default_model || 'Default' },
                 ]
               : undefined
           }

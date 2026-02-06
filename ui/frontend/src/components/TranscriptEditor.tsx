@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 // Speaker colors for inline highlighting
 const SPEAKER_COLORS = [
   "text-blue-400",
-  "text-green-400",
+  "text-sky-400",
   "text-purple-400",
   "text-orange-400",
   "text-pink-400",
@@ -278,7 +278,7 @@ export default function TranscriptEditor({
               type="checkbox"
               checked={showTimestamps}
               onChange={(e) => setShowTimestamps(e.target.checked)}
-              className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500"
+              className="w-4 h-4 rounded border-white/20 bg-white/5 text-accent-primary focus:ring-accent-primary"
             />
             <Clock className="w-4 h-4 text-slate-400" />
             <span className="text-slate-400">Timestamps</span>
@@ -291,7 +291,7 @@ export default function TranscriptEditor({
                 type="checkbox"
                 checked={showSpeakers}
                 onChange={(e) => setShowSpeakers(e.target.checked)}
-                className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500"
+                className="w-4 h-4 rounded border-white/20 bg-white/5 text-accent-primary focus:ring-accent-primary"
               />
               <Users className="w-4 h-4 text-slate-400" />
               <span className="text-slate-400">
@@ -301,7 +301,7 @@ export default function TranscriptEditor({
                 <span className={cn(
                   "px-1.5 py-0.5 text-xs rounded",
                   diarizationMethod === 'pyannote'
-                    ? "bg-emerald-500/20 text-emerald-400"
+                    ? "bg-accent-primary/10 text-accent-primary"
                     : "bg-amber-500/20 text-amber-400"
                 )}>
                   {diarizationMethod === 'pyannote' ? 'AI' : 'Basic'}
@@ -440,7 +440,7 @@ export default function TranscriptEditor({
                         {/* Timestamp (if showing) */}
                         {showTimestamps && (
                           <span
-                            className="text-xs text-slate-400 font-mono mr-1 cursor-pointer hover:text-emerald-400"
+                            className="text-xs text-slate-400 font-mono mr-1 cursor-pointer hover:text-accent-primary"
                             onClick={() => handleSeek(getSegmentStart(seg))}
                           >
                             [{formatTimestamp(getSegmentStart(seg))}]
@@ -453,12 +453,12 @@ export default function TranscriptEditor({
                             if (el) segmentRefs.current.set(seg.id, el);
                             else segmentRefs.current.delete(seg.id);
                           }}
-                          className={cn(
-                            "cursor-pointer transition-all duration-150 rounded px-0.5 -mx-0.5",
-                            isActive && "bg-emerald-500/20 text-emerald-200",
-                            isHovered && !isActive && "bg-white/10",
-                            matchesSearch && !isCurrentMatch && "bg-yellow-500/20 text-yellow-200",
-                            isCurrentMatch && "bg-orange-500/40 text-orange-100 ring-2 ring-orange-400/50"
+                            className={cn(
+                              "cursor-pointer transition-all duration-150 rounded px-0.5 -mx-0.5",
+                              isActive && "bg-accent-primary/15 text-accent-primary",
+                              isHovered && !isActive && "bg-white/10",
+                              matchesSearch && !isCurrentMatch && "bg-yellow-500/20 text-yellow-200",
+                              isCurrentMatch && "bg-orange-500/40 text-orange-100 ring-2 ring-orange-400/50"
                           )}
                           onMouseEnter={() => setHoveredSegmentId(seg.id)}
                           onMouseLeave={() => setHoveredSegmentId(null)}

@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-    MessageSquare,
-    BookOpen,
+    type LucideIcon,
     Mic,
     HardDrive,
     History,
@@ -25,49 +24,82 @@ import {
     Volume2,
     Music,
     Radio,
+    Lock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getHotkeys } from '@/lib/api';
+import { usePlan } from '@/components/PlanProvider';
+import { useDevMode } from '@/components/DevModeProvider';
+import { useToast } from '@/components/Toast';
 import { DevDiagnostics } from './DevDiagnostics';
 
-const navItems = [
-    { href: '/', label: 'Text to Speech', icon: MessageSquare, shortLabel: 'TTS' },
-    { href: '/reader', label: 'Reader', icon: Headphones, shortLabel: 'Reader' },
-    { href: '/dictate', label: 'Speech to Text', icon: Mic, shortLabel: 'STT' },
-    { href: '/transcribe', label: 'Transcribe', icon: FileAudio, shortLabel: 'Transcribe' },
-    { href: '/voices', label: 'Voice Library', icon: Mic, shortLabel: 'Voices' },
-    { href: '/history', label: 'History', icon: History, shortLabel: 'History' },
+type SidebarItem = {
+    href: string;
+    label: string;
+    icon: LucideIcon;
+    badge?: 'PRO' | 'BETA';
+};
+
+const coreItems: SidebarItem[] = [
+    { href: '/dictate', label: 'Dictate', icon: Mic },
+    { href: '/reader', label: 'Reader', icon: Headphones },
+    { href: '/transcribe', label: 'Transcribe', icon: FileAudio },
 ];
 
-const moreToolsItems = [
-    { href: '/loopback', label: 'Live Transcription', icon: Radio },
+const toolsItems: SidebarItem[] = [
+    { href: '/voices', label: 'Voice Library', icon: Mic },
+    { href: '/history', label: 'History', icon: History },
+];
+
+const moreToolsItems: SidebarItem[] = [
+    { href: '/loopback', label: 'Live Capture', icon: Radio, badge: 'PRO' },
     { href: '/ai-edit', label: 'AI Edit', icon: Sparkles },
     { href: '/translate', label: 'Translate', icon: Languages },
-    { href: '/audiobook', label: 'Audiobook', icon: BookOpen },
-    { href: '/sfx', label: 'Sound Effects', icon: Volume2 },
-    { href: '/music', label: 'Music', icon: Music },
-    { href: '/voice-changer', label: 'Voice Changer', icon: Wand2 },
-    { href: '/voice-isolator', label: 'Voice Isolator', icon: AudioWaveform },
-    { href: '/dubbing', label: 'Auto Dubbing', icon: Globe },
 ];
 
-const secondaryItems = [
-    { href: '/models', label: 'Models', icon: HardDrive },
-    { href: '/settings', label: 'Settings', icon: Settings },
+const labsItems: SidebarItem[] = [
+    { href: '/voice-changer', label: 'Voice Changer', icon: Wand2, badge: 'PRO' },
+    { href: '/voice-isolator', label: 'Voice Isolator', icon: AudioWaveform, badge: 'PRO' },
+    { href: '/dubbing', label: 'Auto Dubbing', icon: Globe, badge: 'PRO' },
+    { href: '/music', label: 'Music', icon: Music, badge: 'PRO' },
+    { href: '/sfx', label: 'Sound Effects', icon: Volume2, badge: 'PRO' },
 ];
 
 export function Sidebar() {
     const pathname = usePathname();
     const router = useRouter();
-    const [collapsed, setCollapsed] = useState(false);
+    const { hasPro } = usePlan();
+    const { devMode: devModeEnabled } = useDevMode();
+    const toast = useToast();
+    const [collapsed, setCollapsed] = useState(true);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [moreToolsOpen, setMoreToolsOpen] = useState(false);
+    const [labsOpen, setLabsOpen] = useState(false);
     const moreToolsRef = useRef<HTMLDivElement | null>(null);
+    const labsRef = useRef<HTMLDivElement | null>(null);
+    const showAdvancedNav = devModeEnabled;
+    const visibleToolsItems = showAdvancedNav
+        ? toolsItems
+        : toolsItems.filter((item) => item.href === '/history');
+
+    const goToUpgrade = (featureLabel?: string) => {
+        toast.info('Upgrade required', `${featureLabel ?? 'This feature'} is available in Pro.`);
+        const params = new URLSearchParams();
+        params.set('tab', 'plan');
+        params.set('upgrade', 'pro');
+        if (featureLabel) params.set('feature', featureLabel);
+        router.push(`/settings?${params.toString()}`);
+    };
 
     // Persist collapsed state and sync with CSS variable
     useEffect(() => {
         const stored = localStorage.getItem('sidebar-collapsed');
-        if (stored) setCollapsed(stored === 'true');
+        if (stored !== null) {
+            setCollapsed(stored === 'true');
+        } else {
+            setCollapsed(true);
+            localStorage.setItem('sidebar-collapsed', 'true');
+        }
     }, []);
 
     // Sync collapsed state to CSS variable for layout coordination
@@ -92,8 +124,10 @@ export function Sidebar() {
 
         const unsubscribe = window.electronAPI.onHotkey((action) => {
             window.__lastHotkey = action;
-            if (action === 'open-tts') router.push('/');
+            // "Home" is dictation-first now.
+            if (action === 'open-tts') router.push('/dictate');
             if (action === 'read-clipboard') router.push('/reader');
+            if (action === 'open-loopback') router.push('/loopback');
             if (action === 'ai-edit') router.push('/ai-edit');
             if (action === 'translate') router.push('/translate');
             if (action === 'open-settings') router.push('/settings');
@@ -108,16 +142,21 @@ export function Sidebar() {
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (!moreToolsOpen) return;
-            if (moreToolsRef.current?.contains(event.target as Node)) return;
-            setMoreToolsOpen(false);
+            const target = event.target as Node;
+            if (moreToolsOpen && !moreToolsRef.current?.contains(target)) {
+                setMoreToolsOpen(false);
+            }
+            if (labsOpen && !labsRef.current?.contains(target)) {
+                setLabsOpen(false);
+            }
         };
         window.addEventListener('mousedown', handleClickOutside);
         return () => window.removeEventListener('mousedown', handleClickOutside);
-    }, [moreToolsOpen]);
+    }, [moreToolsOpen, labsOpen]);
 
     useEffect(() => {
         setMoreToolsOpen(false);
+        setLabsOpen(false);
     }, [pathname]);
 
     useEffect(() => {
@@ -132,7 +171,7 @@ export function Sidebar() {
     return (
         <>
             {/* Mobile Toggle & Top Bar (Visible only on small screens) */}
-            <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-background/80 backdrop-blur-md border-b border-glass-border flex items-center justify-between px-4 z-50">
+            <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-background/90 border-b border-surface-3/60 flex items-center justify-between px-4 z-50">
                 <div className="flex items-center gap-3">
                     <button 
                         onClick={() => setMobileMenuOpen(true)} 
@@ -144,7 +183,7 @@ export function Sidebar() {
                     >
                         <Menu className="w-6 h-6" aria-hidden="true" />
                     </button>
-                    <span className="text-lg font-bold text-gradient-accent">Whisperall</span>
+                    <span className="text-lg font-semibold text-foreground">Whisperall</span>
                 </div>
             </div>
 
@@ -162,7 +201,7 @@ export function Sidebar() {
                 role="navigation"
                 aria-label="Main navigation"
                 className={cn(
-                    "fixed inset-y-0 left-0 z-50 bg-glass-surface backdrop-blur-lg border-r border-glass-border transition-all duration-300 ease-spring",
+                "fixed inset-y-0 left-0 z-50 bg-background/80 backdrop-blur-md border-r border-surface-3/60 transition-all duration-300 ease-spring overflow-x-hidden",
                     // Mobile: slide in/out
                     mobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
                     // Base width
@@ -179,12 +218,16 @@ export function Sidebar() {
                     )}>
                         {!collapsed && (
                             <Link href="/" prefetch={false} className="flex items-center gap-3 group overflow-hidden">
-                                <div className="w-8 h-8 shrink-0 bg-gradient-to-br from-accent-primary via-teal-400 to-accent-secondary rounded-lg shadow-lg shadow-accent-primary/20" />
-                                <span className="text-lg font-bold text-gradient-accent truncate">Whisperall</span>
+                                <div className="w-9 h-9 shrink-0 rounded-xl bg-accent-primary/10 border border-accent-primary/30 flex items-center justify-center">
+                                    <div className="w-3 h-3 rounded-full bg-accent-primary" />
+                                </div>
+                                <span className="text-base font-semibold text-foreground truncate">Whisperall</span>
                             </Link>
                         )}
                         {collapsed && (
-                            <div className="w-8 h-8 shrink-0 bg-gradient-to-br from-accent-primary via-teal-400 to-accent-secondary rounded-lg shadow-lg shadow-accent-primary/20" />
+                            <div className="w-9 h-9 shrink-0 rounded-xl bg-accent-primary/10 border border-accent-primary/30 flex items-center justify-center">
+                                <div className="w-3 h-3 rounded-full bg-accent-primary" />
+                            </div>
                         )}
 
                         {/* Collapse Toggle (Desktop only) */}
@@ -210,8 +253,13 @@ export function Sidebar() {
                     </div>
 
                     {/* Navigation Items */}
-                    <div className="flex-1 overflow-y-auto py-4 px-2 space-y-1 custom-scrollbar">
-                        {navItems.map(({ href, label, icon: Icon, shortLabel }) => {
+                    <div className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 space-y-1 custom-scrollbar">
+                        {!collapsed && (
+                            <div className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-foreground-muted/70 uppercase">
+                                Core
+                            </div>
+                        )}
+                        {coreItems.map(({ href, label, icon: Icon }) => {
                             const isActive = pathname === href;
                             return (
                                 <Link
@@ -232,7 +280,41 @@ export function Sidebar() {
                                     <Icon className={cn("w-5 h-5 shrink-0", isActive && "text-accent-primary")} aria-hidden="true" />
                                     {!collapsed && <span className="truncate text-sm">{label}</span>}
 
-                                    {/* Tooltip for collapsed state */}
+                                    {collapsed && (
+                                        <div className="absolute left-full ml-2 px-2 py-1 bg-surface-base border border-glass-border rounded-md text-xs text-foreground opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
+                                            {label}
+                                        </div>
+                                    )}
+                                </Link>
+                            );
+                        })}
+
+                        {!collapsed && (
+                            <div className="mt-4 px-3 pb-1 text-[11px] font-semibold tracking-wider text-foreground-muted/70 uppercase">
+                                Tools
+                            </div>
+                        )}
+                        {visibleToolsItems.map(({ href, label, icon: Icon }) => {
+                            const isActive = pathname === href;
+                            return (
+                                <Link
+                                    key={href}
+                                    href={href}
+                                    prefetch={false}
+                                    className={cn(
+                                        "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group relative",
+                                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary focus-visible:ring-inset",
+                                        isActive
+                                            ? "bg-accent-primary/10 text-accent-primary font-medium"
+                                            : "text-foreground-secondary hover:text-foreground hover:bg-surface-2",
+                                        collapsed && "justify-center px-2"
+                                    )}
+                                    title={collapsed ? label : undefined}
+                                    aria-current={isActive ? "page" : undefined}
+                                >
+                                    <Icon className={cn("w-5 h-5 shrink-0", isActive && "text-accent-primary")} aria-hidden="true" />
+                                    {!collapsed && <span className="truncate text-sm">{label}</span>}
+
                                     {collapsed && (
                                         <div className="absolute left-full ml-2 px-2 py-1 bg-surface-base border border-glass-border rounded-md text-xs text-foreground opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
                                             {label}
@@ -243,6 +325,7 @@ export function Sidebar() {
                         })}
                     </div>
 
+                    {showAdvancedNav && (
                     <div className="px-2 pt-3">
                         <div ref={moreToolsRef} className="relative">
                             <button
@@ -272,51 +355,194 @@ export function Sidebar() {
 
                             {moreToolsOpen && (
                                 <div className="absolute left-0 bottom-full mb-2 w-full rounded-xl border border-glass-border bg-surface-base shadow-lg space-y-1 p-2 z-20">
-                                    {moreToolsItems.map(({ href, label, icon: Icon }) => (
-                                        <Link
-                                            key={href}
-                                            href={href}
-                                            prefetch={false}
-                                            className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-surface-2 text-sm text-foreground"
-                                            onClick={() => setMoreToolsOpen(false)}
-                                        >
-                                            <Icon className="w-4 h-4" />
-                                            <span>{label}</span>
-                                        </Link>
-                                    ))}
+                                    {moreToolsItems.map(({ href, label, icon: Icon, badge }) => {
+                                        const locked = badge === 'PRO' && !hasPro;
+                                        return (
+                                            <Link
+                                                key={href}
+                                                href={href}
+                                                prefetch={false}
+                                                className={cn(
+                                                    "flex items-center gap-2 px-3 py-2 rounded-lg text-sm",
+                                                    locked
+                                                        ? "text-foreground-muted hover:bg-amber-500/10"
+                                                        : "text-foreground hover:bg-surface-2"
+                                                )}
+                                                onClick={(e) => {
+                                                    if (locked) {
+                                                        e.preventDefault();
+                                                        setMoreToolsOpen(false);
+                                                        goToUpgrade(label);
+                                                        return;
+                                                    }
+                                                    setMoreToolsOpen(false);
+                                                }}
+                                                title={locked ? "Pro feature (upgrade to unlock)" : undefined}
+                                            >
+                                                <Icon className="w-4 h-4" />
+                                                <span>{label}</span>
+                                                {(badge || locked) && (
+                                                    <div className="ml-auto flex items-center gap-2">
+                                                        {badge && (
+                                                            <span
+                                                                className={cn(
+                                                                    "px-1.5 py-0.5 text-[10px] font-semibold rounded-full",
+                                                                    locked
+                                                                        ? "bg-amber-500/10 text-amber-200/80 border border-amber-500/15"
+                                                                        : "bg-amber-500/15 text-amber-300"
+                                                                )}
+                                                            >
+                                                                {badge}
+                                                            </span>
+                                                        )}
+                                                        {locked && (
+                                                            <Lock className="w-3.5 h-3.5 text-amber-300" aria-hidden="true" />
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </Link>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
                     </div>
+                    )}
+
+                    {showAdvancedNav && (
+                    <div className="px-2 pt-2">
+                        <div ref={labsRef} className="relative">
+                            <button
+                                onClick={() => setLabsOpen((prev) => !prev)}
+                                className={cn(
+                                    "w-full px-3 py-2.5 rounded-xl flex items-center gap-3 transition-all group relative",
+                                    collapsed
+                                        ? "justify-center"
+                                        : "justify-between",
+                                    labsOpen ? "bg-surface-2 text-foreground" : "text-foreground-secondary hover:text-foreground hover:bg-surface-2"
+                                )}
+                                title="Labs"
+                            >
+                                <Sparkles className="w-5 h-5 shrink-0" />
+                                {!collapsed && (
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <span className="truncate text-sm">Labs</span>
+                                        <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-white/10 text-foreground-muted">
+                                            Beta
+                                        </span>
+                                    </div>
+                                )}
+                                {!collapsed && (
+                                    <ChevronDown
+                                        className={cn(
+                                            "w-4 h-4 transition-transform",
+                                            labsOpen ? "rotate-180" : ""
+                                        )}
+                                    />
+                                )}
+                            </button>
+
+                            {labsOpen && (
+                                <div className="absolute left-0 bottom-full mb-2 w-full rounded-xl border border-glass-border bg-surface-base shadow-lg space-y-1 p-2 z-20">
+                                    {labsItems.map(({ href, label, icon: Icon, badge }) => {
+                                        const locked = badge === 'PRO' && !hasPro;
+                                        return (
+                                            <Link
+                                                key={href}
+                                                href={href}
+                                                prefetch={false}
+                                                className={cn(
+                                                    "flex items-center gap-2 px-3 py-2 rounded-lg text-sm",
+                                                    locked
+                                                        ? "text-foreground-muted hover:bg-amber-500/10"
+                                                        : "text-foreground hover:bg-surface-2"
+                                                )}
+                                                onClick={(e) => {
+                                                    if (locked) {
+                                                        e.preventDefault();
+                                                        setLabsOpen(false);
+                                                        goToUpgrade(label);
+                                                        return;
+                                                    }
+                                                    setLabsOpen(false);
+                                                }}
+                                                title={locked ? "Pro feature (upgrade to unlock)" : undefined}
+                                            >
+                                                <Icon className="w-4 h-4" />
+                                                <span>{label}</span>
+                                                {(badge || locked) && (
+                                                    <div className="ml-auto flex items-center gap-2">
+                                                        {badge && (
+                                                            <span
+                                                                className={cn(
+                                                                    "px-1.5 py-0.5 text-[10px] font-semibold rounded-full",
+                                                                    locked
+                                                                        ? "bg-amber-500/10 text-amber-200/80 border border-amber-500/15"
+                                                                        : "bg-amber-500/15 text-amber-300"
+                                                                )}
+                                                            >
+                                                                {badge}
+                                                            </span>
+                                                        )}
+                                                        {locked && (
+                                                            <Lock className="w-3.5 h-3.5 text-amber-300" aria-hidden="true" />
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </Link>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    )}
 
                     {/* Footer / Secondary Items */}
                     <div className="p-2 border-t border-glass-border space-y-1">
-                        {secondaryItems.map(({ href, label, icon: Icon }) => {
-                            const isActive = pathname === href;
-                            return (
-                                <Link
-                                    key={href}
-                                    href={href}
-                                    prefetch={false}
-                                    className={cn(
-                                        "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group relative",
-                                        isActive
-                                            ? "bg-accent-primary/10 text-accent-primary font-medium"
-                                            : "text-foreground-secondary hover:text-foreground hover:bg-surface-2",
-                                        collapsed && "justify-center px-2"
-                                    )}
-                                    title={collapsed ? label : undefined}
-                                >
-                                    <Icon className="w-5 h-5 shrink-0" />
-                                    {!collapsed && <span className="truncate text-sm">{label}</span>}
-                                    {collapsed && (
-                                        <div className="absolute left-full ml-2 px-2 py-1 bg-surface-base border border-glass-border rounded-md text-xs text-foreground opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
-                                            {label}
-                                        </div>
-                                    )}
-                                </Link>
-                            );
-                        })}
+                        {devModeEnabled && (
+                            <Link
+                                href="/models"
+                                prefetch={false}
+                                className={cn(
+                                    "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group relative",
+                                    pathname === "/models"
+                                        ? "bg-accent-primary/10 text-accent-primary font-medium"
+                                        : "text-foreground-secondary hover:text-foreground hover:bg-surface-2",
+                                    collapsed && "justify-center px-2"
+                                )}
+                                title={collapsed ? "Resources" : undefined}
+                            >
+                                <HardDrive className="w-5 h-5 shrink-0" />
+                                {!collapsed && <span className="truncate text-sm">Resources</span>}
+                                {collapsed && (
+                                    <div className="absolute left-full ml-2 px-2 py-1 bg-surface-base border border-glass-border rounded-md text-xs text-foreground opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
+                                        Resources
+                                    </div>
+                                )}
+                            </Link>
+                        )}
+
+                        <Link
+                            href="/settings"
+                            prefetch={false}
+                            className={cn(
+                                "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group relative",
+                                pathname === "/settings"
+                                    ? "bg-accent-primary/10 text-accent-primary font-medium"
+                                    : "text-foreground-secondary hover:text-foreground hover:bg-surface-2",
+                                collapsed && "justify-center px-2"
+                            )}
+                            title={collapsed ? "Settings" : undefined}
+                        >
+                            <Settings className="w-5 h-5 shrink-0" />
+                            {!collapsed && <span className="truncate text-sm">Settings</span>}
+                            {collapsed && (
+                                <div className="absolute left-full ml-2 px-2 py-1 bg-surface-base border border-glass-border rounded-md text-xs text-foreground opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap">
+                                    Settings
+                                </div>
+                            )}
+                        </Link>
 
                         {/* Dev Diagnostics - only shown when DEV_MODE=true */}
                         <DevDiagnostics collapsed={collapsed} />

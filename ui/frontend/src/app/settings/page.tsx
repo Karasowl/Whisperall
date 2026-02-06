@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Settings,
   Key,
@@ -17,6 +19,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { usePlan } from '@/components/PlanProvider';
+import { useDevMode } from '@/components/DevModeProvider';
 import {
   type HotkeysSettings,
   type Model,
@@ -35,6 +39,7 @@ import {
   deleteModel,
   updateSetting,
   getSystemCapabilities,
+  getMonthlyHistoryStats,
 } from '@/lib/api';
 import { SelectMenu } from '@/components/SelectMenu';
 import { HotkeyRecorder } from '@/components/HotkeyRecorder';
@@ -42,16 +47,24 @@ import { applyLanguage, applyTheme } from '@/lib/uiSettings';
 import { applyActionSoundConfig } from '@/lib/actionSounds';
 import { Toggle } from '@/components/Toggle';
 import { useToast } from '@/components/Toast';
+import { UpgradePrompt, UsageMeter } from '@/components/module';
+import type { PlanTier } from '@/lib/entitlements';
 
-const settingsSections = [
-  { id: 'performance', label: 'Performance', icon: Zap, description: 'GPU, device, and speed settings' },
-  { id: 'api-keys', label: 'API Keys', icon: Key, description: 'Manage API keys for cloud services' },
-  { id: 'models', label: 'Models', icon: HardDrive, description: 'Install or remove local models' },
+type SettingsSection = { id: string; label: string; icon: any; description: string };
+
+const CORE_SETTINGS_SECTIONS: SettingsSection[] = [
+  { id: 'plan', label: 'Plan & Usage', icon: Gauge, description: 'Subscription and monthly limits' },
   { id: 'stt', label: 'Speech to Text', icon: Mic, description: 'Dictation and transcription settings' },
-  { id: 'hotkeys', label: 'Hotkeys', icon: Keyboard, description: 'Customize global shortcuts' },
   { id: 'appearance', label: 'Appearance', icon: Palette, description: 'Theme and language' },
   { id: 'notifications', label: 'Notifications', icon: Bell, description: 'Alerts and tray behavior' },
   { id: 'privacy', label: 'Privacy', icon: Shield, description: 'History and analytics' },
+];
+
+const ADVANCED_SETTINGS_SECTIONS: SettingsSection[] = [
+  { id: 'performance', label: 'Performance', icon: Zap, description: 'GPU, device, and speed settings' },
+  { id: 'hotkeys', label: 'Hotkeys', icon: Keyboard, description: 'Customize global shortcuts' },
+  { id: 'api-keys', label: 'API Keys', icon: Key, description: 'Manage API keys for cloud services' },
+  { id: 'models', label: 'Resources', icon: HardDrive, description: 'Manage offline engines and packages' },
 ];
 
 const apiKeyProviders = [
@@ -109,10 +122,36 @@ function formatLoadError(err: any) {
 }
 
 export default function SettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="w-10 h-10 animate-spin text-accent-primary" />
+        </div>
+      }
+    >
+      <SettingsPageInner />
+    </Suspense>
+  );
+}
+
+function SettingsPageInner() {
   const toast = useToast();
-  const [activeSection, setActiveSection] = useState('performance');
+  const searchParams = useSearchParams();
+  const { plan, setPlan, hasPro } = usePlan();
+  const { devMode } = useDevMode();
+  const showAdvancedSections = devMode;
+
+  const settingsSections = useMemo(() => {
+    return showAdvancedSections
+      ? [...CORE_SETTINGS_SECTIONS, ...ADVANCED_SETTINGS_SECTIONS]
+      : CORE_SETTINGS_SECTIONS;
+  }, [showAdvancedSections]);
+  const [activeSection, setActiveSection] = useState('plan');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [upgradeTarget, setUpgradeTarget] = useState<PlanTier | null>(null);
+  const [upgradeFeature, setUpgradeFeature] = useState<string | null>(null);
 
   const [settings, setSettings] = useState<any>(null);
   const [apiKeys, setApiKeysState] = useState<Record<string, string | null>>({});
@@ -126,6 +165,12 @@ export default function SettingsPage() {
   const [appMeta, setAppMeta] = useState<{ version?: string; build_time?: string } | null>(null);
   const [capabilities, setCapabilities] = useState<SystemCapabilities | null>(null);
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogEntry[]>([]);
+
+  useEffect(() => {
+    if (!settingsSections.find((section) => section.id === activeSection)) {
+      setActiveSection(settingsSections[0]?.id || 'plan');
+    }
+  }, [settingsSections, activeSection]);
 
   const loadSettings = async () => {
     setLoading(true);
@@ -225,6 +270,36 @@ export default function SettingsPage() {
     loadSettings();
   }, []);
 
+  // Deep-linking support (e.g. /settings?tab=api-keys or /settings?upgrade=pro&feature=Live%20Capture)
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    const upgrade = searchParams.get('upgrade');
+    const feature = searchParams.get('feature');
+
+    const upgradeTier: PlanTier | null =
+      upgrade === 'free' || upgrade === 'standard' || upgrade === 'pro' ? upgrade : null;
+
+    setUpgradeTarget(upgradeTier);
+    setUpgradeFeature(feature);
+
+    if (upgradeTier) {
+      setActiveSection('plan');
+      return;
+    }
+
+    if (tab && settingsSections.some((s) => s.id === tab)) {
+      setActiveSection(tab);
+    }
+  }, [searchParams, settingsSections]);
+
+  // If advanced sections get hidden while we are viewing them, bounce back to Plan.
+  useEffect(() => {
+    if (showAdvancedSections) return;
+    if (activeSection === 'api-keys' || activeSection === 'models') {
+      setActiveSection('plan');
+    }
+  }, [activeSection, showAdvancedSections]);
+
   const handleApiKeySave = async (provider: string) => {
     const value = apiKeyDrafts[provider];
     if (!value) return;
@@ -320,7 +395,7 @@ export default function SettingsPage() {
   };
 
   const handleModelDownload = async (modelId: string) => {
-    // Legacy function, now handled in Models page. 
+    // Legacy function, now handled in Resources page.
     // Kept here if ConfirmDialog needs it or other refs, but eventually safe to remove.
     // For now we just implement minimal logic to satisfy types if needed.
     setModelBusy((prev) => ({ ...prev, [modelId]: 'Downloading...' }));
@@ -372,113 +447,163 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] overflow-hidden gap-8">
-      {/* Sidebar */}
-      <div className="w-64 flex-shrink-0 space-y-1">
-        {settingsSections.map((section) => {
-          const Icon = section.icon;
-          return (
-            <button
-              key={section.id}
-              onClick={() => setActiveSection(section.id)}
-              className={cn(
-                'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
-                activeSection === section.id
-                  ? 'bg-accent-primary/10 text-accent-primary font-medium'
-                  : 'text-foreground-secondary hover:text-foreground hover:bg-surface-2'
-              )}
-            >
-              <Icon className="w-5 h-5" />
-              <span>{section.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Content Area */}
-      <div className="flex-1 min-w-0 max-w-4xl space-y-8 animate-fade-in overflow-y-auto pr-4 custom-scrollbar">
-        <div className="flex items-center justify-between sticky top-0 bg-background/80 backdrop-blur-md py-4 z-30">
-          <div>
-            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-accent-primary to-accent-secondary">
-              Settings
-            </h1>
-          </div>
-          {appMeta && (
-            <div className="text-right text-xs text-foreground-muted">
-              <p>v{appMeta.version}</p>
+    <div className="min-h-screen bg-background text-foreground flex flex-col overflow-x-hidden page-premium">
+      <header className="sticky top-0 z-50 border-b border-white/5 bg-background/85 backdrop-blur-md px-6 md:px-10 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-6">
+          <div className="flex items-center gap-3 text-foreground">
+            <div className="size-9 rounded-xl bg-accent-primary/15 border border-accent-primary/30 flex items-center justify-center">
+              <Settings className="w-4 h-4 text-accent-primary" />
             </div>
-          )}
+            <span className="text-sm font-semibold tracking-tight">Whisperall</span>
+          </div>
+          <nav className="hidden md:flex items-center gap-8 text-xs uppercase tracking-wide text-foreground-muted">
+            <Link className="hover:text-foreground transition-colors" href="/dictate">Dashboard</Link>
+            <Link className="hover:text-foreground transition-colors" href="/history">History</Link>
+            <Link className="text-foreground border-b border-accent-primary pb-0.5" href="/settings">Settings</Link>
+          </nav>
+          <div className="flex items-center gap-3">
+            <button className="hidden sm:inline-flex h-9 px-4 rounded-lg border border-white/5 bg-surface-2/60 text-xs font-semibold text-foreground-muted hover:text-foreground hover:border-white/10 transition-colors">
+              Help
+            </button>
+            {appMeta && (
+              <div className="hidden sm:flex text-xs text-foreground-muted">
+                v{appMeta.version}
+              </div>
+            )}
+            <div className="h-9 w-9 rounded-full bg-surface-2 border border-surface-3" />
+          </div>
         </div>
+      </header>
 
-        <div className="pb-20">
-          {activeSection === 'performance' && settings?.performance && (
-            <PerformanceSettings
-              device={settings.performance.device}
-              fastMode={settings.performance.fast_mode}
-              preloadModels={settings.performance.preload_models}
-              cudaAvailable={capabilities?.cuda_available ?? false}
-              onChange={handleSettingChange}
-            />
-          )}
+      <main className="flex-1 px-6 md:px-10 py-10">
+        <div className="max-w-6xl mx-auto flex flex-col gap-10">
+          <div className="flex flex-col gap-2">
+            <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground">Settings</h1>
+            <p className="text-foreground-muted text-sm md:text-base">
+              Manage your preferences, speech settings, and privacy controls.
+            </p>
+          </div>
 
-          {activeSection === 'api-keys' && (
-            <APIKeysSettings
-              providers={apiProviders}
-              apiKeys={apiKeys}
-              drafts={apiKeyDrafts}
-              status={apiKeyStatus}
-              onDraftChange={setApiKeyDrafts}
-              onSave={handleApiKeySave}
-              onTest={handleApiKeyTest}
-            />
-          )}
+          <div className="flex flex-col lg:flex-row gap-8">
+            <div className="lg:w-64">
+              <div className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 custom-scrollbar">
+                {settingsSections.map((section) => {
+                  const Icon = section.icon;
+                  return (
+                    <button
+                      key={section.id}
+                      onClick={() => setActiveSection(section.id)}
+                      className={cn(
+                        'flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left border border-transparent min-w-[160px] lg:min-w-0',
+                        activeSection === section.id
+                          ? 'bg-accent-primary/15 text-accent-primary border-accent-primary/30 shadow-[0_8px_20px_-18px_rgba(107,107,255,0.5)]'
+                          : 'text-foreground-secondary hover:text-foreground hover:bg-surface-2/70'
+                      )}
+                    >
+                      <Icon className="w-4 h-4 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium whitespace-nowrap lg:whitespace-normal">{section.label}</span>
+                        <span className="hidden lg:block text-[11px] text-foreground-muted">
+                          {section.description}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-          {activeSection === 'models' && (
-            <ModelsSettings />
-          )}
+            <div className="flex-1 min-w-0">
+              <div className="rounded-2xl border border-white/5 bg-surface-1/40 p-6 md:p-8 space-y-10 animate-fade-in shadow-[0_20px_40px_-40px_rgba(0,0,0,0.8)]">
+                {error && (
+                  <div className="alert alert-warning">
+                    <span className="text-sm">{error}</span>
+                  </div>
+                )}
 
-          {activeSection === 'stt' && settings?.stt && (
-            <STTSettingsView
-              sttConfig={settings.stt}
-              onChange={handleSettingChange}
-            />
-          )}
+                {activeSection === 'plan' && (
+                  <PlanSettingsView
+                    currentPlan={plan}
+                    hasPro={hasPro}
+                    upgradeTarget={upgradeTarget}
+                    upgradeFeature={upgradeFeature}
+                    onPlanChange={(next) => {
+                      setPlan(next);
+                      toast.success('Plan updated', `You are now on ${next.toUpperCase()}.`);
+                    }}
+                  />
+                )}
+                {showAdvancedSections && activeSection === 'performance' && settings?.performance && (
+                  <PerformanceSettings
+                    device={settings.performance.device}
+                    fastMode={settings.performance.fast_mode}
+                    preloadModels={settings.performance.preload_models}
+                    cudaAvailable={capabilities?.cuda_available ?? false}
+                    onChange={handleSettingChange}
+                  />
+                )}
 
-          {activeSection === 'hotkeys' && (
-            <HotkeysSettingsView
-              hotkeys={hotkeys}
-              drafts={hotkeyDrafts}
-              onDraftChange={setHotkeyDrafts}
-              onSave={handleHotkeySave}
-            />
-          )}
+                {showAdvancedSections && activeSection === 'api-keys' && (
+                  <APIKeysSettings
+                    providers={apiProviders}
+                    apiKeys={apiKeys}
+                    drafts={apiKeyDrafts}
+                    status={apiKeyStatus}
+                    onDraftChange={setApiKeyDrafts}
+                    onSave={handleApiKeySave}
+                    onTest={handleApiKeyTest}
+                  />
+                )}
 
-          {activeSection === 'appearance' && settings?.ui && (
-            <AppearanceSettings
-              theme={settings.ui.theme}
-              language={settings.ui.language}
-              onChange={handleSettingChange}
-            />
-          )}
+                {showAdvancedSections && activeSection === 'models' && (
+                  <ModelsSettings />
+                )}
 
-          {activeSection === 'notifications' && settings?.ui && (
-            <NotificationsSettings
-              showNotifications={settings.ui.show_notifications}
-              minimizeToTray={settings.ui.minimize_to_tray}
-              actionSounds={settings.ui.action_sounds}
-              onChange={handleSettingChange}
-            />
-          )}
+                {activeSection === 'stt' && settings?.stt && (
+                  <STTSettingsView
+                    sttConfig={settings.stt}
+                    onChange={handleSettingChange}
+                  />
+                )}
 
-          {activeSection === 'privacy' && settings?.ui && (
-            <PrivacySettings
-              saveHistory={settings.ui.save_history}
-              analytics={settings.ui.analytics}
-              onChange={handleSettingChange}
-            />
-          )}
+                {showAdvancedSections && activeSection === 'hotkeys' && (
+                  <HotkeysSettingsView
+                    hotkeys={hotkeys}
+                    drafts={hotkeyDrafts}
+                    onDraftChange={setHotkeyDrafts}
+                    onSave={handleHotkeySave}
+                  />
+                )}
+
+                {activeSection === 'appearance' && settings?.ui && (
+                  <AppearanceSettings
+                    theme={settings.ui.theme}
+                    language={settings.ui.language}
+                    onChange={handleSettingChange}
+                  />
+                )}
+
+                {activeSection === 'notifications' && settings?.ui && (
+                  <NotificationsSettings
+                    showNotifications={settings.ui.show_notifications}
+                    minimizeToTray={settings.ui.minimize_to_tray}
+                    actionSounds={settings.ui.action_sounds}
+                    onChange={handleSettingChange}
+                  />
+                )}
+
+                {activeSection === 'privacy' && settings?.ui && (
+                  <PrivacySettings
+                    saveHistory={settings.ui.save_history}
+                    analytics={settings.ui.analytics}
+                    onChange={handleSettingChange}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
@@ -486,6 +611,236 @@ export default function SettingsPage() {
 /* =========================================================
    SUB-COMPONENTS
    ========================================================= */
+
+function PlanSettingsView({
+  currentPlan,
+  hasPro,
+  upgradeTarget,
+  upgradeFeature,
+  onPlanChange,
+}: {
+  currentPlan: PlanTier;
+  hasPro: boolean;
+  upgradeTarget: PlanTier | null;
+  upgradeFeature: string | null;
+  onPlanChange: (plan: PlanTier) => void;
+}) {
+  const { devMode, setDevMode } = useDevMode();
+  const [usage, setUsage] = useState<{
+    monthLabel: string;
+    dictateHours: number;
+    readerHours: number;
+    transcribeHours: number;
+  } | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null);
+
+  const plans: Array<{
+    id: PlanTier;
+    name: string;
+    price: string;
+    caption: string;
+    highlights: string[];
+  }> = [
+    {
+      id: 'free',
+      name: 'Free',
+      price: '$0',
+      caption: 'Try Whisperall with light limits',
+      highlights: ['Dictate + Reader', 'Basic Transcribe', 'No setup required'],
+    },
+    {
+      id: 'standard',
+      name: 'Standard',
+      price: '$7/mo',
+      caption: 'Best value for daily dictation',
+      highlights: ['Dictation-first UX', 'Reader (TTS) unlimited (fair-use)', 'Transcribe up to 10h/mo'],
+    },
+    {
+      id: 'pro',
+      name: 'Pro',
+      price: '$12/mo',
+      caption: 'Power tools + Labs (beta)',
+      highlights: ['Unlock Live Capture + Labs', 'Higher monthly limits', 'BYOK (advanced)'],
+    },
+  ];
+
+  const limitsByPlan: Record<PlanTier, { dictateHours: number; readerHours: number; transcribeHours: number }> = {
+    free: { dictateHours: 1, readerHours: 1, transcribeHours: 0.5 },
+    standard: { dictateHours: 50, readerHours: 20, transcribeHours: 10 },
+    pro: { dictateHours: 100, readerHours: 50, transcribeHours: 30 },
+  };
+
+  const limits = limitsByPlan[currentPlan];
+
+  useEffect(() => {
+    let active = true;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+    const monthLabel = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+    getMonthlyHistoryStats(year, month)
+      .then((stats) => {
+        if (!active) return;
+        const byModule = stats?.by_module || {};
+        const sttSeconds = byModule.stt?.total_duration || 0;
+        const readerSeconds = byModule.reader?.total_duration || 0;
+        const transcribeSeconds = byModule.transcribe?.total_duration || 0;
+        setUsage({
+          monthLabel,
+          dictateHours: sttSeconds / 3600,
+          readerHours: readerSeconds / 3600,
+          transcribeHours: transcribeSeconds / 3600,
+        });
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        setUsage(null);
+        setUsageError(err?.message || 'Failed to load usage');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Plan &amp; Usage</h2>
+          <p className="text-foreground-muted text-sm">
+            Manage subscription tier and monthly limits (billing integration coming soon).
+          </p>
+        </div>
+        <span className="badge badge-accent">{currentPlan.toUpperCase()}</span>
+      </div>
+
+      {upgradeTarget === 'pro' && !hasPro && (
+        <UpgradePrompt
+          requiredPlan="pro"
+          feature={upgradeFeature ?? undefined}
+          title={upgradeFeature ? `Unlock ${upgradeFeature}` : 'Upgrade to Pro'}
+          description={
+            upgradeFeature
+              ? `This feature is part of Pro. Upgrade to unlock it.`
+              : 'Upgrade to Pro to unlock Live Capture + Labs.'
+          }
+          ctaLabel="Upgrade to Pro"
+          onUpgrade={() => onPlanChange('pro')}
+        />
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {plans.map((p) => {
+          const isCurrent = p.id === currentPlan;
+          const isTarget = p.id === upgradeTarget;
+          return (
+            <div
+              key={p.id}
+              className={cn(
+                'glass-card p-5 border transition-all',
+                isCurrent && 'border-accent-primary/40 shadow-[0_0_0_1px_rgba(14,165,233,0.25)]',
+                !isCurrent && isTarget && 'border-amber-500/25'
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{p.name}</p>
+                  <p className="text-2xl font-bold text-foreground mt-1">{p.price}</p>
+                  <p className="text-xs text-foreground-muted mt-2">{p.caption}</p>
+                </div>
+                {isCurrent && <span className="badge badge-success">Current</span>}
+                {!isCurrent && isTarget && <span className="badge badge-warning">Recommended</span>}
+              </div>
+
+              <ul className="mt-4 space-y-2 text-sm text-foreground-secondary">
+                {p.highlights.map((h) => (
+                  <li key={h} className="flex gap-2">
+                    <span className="text-accent-primary">•</span>
+                    <span>{h}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-5">
+                <button
+                  className={cn(
+                    'btn w-full',
+                    isCurrent ? 'btn-secondary opacity-70 cursor-default' : 'btn-primary'
+                  )}
+                  disabled={isCurrent}
+                  onClick={() => onPlanChange(p.id)}
+                >
+                  {isCurrent ? 'Current plan' : p.id === 'pro' ? 'Upgrade' : 'Select'}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="glass-card p-6 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-lg font-semibold text-foreground">Monthly usage</h3>
+          <span className="text-xs text-foreground-muted">
+            {usage?.monthLabel ?? 'This month'}
+          </span>
+        </div>
+
+        <div className="grid gap-4">
+          {usageError && (
+            <div className="text-xs text-foreground-muted">
+              Usage unavailable: {usageError}
+            </div>
+          )}
+          <UsageMeter
+            label="Dictation (STT)"
+            used={usage?.dictateHours ?? 0}
+            limit={limits.dictateHours}
+            unit="h"
+            caption="Soft limit, then throttle"
+          />
+          <UsageMeter
+            label="Reader (TTS)"
+            used={usage?.readerHours ?? 0}
+            limit={limits.readerHours}
+            unit="h"
+            caption="Fair-use limit"
+          />
+          <UsageMeter
+            label="Transcribe (files)"
+            used={usage?.transcribeHours ?? 0}
+            limit={limits.transcribeHours}
+            unit="h"
+            caption="Monthly cap"
+          />
+        </div>
+      </div>
+
+      <div className="glass-card p-6 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-lg font-semibold text-foreground">Developer</h3>
+          <span className="text-xs text-foreground-muted">
+            {devMode ? 'On' : 'Off'}
+          </span>
+        </div>
+
+        <Toggle
+          label="Developer mode"
+          description="Enables diagnostics and advanced configuration tools."
+          enabled={devMode}
+          onChange={setDevMode}
+          className="justify-between flex-row-reverse w-full gap-0"
+        />
+
+        <p className="text-xs text-foreground-muted">
+          Keep this off for a cleaner experience unless you need troubleshooting tools.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function PerformanceSettings({
   device,
@@ -544,8 +899,8 @@ function PerformanceSettings({
 
         <div className="glass-card p-4">
           <Toggle
-            label="Preload Models"
-            description="Load TTS models at startup for instant response. Uses more RAM."
+            label="Preload Resources"
+            description="Load speech engines at startup for instant response. Uses more RAM."
             enabled={preloadModels}
             onChange={(val) => onChange('performance.preload_models', val)}
             className="justify-between flex-row-reverse w-full gap-0"
@@ -917,8 +1272,8 @@ function ModelsSettings() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-foreground mb-2">Local Models</h2>
-          <p className="text-foreground-muted text-sm">Download or remove models for offline use</p>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Local Resources</h2>
+          <p className="text-foreground-muted text-sm">Download or remove offline engines and packages</p>
         </div>
       </div>
 
@@ -927,10 +1282,10 @@ function ModelsSettings() {
           <HardDrive className="w-8 h-8 text-accent-primary" />
         </div>
         <div className="max-w-md space-y-2">
-          <h3 className="text-lg font-semibold text-foreground">Advanced Model Management</h3>
+          <h3 className="text-lg font-semibold text-foreground">Advanced Resource Management</h3>
           <p className="text-foreground-secondary">
-            We have moved model management to a dedicated page with detailed progress tracking,
-            Speech-to-Text models, and API provider diagnostics.
+            We have moved engine management to a dedicated page with detailed progress tracking,
+            transcription packages, and API provider diagnostics.
           </p>
         </div>
         <a
@@ -938,7 +1293,7 @@ function ModelsSettings() {
           className="btn btn-primary px-8 py-3 flex items-center gap-2 shadow-lg shadow-accent-primary/20 hover:scale-105 transition-transform"
         >
           <Settings2 className="w-4 h-4" />
-          Manage Models
+          Manage Resources
         </a>
       </div>
     </div>
@@ -1050,6 +1405,24 @@ function STTSettingsView({
             disabled={!overlayEnabled}
             className="justify-between flex-row-reverse w-full gap-0"
           />
+        </div>
+
+        <div className="glass-card p-4 flex items-center justify-between">
+          <div>
+            <span className="font-medium text-foreground">Locate Widget</span>
+            <p className="text-xs text-foreground-muted mt-1">
+              Center the widget on your main monitor and highlight it briefly.
+            </p>
+          </div>
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              window.electronAPI?.showWidgetOverlay?.();
+              window.electronAPI?.centerWidget?.();
+            }}
+          >
+            Center Widget
+          </button>
         </div>
 
         <div className="glass-card p-4">

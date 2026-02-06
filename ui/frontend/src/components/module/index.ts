@@ -29,3 +29,5 @@ export { ActionBar } from './ActionBar';
 export { StatusAlert } from './StatusAlert';
 export type { AlertVariant } from './StatusAlert';
 export { EmptyState } from './EmptyState';
+export { UpgradePrompt } from './UpgradePrompt';
+export { UsageMeter } from './UsageMeter';
