@@ -4,8 +4,8 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-let mainWindow: BrowserWindow | null = null;
-let overlayWindow: BrowserWindow | null = null;
+let mainWindow = null;
+let overlayWindow = null;
 let lastDictationText = '';
 
 const isDev = !app.isPackaged;
@@ -83,7 +83,7 @@ app.on('window-all-closed', () => {
   }
 });
 
-ipcMain.on('dictation-final', (_event, text: string) => {
+ipcMain.on('dictation-final', (_event, text) => {
   lastDictationText = text;
   if (overlayWindow) {
     overlayWindow.webContents.send('overlay-state', { state: 'ready' });
