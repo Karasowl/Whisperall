@@ -1,59 +1,47 @@
 import { useEffect } from 'react';
 import { usePlanStore } from '../stores/plan';
-import { useAuthStore } from '../stores/auth';
+import { useT } from '../lib/i18n';
 import type { UsageRecord } from '@whisperall/api-client';
 
-const RESOURCE_LABELS: Record<keyof UsageRecord, string> = {
-  stt_seconds: 'Dictation',
-  tts_chars: 'Text-to-Speech',
-  translate_chars: 'Translation',
-  transcribe_seconds: 'Transcription',
-  ai_edit_tokens: 'AI Editing',
+const LABEL_KEYS: Record<keyof UsageRecord, string> = {
+  stt_seconds: 'usage.dictation', tts_chars: 'usage.tts', translate_chars: 'usage.translation',
+  transcribe_seconds: 'usage.transcription', ai_edit_tokens: 'usage.aiEditing', notes_count: 'usage.notes',
 };
 
-function formatUsage(resource: keyof UsageRecord, value: number, limit: number): string {
-  if (resource === 'stt_seconds' || resource === 'transcribe_seconds') {
-    const usedMin = Math.round(value / 60);
-    const limitMin = Math.round(limit / 60);
-    return `${usedMin}/${limitMin} min`;
-  }
-  const usedK = Math.round(value / 1000);
-  const limitK = Math.round(limit / 1000);
-  return `${usedK}k/${limitK}k`;
+function fmt(resource: keyof UsageRecord, value: number, limit: number): string {
+  if (resource === 'stt_seconds' || resource === 'transcribe_seconds')
+    return `${Math.round(value / 60)}/${Math.round(limit / 60)} min`;
+  if (resource === 'notes_count')
+    return `${value}/${limit}`;
+  return `${Math.round(value / 1000)}k/${Math.round(limit / 1000)}k`;
 }
 
 export function UsageMeter() {
-  const user = useAuthStore((s) => s.user);
+  const t = useT();
   const { plan, usage, loading, fetch, getLimit, usagePercent } = usePlanStore();
 
-  useEffect(() => {
-    if (user) fetch();
-  }, [user, fetch]);
+  useEffect(() => { fetch(); }, [fetch]);
+  if (loading) return null;
 
-  if (!user || loading) return null;
-
-  const resources: (keyof UsageRecord)[] = [
-    'stt_seconds', 'transcribe_seconds', 'tts_chars', 'translate_chars', 'ai_edit_tokens',
-  ];
+  const resources: (keyof UsageRecord)[] = ['stt_seconds', 'transcribe_seconds', 'tts_chars', 'translate_chars', 'ai_edit_tokens', 'notes_count'];
 
   return (
-    <div className="usage-meter">
-      <div className="settings-row">
-        <span>Plan</span>
-        <span className={`plan-badge ${plan}`}>{plan}</span>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted">{t('usage.plan')}</span>
+        <span className={`text-xs font-semibold uppercase px-2 py-0.5 rounded-full ${
+          plan === 'pro' ? 'bg-purple-500/15 text-purple-400' : plan === 'basic' ? 'bg-primary/15 text-primary' : 'bg-edge text-muted'
+        }`}>{plan}</span>
       </div>
-      {resources.map((resource) => {
-        const pct = usagePercent(resource);
-        const fillClass = pct >= 90 ? 'danger' : pct >= 70 ? 'warning' : '';
+      {resources.map((r) => {
+        const pct = usagePercent(r);
         return (
-          <div key={resource} className="usage-row">
-            <span className="usage-label">{RESOURCE_LABELS[resource]}</span>
-            <div className="usage-bar">
-              <div className={`usage-fill ${fillClass}`} style={{ width: `${pct}%` }} />
+          <div key={r} className="flex items-center gap-3">
+            <span className="text-xs text-muted w-24 shrink-0">{t(LABEL_KEYS[r])}</span>
+            <div className="flex-1 h-1.5 bg-edge rounded-full overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${pct}%` }} />
             </div>
-            <span className="usage-value">
-              {formatUsage(resource, usage[resource], getLimit(resource))}
-            </span>
+            <span className="text-[11px] text-muted w-16 text-right shrink-0">{fmt(r, usage[r], getLimit(r))}</span>
           </div>
         );
       })}

@@ -1,0 +1,105 @@
+/** Real-time speech-to-text via WebSocket (backend proxies to Deepgram). */
+
+export type StreamEvent =
+  | { type: 'transcript'; text: string; isFinal: boolean; speechFinal: boolean }
+  | { type: 'utterance_end' }
+  | { type: 'error'; message: string }
+  | { type: 'open' }
+  | { type: 'close' };
+
+export type DeepgramStreamOptions = {
+  url: string; // ws://localhost:8080/v1/live/stream
+  onEvent: (event: StreamEvent) => void;
+};
+
+const MAX_RETRIES = Infinity; // support 10h+ sessions
+const INITIAL_DELAY = 1500;
+const MAX_DELAY = 30_000;
+
+export class DeepgramStream {
+  private ws: WebSocket | null = null;
+  private recorder: MediaRecorder | null = null;
+  private stream: MediaStream | null = null;
+  private stopped = false;
+  private retries = 0;
+
+  constructor(private opts: DeepgramStreamOptions) {}
+
+  start(stream: MediaStream): void {
+    this.stream = stream;
+    this.stopped = false;
+    this.retries = 0;
+    this.connect();
+  }
+
+  private connect(): void {
+    if (this.stopped || !this.stream?.active) return;
+
+    const ws = new WebSocket(this.opts.url);
+    this.ws = ws;
+
+    ws.onopen = () => {
+      console.log('[dg-stream] WebSocket open');
+      this.retries = 0;
+      this.opts.onEvent({ type: 'open' });
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus' : 'audio/webm';
+      const rec = new MediaRecorder(this.stream!, { mimeType });
+      this.recorder = rec;
+
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+          ws.send(e.data);
+        }
+      };
+      rec.start(500);
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'transcript') {
+          this.opts.onEvent({
+            type: 'transcript',
+            text: data.text,
+            isFinal: data.is_final ?? false,
+            speechFinal: data.speech_final ?? false,
+          });
+        } else if (data.type === 'utterance_end') {
+          this.opts.onEvent({ type: 'utterance_end' });
+        } else if (data.type === 'error') {
+          this.opts.onEvent({ type: 'error', message: data.message });
+        }
+      } catch { /* non-JSON message */ }
+    };
+
+    ws.onerror = () => {
+      this.opts.onEvent({ type: 'error', message: 'WebSocket connection error' });
+    };
+
+    ws.onclose = () => {
+      console.log('[dg-stream] WebSocket closed, stopped=', this.stopped);
+      if (this.recorder?.state === 'recording') this.recorder.stop();
+      this.recorder = null;
+
+      if (!this.stopped && this.stream?.active && this.retries < MAX_RETRIES) {
+        this.retries++;
+        const delay = Math.min(INITIAL_DELAY * 2 ** (this.retries - 1), MAX_DELAY);
+        console.log(`[dg-stream] reconnecting (attempt ${this.retries}), delay=${delay}ms`);
+        setTimeout(() => this.connect(), delay);
+      } else {
+        this.opts.onEvent({ type: 'close' });
+      }
+    };
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.recorder?.state === 'recording') this.recorder.stop();
+    this.recorder = null;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.close();
+    this.ws = null;
+    this.stream = null;
+  }
+}

@@ -4,3 +4,6 @@ export { createTranscribeEndpoint } from "./transcribe";
 export { createTTSEndpoint } from "./tts";
 export { createTranslateEndpoint } from "./translate";
 export { createAiEditEndpoint } from "./ai-edit";
+export { createDocumentsEndpoint } from "./documents";
+export { createHistoryEndpoint } from "./history";
+export { createUsageEndpoint } from "./usage";

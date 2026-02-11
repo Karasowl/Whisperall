@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from app.config import settings
-from app.main import app
+from app.main import app, asgi_app
 
 
 JWT_SECRET = "test-secret"
@@ -14,15 +14,17 @@ TEST_EMAIL = "test@example.com"
 
 @pytest.fixture(autouse=True)
 def _patch_settings():
-    """Patch the singleton settings for all tests."""
+    """Patch the singleton settings for all tests. Also mock DB in auth to avoid real Supabase queries."""
     with patch.object(settings, "supabase_jwt_secret", JWT_SECRET), \
-         patch.object(settings, "auth_disabled", False):
+         patch.object(settings, "auth_disabled", False), \
+         patch("app.auth.get_supabase_or_none", return_value=None):
         yield
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    # Use the runtime ASGI wrapper so tests exercise CORS behavior seen in dev/prod.
+    return TestClient(asgi_app)
 
 
 def make_token(user_id: str = TEST_USER_ID, email: str = TEST_EMAIL) -> str:
@@ -46,7 +48,8 @@ def mock_openai_stt():
 
 @pytest.fixture
 def mock_deepgram():
-    with patch("app.routers.live.deepgram.transcribe_chunk", new_callable=AsyncMock) as m:
+    """Legacy alias — kept for backward compat. Now mocks openai_stt.diarize."""
+    with patch("app.routers.live.openai_stt.diarize", new_callable=AsyncMock) as m:
         m.return_value = "live text"
         yield m
 

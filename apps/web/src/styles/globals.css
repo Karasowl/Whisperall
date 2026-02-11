@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+/* ── Theme Variables ─────────────────────────────── */
+:root {
+  --theme-base: #f6f7f8;
+  --theme-surface: #ffffff;
+  --theme-surface-alt: #F9FAFB;
+  --theme-edge: #E5E7EB;
+  --theme-muted: #9CA3AF;
+  --theme-text: #1F2937;
+  --theme-text-secondary: #6B7280;
+  --theme-glass-bg: rgba(255, 255, 255, 0.7);
+  --theme-paper-dot: #d1d5db;
+  --theme-scrollbar-track: #f6f7f8;
+  --theme-scrollbar-thumb: #d1d5db;
+  --theme-scrollbar-hover: #9ca3af;
+}
+
+html.dark {
+  --theme-base: #101922;
+  --theme-surface: #1c242c;
+  --theme-surface-alt: #111418;
+  --theme-edge: #283039;
+  --theme-muted: #9dabb9;
+  --theme-text: #f1f5f9;
+  --theme-text-secondary: #cbd5e1;
+  --theme-glass-bg: rgba(28, 36, 44, 0.6);
+  --theme-paper-dot: #2a343e;
+  --theme-scrollbar-track: #101922;
+  --theme-scrollbar-thumb: #283039;
+  --theme-scrollbar-hover: #3b4754;
+}
+
+/* ── Design Tokens (Tailwind v4) ─────────────────── */
+@theme {
+  --color-primary: #137fec;
+  --color-base: var(--theme-base);
+  --color-surface: var(--theme-surface);
+  --color-surface-alt: var(--theme-surface-alt);
+  --color-edge: var(--theme-edge);
+  --color-muted: var(--theme-muted);
+  --color-text: var(--theme-text);
+  --color-text-secondary: var(--theme-text-secondary);
+  --font-family-display: "Inter", system-ui, sans-serif;
+  --radius-DEFAULT: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --animate-fade-in-down: fade-in-down 0.5s ease-out forwards;
+  --animate-fade-in-up: fade-in-up 0.6s ease-out forwards;
+}
+
+@keyframes fade-in-down {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Scrollbar ──────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--theme-scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--theme-scrollbar-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--theme-scrollbar-hover); }
+
+/* ── Glass panel ────────────────────────────────── */
+.glass-panel {
+  background: var(--theme-glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Material Symbols ───────────────────────────── */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+.fill-1 {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+::selection { background: #137fec; color: white; }
+
+/* ── Smooth scroll ──────────────────────────────── */
+html { scroll-behavior: smooth; }

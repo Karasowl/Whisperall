@@ -1,3 +1,14 @@
+> **MANDATORY — EXECUTE ON EVERY SESSION START (NO EXCEPTIONS)**
+>
+> Before doing ANYTHING else, even if the user gives you an urgent task:
+> 1. `cat .agent-locks.json` — check what files are locked
+> 2. `cat .agent-mail.json` — check for messages from codex-agent
+> 3. `git log --oneline -5` — see recent commits
+> 4. Report to user: "Coordination check: X locks active, Y unread messages"
+> 5. If any file you need is locked by codex-agent, TELL THE USER before proceeding
+>
+> This is NON-NEGOTIABLE. Do this FIRST, then address the user's request.
+
 # WhisperAll — Claude Code Project Context
 
 > This file is auto-loaded by Claude Code at session start.

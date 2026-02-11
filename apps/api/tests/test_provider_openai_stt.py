@@ -78,32 +78,30 @@ class TestDiarize:
     @respx.mock
     @pytest.mark.asyncio
     async def test_sends_diarize_request(self):
-        segments = [{"speaker": "A", "start": 0.0, "end": 1.5, "text": "hello"}]
         route = respx.post("https://api.openai.com/v1/audio/transcriptions").mock(
-            return_value=httpx.Response(200, json={"segments": segments})
+            return_value=httpx.Response(200, json={"text": "hello from speaker"})
         )
 
         result = await openai_stt.diarize(b"audio", language="es")
 
-        assert result == segments
+        assert result == "hello from speaker"
         req = route.calls.last.request
         assert req.headers["authorization"] == "Bearer sk-test-key"
-        assert b"gpt-4o-transcribe-diarize" in req.content
+        assert b"gpt-4o-transcribe" in req.content
         assert b"es" in req.content
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_returns_empty_segments(self):
+    async def test_returns_empty_text(self):
         respx.post("https://api.openai.com/v1/audio/transcriptions").mock(
             return_value=httpx.Response(200, json={})
         )
 
         result = await openai_stt.diarize(b"audio")
-        assert result == []
+        assert result == ""
 
     @pytest.mark.asyncio
     async def test_stub_when_no_key(self):
         with patch.object(settings, "openai_api_key", None):
             result = await openai_stt.diarize(b"audio")
-        assert len(result) == 1
-        assert result[0]["speaker"] == "A"
+        assert "[openai-stub]" in result

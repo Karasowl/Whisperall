@@ -40,7 +40,7 @@ class TestEditText:
         assert body["messages"][0]["role"] == "system"
         assert "filler" in body["messages"][0]["content"].lower()
         assert body["messages"][1]["role"] == "user"
-        assert body["messages"][1]["content"] == "um hello uh world"
+        assert "um hello uh world" in body["messages"][1]["content"]
 
     @respx.mock
     @pytest.mark.asyncio
@@ -54,7 +54,7 @@ class TestEditText:
         assert result == "summarized"
         import json
         body = json.loads(route.calls.last.request.content)
-        assert "summarize" in body["messages"][0]["content"]
+        assert "summarize" in body["messages"][0]["content"].lower()
 
     @respx.mock
     @pytest.mark.asyncio

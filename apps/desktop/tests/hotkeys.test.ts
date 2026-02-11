@@ -45,6 +45,27 @@ describe('Hotkey registration', () => {
     expect(typeof dictateCall![1]).toBe('function');
   });
 
+  it('registers overlay_toggle and translate hotkeys', async () => {
+    const { registerHotkeys } = await import('../electron/modules/hotkeys.js');
+    registerHotkeys();
+
+    const registered = mockGlobalShortcut.register.mock.calls.map((c: unknown[]) => c[0]);
+    expect(registered).toContain('Alt+W');
+    expect(registered).toContain('Alt+T');
+  });
+
+  it('overlay-toggle callback invokes toggleOverlay', async () => {
+    const { registerHotkeys } = await import('../electron/modules/hotkeys.js');
+    registerHotkeys();
+
+    const overlayCall = mockGlobalShortcut.register.mock.calls.find(
+      (c: unknown[]) => c[0] === 'Alt+W',
+    );
+    expect(overlayCall).toBeTruthy();
+    // Callback should be a function (toggleOverlay is mocked in electron-mocks)
+    expect(typeof overlayCall![1]).toBe('function');
+  });
+
   it('setLastDictationText and getLastDictationText work', async () => {
     const { setLastDictationText, getLastDictationText } = await import(
       '../electron/modules/hotkeys.js'

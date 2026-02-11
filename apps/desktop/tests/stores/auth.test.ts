@@ -9,6 +9,19 @@ vi.mock('../../src/lib/api', () => ({
   setApiToken: vi.fn(),
 }));
 
+const { mockElectronBridge, mockIsElectron } = vi.hoisted(() => ({
+  mockElectronBridge: {
+    openExternal: vi.fn(),
+    onAuthCallback: vi.fn(),
+  },
+  mockIsElectron: vi.fn(() => false),
+}));
+
+vi.mock('../../src/lib/electron', () => ({
+  electron: mockElectronBridge,
+  isElectron: () => mockIsElectron(),
+}));
+
 import { useAuthStore } from '../../src/stores/auth';
 import { getSupabase } from '../../src/lib/supabase';
 import { setApiToken } from '../../src/lib/api';
@@ -19,12 +32,17 @@ const mockSetApiToken = vi.mocked(setApiToken);
 describe('Auth store', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsElectron.mockReturnValue(false);
+    mockElectronBridge.openExternal.mockReset();
+    mockElectronBridge.onAuthCallback.mockReset();
     // Reset store state
     useAuthStore.setState({
       user: null,
       session: null,
       loading: true,
       error: null,
+      signUpSuccess: false,
+      signUpEmail: null,
     });
   });
 
@@ -59,6 +77,64 @@ describe('Auth store', () => {
     expect(useAuthStore.getState().loading).toBe(false);
     expect(useAuthStore.getState().session).toBe(mockSession);
     expect(mockSetApiToken).toHaveBeenCalledWith('test-token');
+  });
+
+  it('init handles Electron OAuth token callback hash', async () => {
+    mockIsElectron.mockReturnValue(true);
+    let callback: ((url: string) => void | Promise<void>) | null = null;
+    mockElectronBridge.onAuthCallback.mockImplementation((fn: (url: string) => void | Promise<void>) => {
+      callback = fn;
+      return vi.fn();
+    });
+
+    const newSession = {
+      access_token: 'tok-new',
+      user: { id: 'u3', email: 'oauth@test.com' },
+    };
+    const mockSb = {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+        onAuthStateChange: vi.fn(),
+        setSession: vi.fn().mockResolvedValue({ data: { session: newSession }, error: null }),
+        exchangeCodeForSession: vi.fn(),
+      },
+    };
+    mockGetSupabase.mockReturnValue(mockSb as any);
+
+    await useAuthStore.getState().init();
+    await callback?.('whisperall://auth/callback#access_token=acc123&refresh_token=ref456');
+
+    expect(mockSb.auth.setSession).toHaveBeenCalledWith({ access_token: 'acc123', refresh_token: 'ref456' });
+    expect(useAuthStore.getState().session?.access_token).toBe('tok-new');
+  });
+
+  it('init handles Electron OAuth code callback query', async () => {
+    mockIsElectron.mockReturnValue(true);
+    let callback: ((url: string) => void | Promise<void>) | null = null;
+    mockElectronBridge.onAuthCallback.mockImplementation((fn: (url: string) => void | Promise<void>) => {
+      callback = fn;
+      return vi.fn();
+    });
+
+    const newSession = {
+      access_token: 'tok-from-code',
+      user: { id: 'u4', email: 'pkce@test.com' },
+    };
+    const mockSb = {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+        onAuthStateChange: vi.fn(),
+        setSession: vi.fn(),
+        exchangeCodeForSession: vi.fn().mockResolvedValue({ data: { session: newSession }, error: null }),
+      },
+    };
+    mockGetSupabase.mockReturnValue(mockSb as any);
+
+    await useAuthStore.getState().init();
+    await callback?.('whisperall://auth/callback?code=pkce-code-123');
+
+    expect(mockSb.auth.exchangeCodeForSession).toHaveBeenCalledWith('pkce-code-123');
+    expect(useAuthStore.getState().session?.access_token).toBe('tok-from-code');
   });
 
   it('setSession updates user and token', () => {
@@ -110,10 +186,43 @@ describe('Auth store', () => {
     expect(useAuthStore.getState().loading).toBe(false);
   });
 
-  it('signInWithGoogle calls signInWithOAuth', async () => {
+  it('signUp sets signUpSuccess and email on success', async () => {
+    const mockSb = {
+      auth: { signUp: vi.fn().mockResolvedValue({ error: null }) },
+    };
+    mockGetSupabase.mockReturnValue(mockSb as any);
+
+    await useAuthStore.getState().signUp('new@test.com', 'pass123');
+
+    const state = useAuthStore.getState();
+    expect(state.signUpSuccess).toBe(true);
+    expect(state.signUpEmail).toBe('new@test.com');
+    expect(state.loading).toBe(false);
+    expect(state.error).toBeNull();
+  });
+
+  it('signUp sets error on failure', async () => {
+    const mockSb = {
+      auth: { signUp: vi.fn().mockResolvedValue({ error: { message: 'User already registered' } }) },
+    };
+    mockGetSupabase.mockReturnValue(mockSb as any);
+
+    await useAuthStore.getState().signUp('dup@test.com', 'pass123');
+
+    const state = useAuthStore.getState();
+    expect(state.signUpSuccess).toBe(false);
+    expect(state.error).toBe('User already registered');
+    expect(state.loading).toBe(false);
+  });
+
+  it('signInWithGoogle opens external browser in Electron', async () => {
+    mockIsElectron.mockReturnValue(true);
     const mockSb = {
       auth: {
-        signInWithOAuth: vi.fn().mockResolvedValue({ error: null }),
+        signInWithOAuth: vi.fn().mockResolvedValue({
+          data: { url: 'https://oauth.example.com/start' },
+          error: null,
+        }),
       },
     };
     mockGetSupabase.mockReturnValue(mockSb as any);
@@ -122,16 +231,21 @@ describe('Auth store', () => {
 
     expect(mockSb.auth.signInWithOAuth).toHaveBeenCalledWith({
       provider: 'google',
-      options: { redirectTo: undefined },
+      options: { redirectTo: 'whisperall://auth/callback', skipBrowserRedirect: true },
     });
+    expect(mockElectronBridge.openExternal).toHaveBeenCalledWith('https://oauth.example.com/start');
+    expect(useAuthStore.getState().error).toBeNull();
     expect(useAuthStore.getState().loading).toBe(false);
   });
 
-  it('signInWithGoogle sets error on failure', async () => {
+  it('signInWithGoogle shows error when opening browser fails', async () => {
+    mockIsElectron.mockReturnValue(true);
+    mockElectronBridge.openExternal.mockRejectedValue(new Error('blocked'));
     const mockSb = {
       auth: {
         signInWithOAuth: vi.fn().mockResolvedValue({
-          error: { message: 'Google auth failed' },
+          data: { url: 'https://oauth.example.com/start' },
+          error: null,
         }),
       },
     };
@@ -139,16 +253,18 @@ describe('Auth store', () => {
 
     await useAuthStore.getState().signInWithGoogle();
 
-    expect(useAuthStore.getState().error).toBe('Google auth failed');
+    expect(useAuthStore.getState().error).toBe('Could not open browser for Google sign-in');
     expect(useAuthStore.getState().loading).toBe(false);
   });
 
-  it('signInWithGoogle sets error when supabase not configured', async () => {
-    mockGetSupabase.mockReturnValue(null);
+  it('clearSignUpSuccess resets signup state', () => {
+    useAuthStore.setState({ signUpSuccess: true, signUpEmail: 'a@b.com', error: 'old' });
+    useAuthStore.getState().clearSignUpSuccess();
 
-    await useAuthStore.getState().signInWithGoogle();
-
-    expect(useAuthStore.getState().error).toBe('Supabase not configured');
+    const state = useAuthStore.getState();
+    expect(state.signUpSuccess).toBe(false);
+    expect(state.signUpEmail).toBeNull();
+    expect(state.error).toBeNull();
   });
 
   it('signOut clears user and session', async () => {

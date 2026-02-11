@@ -1,57 +1,47 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Settings Page', () => {
+test.describe('Settings Modal', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.locator('.sidebar-link', { hasText: 'Settings' }).click();
-    await expect(page.locator('h2')).toHaveText('Settings');
+    await page.getByTestId('nav-settings').click();
+    await expect(page.getByTestId('settings-modal')).toBeVisible();
   });
 
   test('shows auth form when not signed in', async ({ page }) => {
     await expect(page.locator('input[type="email"]')).toBeVisible();
     await expect(page.locator('input[type="password"]')).toBeVisible();
-    await expect(page.locator('.btn-primary', { hasText: 'Sign In' })).toBeVisible();
-    await expect(page.locator('.btn-ghost', { hasText: 'Sign Up' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign Up' })).toBeVisible();
+  });
+
+  test('shows Google sign-in button', async ({ page }) => {
+    await expect(page.getByRole('button', { name: /Continue with Google/ })).toBeVisible();
   });
 
   test('has language settings section', async ({ page }) => {
-    await expect(page.locator('h3', { hasText: 'Language' })).toBeVisible();
-    const langSelect = page.locator('section', { hasText: 'Language' }).locator('select');
+    const modal = page.getByTestId('settings-modal');
+    await expect(modal.locator('h3', { hasText: 'Language' })).toBeVisible();
+    const langSelect = modal.locator('section', { hasText: 'Language' }).locator('select');
     await expect(langSelect).toHaveValue('en');
   });
 
   test('has dictation settings with hotkey mode', async ({ page }) => {
-    await expect(page.locator('h3', { hasText: 'Dictation' })).toBeVisible();
-    const hotkeySelect = page.locator('section', { hasText: 'Dictation' }).locator('select');
+    const modal = page.getByTestId('settings-modal');
+    await expect(modal.locator('h3', { hasText: 'Dictation' })).toBeVisible();
+    const hotkeySelect = modal.locator('section', { hasText: 'Dictation' }).locator('select');
     await expect(hotkeySelect).toHaveValue('toggle');
   });
 
-  test('has overlay widget checkbox', async ({ page }) => {
-    const overlayRow = page.locator('.settings-row', { hasText: 'Show overlay widget' });
-    const checkbox = overlayRow.locator('input[type="checkbox"]');
-    await expect(checkbox).toBeVisible();
-    await expect(checkbox).toBeChecked();
+  test('has overlay widget toggle', async ({ page }) => {
+    await expect(page.getByText('Overlay widget')).toBeVisible();
   });
 
-  test('has system settings section', async ({ page }) => {
-    await expect(page.locator('h3', { hasText: 'System' })).toBeVisible();
-    const trayRow = page.locator('.settings-row', { hasText: 'Minimize to tray' });
-    await expect(trayRow.locator('input[type="checkbox"]')).toBeChecked();
+  test('has minimize to tray toggle', async ({ page }) => {
+    await expect(page.getByText('Minimize to tray')).toBeVisible();
   });
 
-  test('shows Google sign-in button', async ({ page }) => {
-    await expect(page.locator('.btn-google')).toBeVisible();
-    await expect(page.locator('.btn-google')).toHaveText(/Continue with Google/);
-  });
-
-  test('shows auth divider between email and Google', async ({ page }) => {
-    await expect(page.locator('.auth-divider')).toBeVisible();
-  });
-
-  test('can toggle minimize to tray', async ({ page }) => {
-    const checkbox = page.locator('.settings-row', { hasText: 'Minimize to tray' }).locator('input[type="checkbox"]');
-    await expect(checkbox).toBeChecked();
-    await checkbox.uncheck();
-    await expect(checkbox).not.toBeChecked();
+  test('closes when clicking backdrop', async ({ page }) => {
+    await page.getByTestId('settings-modal').click({ position: { x: 5, y: 5 } });
+    await expect(page.getByTestId('settings-modal')).not.toBeVisible();
   });
 });

@@ -51,7 +51,7 @@ describe("ApiClient", () => {
     );
 
     const client = new ApiClient({ baseUrl: BASE });
-    await expect(client.postJson("/v1/fail", {})).rejects.toThrow("API error: 500");
+    await expect(client.postJson("/v1/fail", {})).rejects.toThrow("API error 500");
   });
 
   it("setToken updates auth header", async () => {
@@ -70,6 +70,43 @@ describe("ApiClient", () => {
     expect(authHeader).toBe("Bearer new-token");
   });
 
+  it("tokenProvider injects token before request", async () => {
+    let authHeader = "";
+    server.use(
+      http.get(`${BASE}/v1/provider-check`, ({ request }) => {
+        authHeader = request.headers.get("authorization") ?? "";
+        return HttpResponse.json({});
+      })
+    );
+
+    const client = new ApiClient({
+      baseUrl: BASE,
+      tokenProvider: async () => "provider-token",
+    });
+    await client.get("/v1/provider-check");
+
+    expect(authHeader).toBe("Bearer provider-token");
+  });
+
+  it("tokenProvider can clear stale token", async () => {
+    let authHeader = "unset";
+    server.use(
+      http.get(`${BASE}/v1/no-auth`, ({ request }) => {
+        authHeader = request.headers.get("authorization") ?? "";
+        return HttpResponse.json({});
+      })
+    );
+
+    const client = new ApiClient({
+      baseUrl: BASE,
+      token: "stale-token",
+      tokenProvider: async () => undefined,
+    });
+    await client.get("/v1/no-auth");
+
+    expect(authHeader).toBe("");
+  });
+
   it("postFormData throws on non-ok response", async () => {
     server.use(
       http.post(`${BASE}/v1/upload`, () => {
@@ -79,7 +116,7 @@ describe("ApiClient", () => {
 
     const client = new ApiClient({ baseUrl: BASE });
     const form = new FormData();
-    await expect(client.postFormData("/v1/upload", form)).rejects.toThrow("API error: 413");
+    await expect(client.postFormData("/v1/upload", form)).rejects.toThrow("API error 413");
   });
 
   it("get throws on non-ok response", async () => {
@@ -90,6 +127,6 @@ describe("ApiClient", () => {
     );
 
     const client = new ApiClient({ baseUrl: BASE });
-    await expect(client.get("/v1/missing")).rejects.toThrow("API error: 404");
+    await expect(client.get("/v1/missing")).rejects.toThrow("API error 404");
   });
 });

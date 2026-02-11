@@ -1,18 +1,36 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.mock('../../src/lib/supabase', () => ({
-  getSupabase: vi.fn().mockReturnValue(null),
+const { mockAuthGetState, mockGetSupabase } = vi.hoisted(() => ({
+  mockAuthGetState: vi.fn(() => ({ session: null, user: null })),
+  mockGetSupabase: vi.fn(() => null),
 }));
 
 vi.mock('../../src/lib/api', () => ({
+  api: {
+    usage: {
+      get: vi.fn(),
+    },
+  },
   setApiToken: vi.fn(),
 }));
 
+vi.mock('../../src/lib/supabase', () => ({
+  getSupabase: mockGetSupabase,
+}));
+
+vi.mock('../../src/stores/auth', () => ({
+  useAuthStore: {
+    getState: () => mockAuthGetState(),
+  },
+}));
+
 import { usePlanStore } from '../../src/stores/plan';
-import { useAuthStore } from '../../src/stores/auth';
+import { api, setApiToken } from '../../src/lib/api';
 import { getSupabase } from '../../src/lib/supabase';
 
-const mockGetSupabase = vi.mocked(getSupabase);
+const mockUsageGet = vi.mocked(api.usage.get);
+const mockSetApiToken = vi.mocked(setApiToken);
+const mockGetSupabaseFn = vi.mocked(getSupabase);
 
 const EMPTY_USAGE = {
   stt_seconds: 0,
@@ -20,26 +38,23 @@ const EMPTY_USAGE = {
   translate_chars: 0,
   transcribe_seconds: 0,
   ai_edit_tokens: 0,
+  notes_count: 0,
 };
 
-function resetStores() {
+function resetStore() {
   usePlanStore.setState({
     plan: 'free',
     usage: { ...EMPTY_USAGE },
     loading: false,
-  });
-  useAuthStore.setState({
-    user: null,
-    session: null,
-    loading: false,
-    error: null,
   });
 }
 
 describe('Plan store', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetStores();
+    mockAuthGetState.mockReturnValue({ session: null, user: null });
+    mockGetSupabaseFn.mockReturnValue(null);
+    resetStore();
   });
 
   describe('initial state', () => {
@@ -55,16 +70,19 @@ describe('Plan store', () => {
     it('returns free plan limits by default', () => {
       expect(usePlanStore.getState().getLimit('stt_seconds')).toBe(1800);
       expect(usePlanStore.getState().getLimit('tts_chars')).toBe(50_000);
+      expect(usePlanStore.getState().getLimit('notes_count')).toBe(50);
     });
 
     it('returns basic plan limits when plan is basic', () => {
       usePlanStore.setState({ plan: 'basic' });
       expect(usePlanStore.getState().getLimit('stt_seconds')).toBe(36_000);
+      expect(usePlanStore.getState().getLimit('notes_count')).toBe(200);
     });
 
     it('returns pro plan limits when plan is pro', () => {
       usePlanStore.setState({ plan: 'pro' });
       expect(usePlanStore.getState().getLimit('stt_seconds')).toBe(108_000);
+      expect(usePlanStore.getState().getLimit('notes_count')).toBe(1000);
     });
   });
 
@@ -108,61 +126,75 @@ describe('Plan store', () => {
   });
 
   describe('fetch', () => {
-    it('does nothing when no user', async () => {
+    it('syncs API token from auth session before fetching usage', async () => {
+      mockAuthGetState.mockReturnValue({
+        session: { access_token: 'session-token-123' },
+        user: { id: 'u1' },
+      });
+      mockUsageGet.mockResolvedValue({
+        plan: 'free',
+        usage: { ...EMPTY_USAGE },
+        limits: { stt_seconds: 1800, tts_chars: 50_000, translate_chars: 50_000, transcribe_seconds: 600, ai_edit_tokens: 50_000, notes_count: 50 },
+      });
+
       await usePlanStore.getState().fetch();
-      expect(usePlanStore.getState().plan).toBe('free');
+
+      expect(mockSetApiToken).toHaveBeenCalledWith('session-token-123');
+      expect(usePlanStore.getState().loading).toBe(false);
     });
 
-    it('does nothing when no supabase', async () => {
-      useAuthStore.setState({ user: { id: 'u1' } as any });
-      mockGetSupabase.mockReturnValue(null);
-
-      await usePlanStore.getState().fetch();
-      expect(usePlanStore.getState().plan).toBe('free');
-    });
-
-    it('fetches plan and usage from supabase', async () => {
-      useAuthStore.setState({ user: { id: 'u1' } as any });
-
-      const mockSb = {
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: { plan: 'basic' } }),
-              eq: vi.fn().mockReturnValue({
-                maybeSingle: vi.fn().mockResolvedValue({
-                  data: { stt_seconds: 500, tts_chars: 100, translate_chars: 0, transcribe_seconds: 0, ai_edit_tokens: 0 },
-                }),
-              }),
-            }),
-          }),
-        }),
-      };
-      mockGetSupabase.mockReturnValue(mockSb as any);
+    it('fetches plan and usage from API', async () => {
+      mockUsageGet.mockResolvedValue({
+        plan: 'basic',
+        usage: { stt_seconds: 500, tts_chars: 100, translate_chars: 0, transcribe_seconds: 0, ai_edit_tokens: 0, notes_count: 3 },
+        limits: { stt_seconds: 36_000, tts_chars: 500_000, translate_chars: 500_000, transcribe_seconds: 18_000, ai_edit_tokens: 500_000, notes_count: 200 },
+      });
 
       await usePlanStore.getState().fetch();
 
       expect(usePlanStore.getState().plan).toBe('basic');
       expect(usePlanStore.getState().usage.stt_seconds).toBe(500);
+      expect(usePlanStore.getState().usage.notes_count).toBe(3);
       expect(usePlanStore.getState().loading).toBe(false);
     });
 
-    it('defaults to free plan when profile not found', async () => {
-      useAuthStore.setState({ user: { id: 'u1' } as any });
+    it('falls back to Supabase profiles.plan when API fails', async () => {
+      mockUsageGet.mockRejectedValue(new Error('Network error'));
+      mockAuthGetState.mockReturnValue({
+        session: { access_token: 'session-token-123' },
+        user: { id: 'u1' },
+      });
+      const maybeSingle = vi.fn().mockResolvedValue({ data: { plan: 'basic' } });
+      const eq = vi.fn(() => ({ maybeSingle }));
+      const select = vi.fn(() => ({ eq }));
+      const from = vi.fn(() => ({ select }));
+      mockGetSupabaseFn.mockReturnValue({ from } as any);
 
-      const mockSb = {
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              maybeSingle: vi.fn().mockResolvedValue({ data: null }),
-              eq: vi.fn().mockReturnValue({
-                maybeSingle: vi.fn().mockResolvedValue({ data: null }),
-              }),
-            }),
-          }),
-        }),
-      };
-      mockGetSupabase.mockReturnValue(mockSb as any);
+      await usePlanStore.getState().fetch();
+
+      expect(from).toHaveBeenCalledWith('profiles');
+      expect(select).toHaveBeenCalledWith('plan');
+      expect(eq).toHaveBeenCalledWith('id', 'u1');
+      expect(usePlanStore.getState().plan).toBe('basic');
+      expect(usePlanStore.getState().loading).toBe(false);
+    });
+
+    it('stays free when API fails', async () => {
+      mockUsageGet.mockRejectedValue(new Error('Network error'));
+
+      await usePlanStore.getState().fetch();
+
+      expect(usePlanStore.getState().plan).toBe('free');
+      expect(usePlanStore.getState().usage).toEqual(EMPTY_USAGE);
+      expect(usePlanStore.getState().loading).toBe(false);
+    });
+
+    it('defaults to free plan when API returns free', async () => {
+      mockUsageGet.mockResolvedValue({
+        plan: 'free',
+        usage: { ...EMPTY_USAGE },
+        limits: { stt_seconds: 1800, tts_chars: 50_000, translate_chars: 50_000, transcribe_seconds: 600, ai_edit_tokens: 50_000, notes_count: 50 },
+      });
 
       await usePlanStore.getState().fetch();
 

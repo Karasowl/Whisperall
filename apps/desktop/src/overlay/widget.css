@@ -1,165 +1,301 @@
-/* ── Widget Pill Mode ─────────────────────────────────── */
-.widget-pill {
-  width: 72px;
-  height: 12px;
-  cursor: grab;
+/* ── Theme ───────────────────────────────────────────── */
+:root {
+  --w-glass-bg: rgb(245, 245, 245);
+  --w-border: rgba(0, 0, 0, 0.1);
+  --w-shadow: rgba(0, 0, 0, 0.15);
+  --w-text: rgba(0, 0, 0, 0.85);
+  --w-text-muted: rgba(0, 0, 0, 0.5);
+  --w-text-subtle: rgba(0, 0, 0, 0.35);
+  --w-hover-bg: rgba(0, 0, 0, 0.06);
+  --w-inset: rgba(255, 255, 255, 0.6);
+  --w-input-bg: rgba(0, 0, 0, 0.04);
+  --w-input-border: rgba(0, 0, 0, 0.06);
+  --w-ghost-border: rgba(0, 0, 0, 0.1);
+  --w-subtitle-bg: rgb(240, 240, 240);
+  --w-subtitle-text: rgba(0, 0, 0, 0.9);
+  --w-subtitle-placeholder: rgba(0, 0, 0, 0.3);
+}
+
+html.dark {
+  --w-glass-bg: rgb(22, 22, 22);
+  --w-border: rgba(255, 255, 255, 0.08);
+  --w-shadow: rgba(0, 0, 0, 0.6);
+  --w-text: rgba(255, 255, 255, 0.85);
+  --w-text-muted: rgba(255, 255, 255, 0.5);
+  --w-text-subtle: rgba(255, 255, 255, 0.35);
+  --w-hover-bg: rgba(255, 255, 255, 0.08);
+  --w-inset: rgba(255, 255, 255, 0.06);
+  --w-input-bg: rgba(255, 255, 255, 0.04);
+  --w-input-border: rgba(255, 255, 255, 0.06);
+  --w-ghost-border: rgba(255, 255, 255, 0.1);
+  --w-subtitle-bg: rgb(20, 20, 20);
+  --w-subtitle-text: rgba(255, 255, 255, 0.95);
+  --w-subtitle-placeholder: rgba(255, 255, 255, 0.3);
+}
+
+/* ─────────────────────────────────────────────────────
+   BASE CONTAINER — shared by pill / hover / dictating
+   Same Electron window size (280×100), no resize between them.
+   Content is anchored to bottom-center.
+   ───────────────────────────────────────────────────── */
+.widget-base {
+  width: 280px;
+  height: 100px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+}
+
+/* ── Pill "barrita" ─────────────────────────────────── */
+.barrita {
+  height: 5px;
+  width: 100px;
+  border-radius: 9999px;
+  background: #111;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  touch-action: none;
+  gap: 2.5px;
+  padding: 0 10px;
+  overflow: hidden;
+  transition: width 0.2s ease, height 0.2s ease, box-shadow 0.2s ease,
+              border-color 0.2s ease, background 0.2s ease, padding 0.2s ease;
+  border: 1px solid transparent;
 }
 
-.widget-pill:active { cursor: grabbing; }
-
-.widget-pill[data-dragging="true"] { cursor: grabbing; }
-
-.pill-surface {
-  width: 100%;
-  height: 100%;
-  border-radius: 9999px;
-  background: linear-gradient(180deg, #1a1a1a 0%, #0b0b0b 100%);
-  border: 1px solid #222;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 4px 8px rgba(0, 0, 0, 0.5);
-  transition: box-shadow 0.15s, border-color 0.15s;
+.barrita-dot {
+  width: 2.5px;
+  height: 2.5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  flex-shrink: 0;
+  transition: opacity 0.15s;
 }
 
-.widget-pill:hover .pill-surface {
-  border-color: #3b82f6;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 4px 12px rgba(59, 130, 246, 0.3);
+/* ── Barrita hover state (CSS only, same element) ──── */
+.barrita:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 12px rgba(255, 255, 255, 0.08), 0 1px 6px rgba(0, 0, 0, 0.4);
 }
 
-/* ── Widget Expanded Mode ────────────────────────────── */
-.widget-expanded {
-  width: 320px;
-  height: 200px;
-  border-radius: 16px;
-  background: rgba(11, 11, 11, 0.92);
-  backdrop-filter: blur(24px) saturate(1.2);
-  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+/* ── Hover expanded bar ─────────────────────────────── */
+.hover-bar {
+  height: 36px;
+  border-radius: 18px;
+  background: #0e0e0e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  opacity: 0;
+  animation: fade-in 0.12s ease-out forwards;
+}
+
+.hover-btn {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 5px 7px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s, background 0.12s;
+}
+
+.hover-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }
+.hover-btn.primary { color: #3b82f6; }
+.hover-btn.primary:hover { color: #60a5fa; background: rgba(59, 130, 246, 0.15); }
+.hover-btn .material-symbols-outlined { font-size: 18px; }
+
+/* ── Dictating compact (Wispr-Flow style) ───────────── */
+.dictating-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  animation: fade-in 0.15s ease-out forwards;
+}
+
+.dictating-label {
+  background: #0a0a0a;
+  color: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.6),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border-radius: 20px;
+  padding: 7px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.dictating-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dictating-cancel,
+.dictating-stop {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.12s;
+}
+.dictating-cancel { background: #3b82f6; color: #fff; }
+.dictating-cancel:hover { opacity: 0.85; }
+.dictating-stop { background: #ef4444; color: #fff; }
+.dictating-stop:hover { opacity: 0.85; }
+.dictating-cancel .material-symbols-outlined,
+.dictating-stop .material-symbols-outlined { font-size: 16px; }
+
+/* ── Waveform ───────────────────────────────────────── */
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 6px;
+  background: #0a0a0a;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.waveform-bar {
+  width: 3px;
+  min-height: 4px;
+  background: #fff;
+  border-radius: 1.5px;
+  animation: wave 1.2s ease-in-out infinite;
+}
+
+@keyframes wave {
+  0%, 100% { height: 4px; }
+  50% { height: 18px; }
+}
+
+.waveform-bar:nth-child(1)  { animation-delay: 0.00s; }
+.waveform-bar:nth-child(2)  { animation-delay: 0.12s; }
+.waveform-bar:nth-child(3)  { animation-delay: 0.24s; }
+.waveform-bar:nth-child(4)  { animation-delay: 0.08s; }
+.waveform-bar:nth-child(5)  { animation-delay: 0.20s; }
+.waveform-bar:nth-child(6)  { animation-delay: 0.04s; }
+.waveform-bar:nth-child(7)  { animation-delay: 0.16s; }
+.waveform-bar:nth-child(8)  { animation-delay: 0.28s; }
+.waveform-bar:nth-child(9)  { animation-delay: 0.10s; }
+.waveform-bar:nth-child(10) { animation-delay: 0.22s; }
+
+.waveform.processing .waveform-bar {
+  animation: pulse-slow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-slow {
+  0%, 100% { height: 5px; opacity: 0.4; }
+  50% { height: 10px; opacity: 1; }
+}
+
+/* ── Shared fade-in ─────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ─────────────────────────────────────────────────────
+   EXPANDED MODE — full panel with tabs
+   Resizes window (only transition that changes window size)
+   ───────────────────────────────────────────────────── */
+.widget-expanded {
+  width: 260px;
+  height: 148px;
+  border-radius: 14px;
+  background: var(--w-glass-bg);
+  border: 1px solid var(--w-border);
+  box-shadow: 0 6px 24px var(--w-shadow), inset 0 1px 0 var(--w-inset);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: widget-appear 0.15s ease-out;
 }
 
-@keyframes widget-appear {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-/* ── Header ──────────────────────────────────────────── */
 .widget-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px 6px;
+  padding: 8px 10px 4px;
   -webkit-app-region: drag;
-}
-
-.widget-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: rgba(255, 255, 255, 0.5);
 }
 
 .widget-btn-icon {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--w-text-muted);
   cursor: pointer;
   padding: 2px;
   border-radius: 6px;
   display: flex;
   -webkit-app-region: no-drag;
 }
-
-.widget-btn-icon:hover { color: rgba(255, 255, 255, 0.8); background: rgba(255, 255, 255, 0.08); }
+.widget-btn-icon:hover { color: var(--w-text); background: var(--w-hover-bg); }
 .widget-btn-icon .material-symbols-outlined { font-size: 16px; }
 
-/* ── Body ────────────────────────────────────────────── */
 .widget-body {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 8px 14px 14px;
-  gap: 10px;
+  padding: 4px 10px 10px;
+  gap: 8px;
 }
 
-/* ── Record Button ───────────────────────────────────── */
+.widget-tabs { display: flex; gap: 2px; }
+
+.widget-tab {
+  background: none;
+  border: none;
+  color: var(--w-text-subtle);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  display: flex;
+  -webkit-app-region: no-drag;
+  transition: color 0.12s, background 0.12s;
+}
+.widget-tab:hover { color: var(--w-text); background: var(--w-hover-bg); }
+.widget-tab.active { color: #3b82f6; background: rgba(59, 130, 246, 0.12); }
+.widget-tab .material-symbols-outlined { font-size: 16px; }
+
 .widget-btn-record {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 20px;
+  gap: 5px;
+  padding: 8px 16px;
   background: #3b82f6;
   color: white;
   border: none;
-  border-radius: 20px;
-  font-size: 13px;
+  border-radius: 16px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.12s;
 }
-
 .widget-btn-record:hover { background: #2563eb; }
-.widget-btn-record .material-symbols-outlined { font-size: 18px; }
+.widget-btn-record .material-symbols-outlined { font-size: 16px; }
 
-/* ── Recording State ─────────────────────────────────── */
-.widget-recording {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
-}
+.widget-status { font-size: 13px; color: var(--w-text-muted); }
 
-.recording-indicator {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #ef4444;
-  animation: pulse-dot 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
-  50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
-}
-
-.widget-btn-stop {
-  display: flex;
-  align-items: center;
-  padding: 6px;
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.widget-btn-stop:hover { background: rgba(239, 68, 68, 0.25); }
-.widget-btn-stop .material-symbols-outlined { font-size: 18px; }
-
-/* ── Status ──────────────────────────────────────────── */
-.widget-status {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-/* ── Result ──────────────────────────────────────────── */
 .widget-result {
   width: 100%;
   display: flex;
@@ -168,22 +304,18 @@
 }
 
 .widget-text {
-  font-size: 13px;
-  line-height: 1.4;
-  color: rgba(255, 255, 255, 0.85);
-  max-height: 80px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--w-text);
+  max-height: 52px;
   overflow-y: auto;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 6px 8px;
+  background: var(--w-input-bg);
+  border-radius: 6px;
+  border: 1px solid var(--w-input-border);
 }
 
-.widget-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-}
+.widget-actions { display: flex; gap: 8px; justify-content: center; }
 
 .widget-btn-primary {
   display: flex;
@@ -197,26 +329,23 @@
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.12s;
 }
-
 .widget-btn-primary:hover { background: #2563eb; }
 .widget-btn-primary .material-symbols-outlined { font-size: 14px; }
 
 .widget-btn-ghost {
   padding: 6px 14px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--w-text-muted);
+  border: 1px solid var(--w-ghost-border);
   border-radius: 8px;
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.12s, color 0.12s;
 }
+.widget-btn-ghost:hover { background: var(--w-hover-bg); color: var(--w-text); }
 
-.widget-btn-ghost:hover { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.8); }
-
-/* ── Error ───────────────────────────────────────────── */
 .widget-error {
   display: flex;
   flex-direction: column;
@@ -224,6 +353,39 @@
   gap: 8px;
   font-size: 12px;
   color: #ef4444;
+}
+
+/* ─────────────────────────────────────────────────────
+   SUBTITLES MODE
+   ───────────────────────────────────────────────────── */
+.widget-subtitles {
+  width: 800px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--w-subtitle-bg);
+  border-radius: 12px;
+  padding: 8px 40px 8px 16px;
+  position: relative;
+}
+
+.widget-subtitle-close { position: absolute; top: 6px; right: 6px; }
+
+.subtitle-line {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--w-subtitle-text);
+  text-align: center;
+  line-height: 1.3;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.subtitle-line.subtitle-placeholder {
+  color: var(--w-subtitle-placeholder);
+  font-style: italic;
+  font-weight: 400;
 }
 
 /* ── Material Symbols ────────────────────────────────── */

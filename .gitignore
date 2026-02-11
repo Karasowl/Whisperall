@@ -36,6 +36,10 @@ eggs/
 !ui/frontend/src/lib/
 lib/
 lib64/
+!apps/desktop/src/lib/
+!apps/desktop/src/lib/**
+!apps/desktop/tests/lib/
+!apps/desktop/tests/lib/**
 parts/
 sdist/
 var/
@@ -109,3 +113,4 @@ coverage/
 test-results/
 playwright-report/
 .playwright/
+.vercel

@@ -8,6 +8,8 @@
     "build:desktop": "pnpm --filter @whisperall/desktop build",
     "dev:api": "pnpm --filter @whisperall/api dev",
     "test:api": "pnpm --filter @whisperall/api test",
+    "dev:web": "pnpm --filter @whisperall/web dev",
+    "build:web": "pnpm --filter @whisperall/web build",
     "lint": "pnpm -r lint"
   }
 }

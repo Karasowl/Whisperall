@@ -3,6 +3,7 @@ import type {
   TranscribeJobParams,
   TranscribeChunkParams,
   TranscribeRunParams,
+  TranscribeUrlParams,
   TranscribeJobResponse,
   TranscribeResultResponse,
 } from "../types";
@@ -27,6 +28,10 @@ export function createTranscribeEndpoint(client: ApiClient) {
 
     async getResult(jobId: string): Promise<TranscribeResultResponse> {
       return client.get<TranscribeResultResponse>(`/v1/transcribe/jobs/${jobId}/result`);
+    },
+
+    async fromUrl(params: TranscribeUrlParams): Promise<TranscribeResultResponse> {
+      return client.postJson<TranscribeResultResponse>("/v1/transcribe/from-url", params);
     },
   };
 }

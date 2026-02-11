@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Whisperall Asset &amp; History Manager</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#137fec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101922",
+                        "surface-dark": "#1c242c",
+                        "surface-darker": "#111418",
+                        "border-dark": "#283039",
+                        "text-secondary": "#9dabb9",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        /* Custom scrollbar for webkit */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1c242c; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3b4754; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4b5866; 
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-white font-display overflow-hidden h-screen flex flex-col">
+<!-- Top Navigation -->
+<header class="flex items-center justify-between whitespace-nowrap border-b border-solid border-slate-200 dark:border-border-dark px-6 py-4 bg-white dark:bg-surface-darker shrink-0 z-20">
+<div class="flex items-center gap-4 text-slate-900 dark:text-white">
+<div class="size-8 text-primary">
+<svg class="w-full h-full" fill="none" viewbox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+<path clip-rule="evenodd" d="M24 18.4228L42 11.475V34.3663C42 34.7796 41.7457 35.1504 41.3601 35.2992L24 42V18.4228Z" fill="currentColor" fill-rule="evenodd"></path>
+<path clip-rule="evenodd" d="M24 8.18819L33.4123 11.574L24 15.2071L14.5877 11.574L24 8.18819ZM9 15.8487L21 20.4805V37.6263L9 32.9945V15.8487ZM27 37.6263V20.4805L39 15.8487V32.9945L27 37.6263ZM25.354 2.29885C24.4788 1.98402 23.5212 1.98402 22.646 2.29885L4.98454 8.65208C3.7939 9.08038 3 10.2097 3 11.475V34.3663C3 36.0196 4.01719 37.5026 5.55962 38.098L22.9197 44.7987C23.6149 45.0671 24.3851 45.0671 25.0803 44.7987L42.4404 38.098C43.9828 37.5026 45 36.0196 45 34.3663V11.475C45 10.2097 44.2061 9.08038 43.0155 8.65208L25.354 2.29885Z" fill="currentColor" fill-rule="evenodd"></path>
+</svg>
+</div>
+<h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Whisperall</h2>
+</div>
+<div class="flex flex-1 justify-end gap-8 items-center">
+<nav class="flex items-center gap-6 hidden md:flex">
+<a class="text-slate-500 dark:text-text-secondary hover:text-primary dark:hover:text-white text-sm font-medium leading-normal transition-colors" href="#">Dashboard</a>
+<a class="text-slate-500 dark:text-text-secondary hover:text-primary dark:hover:text-white text-sm font-medium leading-normal transition-colors" href="#">Dictation</a>
+<a class="text-slate-900 dark:text-white text-sm font-medium leading-normal" href="#">History</a>
+<a class="text-slate-500 dark:text-text-secondary hover:text-primary dark:hover:text-white text-sm font-medium leading-normal transition-colors" href="#">Settings</a>
+</nav>
+<div class="bg-center bg-no-repeat aspect-square bg-cover rounded-full size-10 border-2 border-slate-200 dark:border-border-dark cursor-pointer" data-alt="User profile picture placeholder" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuAvYoXq4lN1QLzONsJcRc6tYuv5MVtbqEHloLPsQV8fxjueBtjzEeFWj55rwLjPXoQdEUbFMf9JpvOYMRnuPG70rk6K160M8DWYRUWUZEvGYBWXesLX5GIOcTxR7oByNbQH9lILr9ycD3YoN-oGEUbCKuKl4HvJY5IXTlOH3ae2ApCSNho_SgtxAbPAoGfBve69WWpqyFB6im_MA_lD_VVuRrsjG3M5yZ7T0Lxr5aWv_bPiQEiVYiFIxo1CpJjGkt3RzL6earKvr8Y");'></div>
+</div>
+</header>
+<!-- Main Content Area -->
+<div class="flex flex-1 overflow-hidden">
+<!-- Left Panel: List & Controls -->
+<main class="flex-1 flex flex-col h-full overflow-hidden bg-background-light dark:bg-background-dark relative z-10">
+<!-- Header Section -->
+<div class="px-8 pt-8 pb-4">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+<div>
+<h1 class="text-slate-900 dark:text-white text-3xl font-bold tracking-tight">History &amp; Assets</h1>
+<p class="text-slate-500 dark:text-text-secondary mt-1">Manage, search, and review your transcriptions.</p>
+</div>
+<button class="bg-primary hover:bg-blue-600 text-white px-5 py-2.5 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors shadow-lg shadow-primary/20">
+<span class="material-symbols-outlined text-[20px]">add</span>
+                        New Import
+                    </button>
+</div>
+<!-- Search & Filter Bar -->
+<div class="flex flex-col gap-4">
+<label class="relative flex items-center w-full group">
+<span class="absolute left-4 text-slate-400 group-focus-within:text-primary transition-colors material-symbols-outlined">search</span>
+<input class="w-full bg-white dark:bg-surface-dark border border-slate-200 dark:border-border-dark rounded-xl py-3 pl-12 pr-4 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-sm" placeholder="Search transcripts, filenames, keywords..." type="text"/>
+<div class="absolute right-3 flex items-center gap-1">
+<span class="text-xs text-slate-400 border border-slate-200 dark:border-border-dark rounded px-1.5 py-0.5">⌘ K</span>
+</div>
+</label>
+<div class="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-200 dark:bg-white/10 text-slate-900 dark:text-white text-sm font-medium whitespace-nowrap hover:bg-slate-300 dark:hover:bg-white/20 transition-colors">
+                            All Items
+                        </button>
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-transparent border border-slate-200 dark:border-border-dark text-slate-500 dark:text-text-secondary text-sm font-medium whitespace-nowrap hover:bg-slate-100 dark:hover:bg-surface-dark hover:text-slate-900 dark:hover:text-white transition-colors">
+<span class="w-2 h-2 rounded-full bg-green-500"></span>
+                            Today
+                        </button>
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-transparent border border-slate-200 dark:border-border-dark text-slate-500 dark:text-text-secondary text-sm font-medium whitespace-nowrap hover:bg-slate-100 dark:hover:bg-surface-dark hover:text-slate-900 dark:hover:text-white transition-colors">
+<span class="material-symbols-outlined text-[16px]">mic</span>
+                            Voice Memos
+                        </button>
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-transparent border border-slate-200 dark:border-border-dark text-slate-500 dark:text-text-secondary text-sm font-medium whitespace-nowrap hover:bg-slate-100 dark:hover:bg-surface-dark hover:text-slate-900 dark:hover:text-white transition-colors">
+<span class="material-symbols-outlined text-[16px]">groups</span>
+                            Meetings
+                        </button>
+<button class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-transparent border border-slate-200 dark:border-border-dark text-slate-500 dark:text-text-secondary text-sm font-medium whitespace-nowrap hover:bg-slate-100 dark:hover:bg-surface-dark hover:text-slate-900 dark:hover:text-white transition-colors ml-auto">
+<span class="material-symbols-outlined text-[16px]">filter_list</span>
+                            More Filters
+                        </button>
+</div>
+</div>
+</div>
+<!-- Table Section -->
+<div class="flex-1 overflow-auto px-8 pb-8">
+<div class="rounded-xl border border-slate-200 dark:border-border-dark bg-white dark:bg-surface-dark overflow-hidden shadow-sm">
+<table class="w-full text-left border-collapse">
+<thead class="bg-slate-50 dark:bg-surface-darker sticky top-0 z-10 border-b border-slate-200 dark:border-border-dark">
+<tr>
+<th class="py-3 pl-6 pr-4 font-medium text-xs text-slate-500 dark:text-text-secondary uppercase tracking-wider w-1/3">Name</th>
+<th class="py-3 px-4 font-medium text-xs text-slate-500 dark:text-text-secondary uppercase tracking-wider w-24">Type</th>
+<th class="py-3 px-4 font-medium text-xs text-slate-500 dark:text-text-secondary uppercase tracking-wider">Date</th>
+<th class="py-3 px-4 font-medium text-xs text-slate-500 dark:text-text-secondary uppercase tracking-wider">Duration</th>
+<th class="py-3 px-4 font-medium text-xs text-slate-500 dark:text-text-secondary uppercase tracking-wider">Status</th>
+<th class="py-3 pr-6 pl-4 font-medium text-xs text-slate-500 dark:text-text-secondary uppercase tracking-wider text-right">Action</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-100 dark:divide-border-dark">
+<!-- Active Row Example -->
+<tr class="group cursor-pointer bg-blue-50/50 dark:bg-white/5 hover:bg-blue-50 dark:hover:bg-white/10 transition-colors">
+<td class="py-4 pl-6 pr-4">
+<div class="flex items-center gap-3">
+<div class="bg-primary/20 text-primary p-2 rounded-lg shrink-0">
+<span class="material-symbols-outlined text-[20px]">description</span>
+</div>
+<div>
+<p class="text-sm font-semibold text-slate-900 dark:text-white">Q3 Quarterly Review</p>
+<p class="text-xs text-slate-500 dark:text-text-secondary truncate max-w-[200px]">Discussing financial targets and marketing...</p>
+</div>
+</div>
+</td>
+<td class="py-4 px-4">
+<div class="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-surface-darker rounded px-2 py-1 w-fit">
+<span class="material-symbols-outlined text-[14px]">groups</span>
+                                        Meeting
+                                    </div>
+</td>
+<td class="py-4 px-4 text-sm text-slate-500 dark:text-text-secondary">Oct 24, 2023</td>
+<td class="py-4 px-4 text-sm text-slate-500 dark:text-text-secondary">45:12</td>
+<td class="py-4 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400">
+<span class="size-1.5 rounded-full bg-green-500"></span> Processed
+                                    </span>
+</td>
+<td class="py-4 pr-6 pl-4 text-right">
+<button class="text-slate-400 hover:text-primary dark:text-text-secondary dark:hover:text-white transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Normal Row -->
+<tr class="group cursor-pointer hover:bg-slate-50 dark:hover:bg-surface-darker/50 transition-colors">
+<td class="py-4 pl-6 pr-4">
+<div class="flex items-center gap-3">
+<div class="bg-purple-500/20 text-purple-400 p-2 rounded-lg shrink-0">
+<span class="material-symbols-outlined text-[20px]">lightbulb</span>
+</div>
+<div>
+<p class="text-sm font-medium text-slate-900 dark:text-white">Product Idea Note 001</p>
+<p class="text-xs text-slate-500 dark:text-text-secondary truncate max-w-[200px]">Quick thoughts on the new feature set...</p>
+</div>
+</div>
+</td>
+<td class="py-4 px-4">
+<div class="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-surface-darker rounded px-2 py-1 w-fit">
+<span class="material-symbols-outlined text-[14px]">mic</span>
+                                        Memo
+                                    </div>
+</td>
+<td class="py-4 px-4 text-sm text-slate-500 dark:text-text-secondary">Oct 23, 2023</td>
+<td class="py-4 px-4 text-sm text-slate-500 dark:text-text-secondary">02:30</td>
+<td class="py-4 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400">
+<span class="size-1.5 rounded-full bg-green-500"></span> Processed
+                                    </span>
+</td>
+<td class="py-4 pr-6 pl-4 text-right">
+<button class="text-slate-400 hover:text-primary dark:text-text-secondary dark:hover:text-white transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Processing Row -->
+<tr class="group cursor-pointer hover:bg-slate-50 dark:hover:bg-surface-darker/50 transition-colors">
+<td class="py-4 pl-6 pr-4">
+<div class="flex items-center gap-3">
+<div class="bg-amber-500/20 text-amber-500 p-2 rounded-lg shrink-0">
+<span class="material-symbols-outlined text-[20px]">record_voice_over</span>
+</div>
+<div>
+<p class="text-sm font-medium text-slate-900 dark:text-white">Client Interview - John D.</p>
+<p class="text-xs text-slate-500 dark:text-text-secondary truncate max-w-[200px]">User feedback session regarding v2.0</p>
+</div>
+</div>
+</td>
+<td class="py-4 px-4">
+<div class="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-surface-darker rounded px-2 py-1 w-fit">
+<span class="material-symbols-outlined text-[14px]">person</span>
+                                        Interview
+                                    </div>
+</td>
+<td class="py-4 px-4 text-sm text-slate-500 dark:text-text-secondary">Oct 22, 2023</td>
+<td class="py-4 px-4 text-sm text-slate-500 dark:text-text-secondary">30:00</td>
+<td class="py-4 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400">
+<span class="size-1.5 rounded-full bg-amber-500 animate-pulse"></span> Analyzing...
+                                    </span>
+</td>
+<td class="py-4 pr-6 pl-4 text-right">
+<button class="text-slate-400 hover:text-primary dark:text-text-secondary dark:hover:text-white transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Normal Row -->
+<tr class="group cursor-pointer hover:bg-slate-50 dark:hover:bg-surface-darker/50 transition-colors">
+<td class="py-4 pl-6 pr-4">
+<div class="flex items-center gap-3">
+<div class="bg-blue-500/20 text-blue-400 p-2 rounded-lg shrink-0">
+<span class="material-symbols-outlined text-[20px]">video_camera_front</span>
+</div>
+<div>
+<p class="text-sm font-medium text-slate-900 dark:text-white">Weekly Sync Video</p>
+<p class="text-xs text-slate-500 dark:text-text-secondary truncate max-w-[200px]">Team catch-up and sprint planning</p>
+</div>
+</div>
+</td>
+<td class="py-4 px-4">
+<div class="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-surface-darker rounded px-2 py-1 w-fit">
+<span class="material-symbols-outlined text-[14px]">videocam</span>
+                                        Video
+                                    </div>
+</td>
+<td class="py-4 px-4 text-sm text-slate-500 dark:text-text-secondary">Oct 20, 2023</td>
+<td class="py-4 px-4 text-sm text-slate-500 dark:text-text-secondary">15:45</td>
+<td class="py-4 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400">
+<span class="size-1.5 rounded-full bg-green-500"></span> Processed
+                                    </span>
+</td>
+<td class="py-4 pr-6 pl-4 text-right">
+<button class="text-slate-400 hover:text-primary dark:text-text-secondary dark:hover:text-white transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+<!-- Pagination (Static) -->
+<div class="border-t border-slate-200 dark:border-border-dark px-6 py-4 flex items-center justify-between bg-slate-50 dark:bg-surface-darker">
+<span class="text-xs text-slate-500 dark:text-text-secondary">Showing 1-4 of 24 items</span>
+<div class="flex gap-2">
+<button class="p-1 rounded hover:bg-slate-200 dark:hover:bg-white/10 text-slate-400 disabled:opacity-50" disabled="">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<button class="p-1 rounded hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-white">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Right Preview Panel (Split View) -->
+<aside class="w-[480px] border-l border-slate-200 dark:border-border-dark bg-white dark:bg-surface-dark flex flex-col shadow-2xl z-20 hidden xl:flex">
+<!-- Preview Header -->
+<div class="px-6 py-5 border-b border-slate-200 dark:border-border-dark flex justify-between items-start bg-slate-50/50 dark:bg-surface-darker/50 backdrop-blur-sm">
+<div class="flex-1 pr-4">
+<div class="flex items-center gap-2 mb-2">
+<span class="inline-flex items-center justify-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary border border-primary/20">Meeting</span>
+<span class="text-xs text-slate-400">Oct 24, 2023 • 10:00 AM</span>
+</div>
+<h2 class="text-xl font-bold text-slate-900 dark:text-white leading-tight">Q3 Quarterly Review</h2>
+<p class="text-sm text-slate-500 dark:text-text-secondary mt-1">Participants: Alex, Sarah, Mike</p>
+</div>
+<div class="flex gap-2 shrink-0">
+<button class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-primary transition-colors" title="Export">
+<span class="material-symbols-outlined text-[20px]">ios_share</span>
+</button>
+<button class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-slate-400 hover:text-primary transition-colors" title="Close Preview">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+</div>
+<!-- Audio Player (Mini) -->
+<div class="px-6 py-4 border-b border-slate-200 dark:border-border-dark bg-slate-50 dark:bg-surface-darker">
+<div class="flex items-center justify-between mb-2">
+<span class="text-xs font-mono text-slate-500 dark:text-text-secondary">12:34 / 45:12</span>
+<button class="text-xs font-medium text-primary hover:text-blue-400">1.0x Speed</button>
+</div>
+<!-- Fake Waveform -->
+<div aria-hidden="true" class="h-12 w-full flex items-center justify-between gap-[2px] mb-3 opacity-80">
+<div class="w-1 bg-primary/40 h-3 rounded-full"></div>
+<div class="w-1 bg-primary/60 h-5 rounded-full"></div>
+<div class="w-1 bg-primary h-8 rounded-full"></div>
+<div class="w-1 bg-primary h-6 rounded-full"></div>
+<div class="w-1 bg-primary/50 h-4 rounded-full"></div>
+<div class="w-1 bg-primary/30 h-2 rounded-full"></div>
+<div class="w-1 bg-primary/40 h-5 rounded-full"></div>
+<div class="w-1 bg-primary h-10 rounded-full"></div>
+<div class="w-1 bg-primary h-7 rounded-full"></div>
+<div class="w-1 bg-primary/60 h-4 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-3 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-2 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-6 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-4 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-2 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-5 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-3 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-8 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-4 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-2 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-6 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-4 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-2 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-5 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-3 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-8 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-4 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-2 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-6 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-4 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-2 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-5 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-3 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-8 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-4 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-2 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-6 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-4 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-2 rounded-full"></div>
+<div class="w-1 bg-slate-300 dark:bg-slate-700 h-5 rounded-full"></div>
+</div>
+<div class="flex justify-center items-center gap-6">
+<button class="text-slate-400 hover:text-white"><span class="material-symbols-outlined">replay_10</span></button>
+<button class="bg-primary text-white rounded-full p-2 hover:bg-blue-600 shadow-lg shadow-primary/30 flex items-center justify-center">
+<span class="material-symbols-outlined text-[28px] pl-0.5">play_arrow</span>
+</button>
+<button class="text-slate-400 hover:text-white"><span class="material-symbols-outlined">forward_10</span></button>
+</div>
+</div>
+<!-- Transcript Content -->
+<div class="flex-1 overflow-y-auto p-6 space-y-6">
+<!-- Summary Card -->
+<div class="bg-slate-50 dark:bg-surface-darker p-4 rounded-xl border border-slate-200 dark:border-border-dark">
+<h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px]">auto_awesome</span> AI Summary
+                    </h3>
+<p class="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+                        The meeting focused on Q3 targets. Marketing needs to increase ad spend by 15% to hit the new KPIs. Alex raised concerns about the timeline for the new product launch, suggesting a 2-week delay.
+                    </p>
+</div>
+<!-- Dialogue -->
+<div class="space-y-4">
+<div class="flex gap-3">
+<div class="shrink-0 mt-1">
+<div class="size-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-xs font-bold text-blue-600 dark:text-blue-400">AM</div>
+</div>
+<div>
+<p class="text-xs font-bold text-slate-400 mb-0.5">Alex M. <span class="font-normal opacity-50 ml-1">00:05</span></p>
+<p class="text-slate-800 dark:text-slate-200 text-sm leading-relaxed">Alright, let's get started. Thanks everyone for joining the quarterly review.</p>
+</div>
+</div>
+<div class="flex gap-3 bg-blue-50/50 dark:bg-primary/5 -mx-3 px-3 py-2 rounded-lg border-l-2 border-primary">
+<div class="shrink-0 mt-1">
+<div class="size-8 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-xs font-bold text-purple-600 dark:text-purple-400">SJ</div>
+</div>
+<div>
+<p class="text-xs font-bold text-slate-400 mb-0.5">Sarah J. <span class="font-normal opacity-50 ml-1">00:12</span></p>
+<p class="text-slate-900 dark:text-white font-medium text-sm leading-relaxed">I have the numbers for the marketing team ready. Should I share my screen?</p>
+</div>
+</div>
+<div class="flex gap-3">
+<div class="shrink-0 mt-1">
+<div class="size-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-xs font-bold text-blue-600 dark:text-blue-400">AM</div>
+</div>
+<div>
+<p class="text-xs font-bold text-slate-400 mb-0.5">Alex M. <span class="font-normal opacity-50 ml-1">00:18</span></p>
+<p class="text-slate-800 dark:text-slate-200 text-sm leading-relaxed">Yes, please go ahead. Specifically looking at the conversion rates for September.</p>
+</div>
+</div>
+<div class="flex gap-3">
+<div class="shrink-0 mt-1">
+<div class="size-8 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-xs font-bold text-orange-600 dark:text-orange-400">MK</div>
+</div>
+<div>
+<p class="text-xs font-bold text-slate-400 mb-0.5">Mike K. <span class="font-normal opacity-50 ml-1">00:24</span></p>
+<p class="text-slate-800 dark:text-slate-200 text-sm leading-relaxed">While she brings that up, I wanted to quickly mention the server load issue we saw last Tuesday.</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Action -->
+<div class="p-4 border-t border-slate-200 dark:border-border-dark bg-slate-50 dark:bg-surface-darker">
+<button class="w-full py-2.5 rounded-lg bg-slate-200 dark:bg-surface-dark text-slate-900 dark:text-white text-sm font-medium hover:bg-slate-300 dark:hover:bg-surface-dark/80 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">edit_document</span>
+                    Open Full Editor
+                </button>
+</div>
+</aside>
+</div>
+</body></html>

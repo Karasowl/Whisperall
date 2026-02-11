@@ -1,6 +1,9 @@
+import logging
 import httpx
 
 from ..config import settings
+
+log = logging.getLogger(__name__)
 
 
 async def transcribe(
@@ -8,13 +11,17 @@ async def transcribe(
     language: str | None = None,
     prompt: str | None = None,
     model: str = "gpt-4o-mini-transcribe",
+    content_type: str = "audio/webm",
 ) -> str:
     """Transcribe audio via OpenAI Whisper-compatible endpoint."""
     if not settings.openai_api_key:
         return "[openai-stub] transcribed text"
 
+    ext = content_type.split("/")[-1].split(";")[0]  # webm, wav, mp3, etc.
+    filename = f"audio.{ext}"
+
     async with httpx.AsyncClient(timeout=60) as client:
-        files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
+        files = {"file": (filename, audio_bytes, content_type)}
         data: dict = {"model": model}
         if language:
             data["language"] = language
@@ -34,14 +41,22 @@ async def transcribe(
 async def diarize(
     audio_bytes: bytes,
     language: str | None = None,
-) -> list[dict]:
-    """Diarize audio via OpenAI gpt-4o-transcribe-diarize."""
+    content_type: str = "audio/webm",
+) -> str:
+    """Transcribe audio with speaker diarization via OpenAI."""
     if not settings.openai_api_key:
-        return [{"speaker": "A", "start": 0.0, "end": 1.0, "text": "[openai-stub] diarized"}]
+        return "[openai-stub] diarized text"
+
+    # Strip codec params (e.g. "audio/webm;codecs=opus" → "audio/webm")
+    clean_ct = content_type.split(";")[0].strip()
+    ext = clean_ct.split("/")[-1]
+    filename = f"audio.{ext}"
+
+    log.info("diarize: %d bytes, ct=%s, file=%s", len(audio_bytes), clean_ct, filename)
 
     async with httpx.AsyncClient(timeout=120) as client:
-        files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
-        data: dict = {"model": "gpt-4o-transcribe-diarize"}
+        files = {"file": (filename, audio_bytes, clean_ct)}
+        data: dict = {"model": "gpt-4o-transcribe"}
         if language:
             data["language"] = language
 
@@ -52,4 +67,6 @@ async def diarize(
             data=data,
         )
         resp.raise_for_status()
-        return resp.json().get("segments", [])
+        body = resp.json()
+        log.info("diarize response: %s", str(body)[:500])
+        return body.get("text", "")

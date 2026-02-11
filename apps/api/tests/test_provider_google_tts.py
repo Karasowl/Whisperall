@@ -3,7 +3,7 @@ import base64
 import pytest
 import httpx
 import respx
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.config import settings
 from app.providers import google_tts
@@ -21,7 +21,7 @@ def _enable_key():
 class TestSynthesize:
     @respx.mock
     @pytest.mark.asyncio
-    async def test_sends_correct_request(self):
+    async def test_sends_correct_request_default_english(self):
         route = respx.post("https://texttospeech.googleapis.com/v1/text:synthesize").mock(
             return_value=httpx.Response(200, json={"audioContent": SAMPLE_AUDIO})
         )
@@ -31,19 +31,33 @@ class TestSynthesize:
 
         assert route.called
         req = route.calls.last.request
-        url = str(req.url)
-        assert "key=gcp-test-key" in url
+        assert "key=gcp-test-key" in str(req.url)
 
         import json
         body = json.loads(req.content)
         assert body["input"]["text"] == "Hello world"
         assert body["voice"]["languageCode"] == "en-US"
-        assert body["voice"]["name"] == "en-US-WaveNet-D"
+        assert body["voice"]["name"] == "en-US-Standard-D"
         assert body["audioConfig"]["audioEncoding"] == "MP3"
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_returns_fallback_url_without_db(self):
+    async def test_spanish_voice_by_language(self):
+        route = respx.post("https://texttospeech.googleapis.com/v1/text:synthesize").mock(
+            return_value=httpx.Response(200, json={"audioContent": SAMPLE_AUDIO})
+        )
+
+        with patch("app.providers.google_tts.get_supabase_or_none", return_value=None):
+            await google_tts.synthesize("Hola mundo", language="es")
+
+        import json
+        body = json.loads(route.calls.last.request.content)
+        assert body["voice"]["languageCode"] == "es-US"
+        assert body["voice"]["name"] == "es-US-Standard-A"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_returns_data_url_without_db(self):
         respx.post("https://texttospeech.googleapis.com/v1/text:synthesize").mock(
             return_value=httpx.Response(200, json={"audioContent": SAMPLE_AUDIO})
         )
@@ -51,7 +65,7 @@ class TestSynthesize:
         with patch("app.providers.google_tts.get_supabase_or_none", return_value=None):
             result = await google_tts.synthesize("test")
 
-        assert result == "https://storage.example.com/tts-output.mp3"
+        assert result.startswith("data:audio/mpeg;base64,")
 
     @respx.mock
     @pytest.mark.asyncio
@@ -72,32 +86,38 @@ class TestSynthesize:
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_custom_voice(self):
+    async def test_custom_voice_overrides_language(self):
         route = respx.post("https://texttospeech.googleapis.com/v1/text:synthesize").mock(
             return_value=httpx.Response(200, json={"audioContent": SAMPLE_AUDIO})
         )
 
         with patch("app.providers.google_tts.get_supabase_or_none", return_value=None):
-            await google_tts.synthesize("hola", voice="es-ES-WaveNet-B", language_code="es-ES")
+            await google_tts.synthesize("hola", voice="es-ES-WaveNet-B", language="es")
 
         import json
         body = json.loads(route.calls.last.request.content)
         assert body["voice"]["name"] == "es-ES-WaveNet-B"
-        assert body["voice"]["languageCode"] == "es-ES"
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_raises_on_http_error(self):
+    async def test_falls_back_to_edge_tts_on_error(self):
         respx.post("https://texttospeech.googleapis.com/v1/text:synthesize").mock(
-            return_value=httpx.Response(400, json={"error": "bad request"})
+            return_value=httpx.Response(403, json={"error": "forbidden"})
         )
 
-        with patch("app.providers.google_tts.get_supabase_or_none", return_value=None):
-            with pytest.raises(httpx.HTTPStatusError):
-                await google_tts.synthesize("test")
+        with patch("app.providers.google_tts.edge_tts_synth.synthesize", new_callable=AsyncMock) as mock_edge:
+            mock_edge.return_value = "data:audio/mpeg;base64,fake"
+            result = await google_tts.synthesize("test")
+
+        assert result == "data:audio/mpeg;base64,fake"
+        mock_edge.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_stub_when_no_key(self):
-        with patch.object(settings, "google_tts_api_key", None):
+    async def test_falls_back_to_edge_tts_when_no_key(self):
+        with patch.object(settings, "google_tts_api_key", None), \
+             patch("app.providers.google_tts.edge_tts_synth.synthesize", new_callable=AsyncMock) as mock_edge:
+            mock_edge.return_value = "data:audio/mpeg;base64,fake"
             result = await google_tts.synthesize("test")
-        assert "stub" in result
+
+        assert result == "data:audio/mpeg;base64,fake"
+        mock_edge.assert_called_once()

@@ -14,6 +14,8 @@ export const mockGlobalShortcut = {
 export const mockBrowserWindow = vi.fn();
 export const mockApp = {
   isPackaged: false,
+  setAsDefaultProtocolClient: vi.fn().mockReturnValue(true),
+  getAppPath: vi.fn().mockReturnValue(process.cwd()),
   getPath: vi.fn().mockReturnValue('/tmp/test'),
   requestSingleInstanceLock: vi.fn().mockReturnValue(true),
   whenReady: vi.fn().mockResolvedValue(undefined),

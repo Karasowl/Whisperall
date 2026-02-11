@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import type { UserPlan, UsageRecord } from '@whisperall/api-client';
+import { api, setApiToken } from '../lib/api';
 import { getSupabase } from '../lib/supabase';
 import { useAuthStore } from './auth';
 
 const PLAN_LIMITS: Record<UserPlan, UsageRecord> = {
-  free: { stt_seconds: 1800, tts_chars: 50_000, translate_chars: 50_000, transcribe_seconds: 600, ai_edit_tokens: 50_000 },
-  basic: { stt_seconds: 36_000, tts_chars: 500_000, translate_chars: 500_000, transcribe_seconds: 18_000, ai_edit_tokens: 500_000 },
-  pro: { stt_seconds: 108_000, tts_chars: 2_000_000, translate_chars: 2_000_000, transcribe_seconds: 108_000, ai_edit_tokens: 2_000_000 },
+  free: { stt_seconds: 1800, tts_chars: 50_000, translate_chars: 50_000, transcribe_seconds: 600, ai_edit_tokens: 50_000, notes_count: 50 },
+  basic: { stt_seconds: 36_000, tts_chars: 500_000, translate_chars: 500_000, transcribe_seconds: 18_000, ai_edit_tokens: 500_000, notes_count: 200 },
+  pro: { stt_seconds: 108_000, tts_chars: 2_000_000, translate_chars: 2_000_000, transcribe_seconds: 108_000, ai_edit_tokens: 2_000_000, notes_count: 1000 },
 };
 
 export type PlanState = {
@@ -27,7 +28,18 @@ const EMPTY_USAGE: UsageRecord = {
   translate_chars: 0,
   transcribe_seconds: 0,
   ai_edit_tokens: 0,
+  notes_count: 0,
 };
+
+function normalizePlan(value: unknown): UserPlan {
+  if (value === 'basic' || value === 'pro') return value;
+  return 'free';
+}
+
+export const PLAN_REFRESH_DEBOUNCE_MS = 1200;
+let planRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let planRefreshInFlight = false;
+let planRefreshQueued = false;
 
 export const usePlanStore = create<PlanState>((set, get) => ({
   plan: 'free',
@@ -35,32 +47,32 @@ export const usePlanStore = create<PlanState>((set, get) => ({
   loading: false,
 
   fetch: async () => {
-    const user = useAuthStore.getState().user;
-    const sb = getSupabase();
-    if (!user || !sb) return;
-
     set({ loading: true });
-
-    let plan: UserPlan = 'free';
-    const profileRes = await sb.from('profiles').select('plan').eq('id', user.id).maybeSingle();
-    if (profileRes.data) {
-      plan = profileRes.data.plan as UserPlan;
+    const sessionToken = useAuthStore.getState().session?.access_token;
+    if (sessionToken) setApiToken(sessionToken);
+    try {
+      const res = await api.usage.get();
+      set({
+        plan: res.plan,
+        usage: res.usage,
+        loading: false,
+      });
+    } catch {
+      const userId = useAuthStore.getState().user?.id;
+      const sb = getSupabase();
+      if (sb && userId) {
+        try {
+          const { data } = await sb.from('profiles').select('plan').eq('id', userId).maybeSingle();
+          if (data?.plan) {
+            set({ plan: normalizePlan(data.plan), loading: false });
+            return;
+          }
+        } catch {
+          // ignore fallback failures and keep current state
+        }
+      }
+      set({ loading: false });
     }
-
-    let usage = { ...EMPTY_USAGE };
-    const month = new Date().toISOString().slice(0, 7) + '-01';
-    const usageRes = await sb.from('usage').select('*').eq('user_id', user.id).eq('month', month).maybeSingle();
-    if (usageRes.data) {
-      usage = {
-        stt_seconds: usageRes.data.stt_seconds ?? 0,
-        tts_chars: usageRes.data.tts_chars ?? 0,
-        translate_chars: usageRes.data.translate_chars ?? 0,
-        transcribe_seconds: usageRes.data.transcribe_seconds ?? 0,
-        ai_edit_tokens: usageRes.data.ai_edit_tokens ?? 0,
-      };
-    }
-
-    set({ plan, usage, loading: false });
   },
 
   getLimit: (resource) => PLAN_LIMITS[get().plan][resource],
@@ -72,3 +84,36 @@ export const usePlanStore = create<PlanState>((set, get) => ({
     return Math.min(100, Math.round((get().usage[resource] / limit) * 100));
   },
 }));
+
+async function runPlanRefresh(): Promise<void> {
+  if (planRefreshInFlight) {
+    planRefreshQueued = true;
+    return;
+  }
+  planRefreshInFlight = true;
+  try {
+    await usePlanStore.getState().fetch();
+  } finally {
+    planRefreshInFlight = false;
+    if (planRefreshQueued) {
+      planRefreshQueued = false;
+      void runPlanRefresh();
+    }
+  }
+}
+
+export function refreshPlanUsageNow(): void {
+  if (planRefreshTimer) {
+    clearTimeout(planRefreshTimer);
+    planRefreshTimer = null;
+  }
+  void runPlanRefresh();
+}
+
+export function requestPlanRefresh(delayMs = PLAN_REFRESH_DEBOUNCE_MS): void {
+  if (planRefreshTimer) clearTimeout(planRefreshTimer);
+  planRefreshTimer = setTimeout(() => {
+    planRefreshTimer = null;
+    void runPlanRefresh();
+  }, Math.max(0, delayMs));
+}

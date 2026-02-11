@@ -13,4 +13,4 @@ def test_tts(client, auth_headers, mock_google_tts):
 def test_tts_with_voice(client, auth_headers, mock_google_tts):
     res = client.post("/v1/tts", json={"text": "hello", "voice": "en-US-WaveNet-A"}, headers=auth_headers)
     assert res.status_code == 200
-    mock_google_tts.assert_called_once_with("hello", "en-US-WaveNet-A")
+    mock_google_tts.assert_called_once_with("hello", "en-US-WaveNet-A", None)

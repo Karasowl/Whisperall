@@ -21,15 +21,19 @@ async def dictate(
     duration_est = max(len(audio_bytes) // 32_000, 1)  # rough estimate: 32KB/s
     check_usage(user, "stt_seconds", duration_est)
 
-    text = await openai_stt.transcribe(audio_bytes, language=language, prompt=prompt)
+    ct = audio.content_type or "audio/webm"
+    text = await openai_stt.transcribe(audio_bytes, language=language, prompt=prompt, content_type=ct)
     sid = session_id or "default"
 
     db = get_supabase_or_none()
     if db:
-        db.rpc("increment_usage", {"p_user_id": user.user_id, "p_stt_seconds": duration_est}).execute()
-        db.table("history").insert({
-            "user_id": user.user_id, "module": "dictate",
-            "output_text": text, "metadata": {"language": language, "is_final": is_final},
-        }).execute()
+        try:
+            db.rpc("increment_usage", {"p_user_id": user.user_id, "p_stt_seconds": duration_est}).execute()
+            db.table("history").insert({
+                "user_id": user.user_id, "module": "dictate",
+                "output_text": text, "metadata": {"language": language, "is_final": is_final},
+            }).execute()
+        except Exception:
+            pass
 
     return DictateResponse(session_id=sid, text=text, is_final=is_final)

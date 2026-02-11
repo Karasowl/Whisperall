@@ -1,6 +1,6 @@
-import { ipcMain, Notification, shell } from 'electron';
+import { ipcMain, desktopCapturer, Notification, shell } from 'electron';
 import { showMainWindow, getMainWindow } from './windows.js';
-import { showOverlay, hideOverlay, toggleOverlay, resizeOverlay, setOverlayIgnoreMouse } from './overlay.js';
+import { showOverlay, hideOverlay, toggleOverlay, resizeOverlay, setOverlayIgnoreMouse, sendSubtitleText } from './overlay.js';
 import { updateHotkeys, updateSttSettings, setLastDictationText } from './hotkeys.js';
 import { updateTraySettings, getTraySettings } from './tray.js';
 import { pasteText, undoPaste, readClipboard } from './clipboard.js';
@@ -40,6 +40,10 @@ export function registerIpcHandlers(): void {
     setOverlayIgnoreMouse(ignore);
   });
 
+  ipcMain.on('overlay:subtitle', (_e, text: string) => {
+    sendSubtitleText(text);
+  });
+
   // --- Tray ---
   ipcMain.on('update-tray-settings', (_e, settings) => {
     updateTraySettings(settings);
@@ -72,6 +76,12 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('open-external', async (_e, url: string) => {
     await shell.openExternal(url);
+  });
+
+  // --- Desktop Capturer ---
+  ipcMain.handle('desktop-sources', async () => {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    return sources.map((s) => ({ id: s.id, name: s.name }));
   });
 
   // --- Window controls ---

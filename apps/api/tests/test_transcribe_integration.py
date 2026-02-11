@@ -1,13 +1,14 @@
 """Full transcribe lifecycle tests with mocked Supabase DB."""
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
+from app.routers.transcribe import _segments_to_labeled_text
 
 
 JOB_ID = "job-abc-123"
 USER_ID = "user-123"
 
 
-def _make_db_mock():
+def _make_db_mock(enable_diarization: bool = False):
     """Build a mock Supabase client that tracks table state."""
     db = MagicMock()
 
@@ -15,7 +16,7 @@ def _make_db_mock():
     job_data = {
         "id": JOB_ID, "user_id": USER_ID, "status": "pending",
         "processed_chunks": 0, "total_chunks": 2,
-        "language": None, "enable_diarization": False,
+        "language": None, "enable_diarization": enable_diarization,
         "enable_translation": False, "target_language": None,
     }
 
@@ -25,8 +26,9 @@ def _make_db_mock():
         if name == "transcribe_jobs":
             # insert
             mock_table.insert.return_value.execute.return_value = MagicMock(data=[job_data])
-            # select("user_id").eq("id", ...).single()
+            # select("...").eq("id", ...).single()/maybe_single()
             mock_table.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(data=job_data)
+            mock_table.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data=job_data)
             # update
             mock_table.update.return_value.eq.return_value.execute.return_value = MagicMock(data=[job_data])
             return mock_table
@@ -78,6 +80,18 @@ def mock_supabase():
 def mock_groq_provider():
     with patch("app.routers.transcribe.groq_stt.transcribe_chunk", new_callable=AsyncMock) as m:
         m.return_value = "chunk text"
+        yield m
+
+
+@pytest.fixture
+def mock_deepgram_provider():
+    with patch("app.routers.transcribe.deepgram.transcribe_chunk_diarized", new_callable=AsyncMock) as m:
+        m.return_value = {
+            "text": "chunk text",
+            "segments": [
+                {"start": 0.0, "end": 1.0, "text": "hello", "speaker": "Speaker 1"},
+            ],
+        }
         yield m
 
 
@@ -143,6 +157,21 @@ class TestRunJob:
         assert len(rpc_calls) >= 1
         assert rpc_calls[0][0][1]["p_transcribe_seconds"] > 0
 
+    def test_processes_chunks_with_diarization(self, client, auth_headers, mock_deepgram_provider):
+        db = _make_db_mock(enable_diarization=True)
+        with patch("app.routers.transcribe.get_supabase_or_none", return_value=db), \
+             patch("app.routers.transcribe.groq_stt.transcribe_chunk", new_callable=AsyncMock) as mock_groq, \
+             patch("app.routers.transcribe.settings.deepgram_api_key", "dg-test-key"):
+            mock_groq.return_value = "hq chunk text"
+            res = client.post(
+                f"/v1/transcribe/jobs/{JOB_ID}/run",
+                json={"max_chunks": 5},
+                headers=auth_headers,
+            )
+        assert res.status_code == 200
+        assert mock_deepgram_provider.call_count == 2
+        assert mock_groq.call_count == 2
+
 
 class TestGetJob:
     def test_returns_job_status(self, client, auth_headers, mock_supabase):
@@ -184,3 +213,18 @@ class TestGetResult:
         with patch("app.routers.transcribe.get_supabase_or_none", return_value=db):
             res = client.get(f"/v1/transcribe/jobs/{JOB_ID}/result", headers=auth_headers)
         assert res.status_code == 404
+
+
+def test_segments_to_labeled_text_groups_consecutive_speakers():
+    text = _segments_to_labeled_text([
+        {"speaker": "Speaker 1", "text": "Hola"},
+        {"speaker": "Speaker 1", "text": "cómo estás"},
+        {"speaker": "Speaker 2", "text": "Bien"},
+        {"speaker": "Speaker 2", "text": "gracias"},
+        {"speaker": "Speaker 1", "text": "Perfecto"},
+    ])
+    assert text == (
+        "Speaker 1: Hola cómo estás\n\n"
+        "Speaker 2: Bien gracias\n\n"
+        "Speaker 1: Perfecto"
+    )

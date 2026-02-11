@@ -56,6 +56,23 @@ class TestTranscribeChunk:
 
     @respx.mock
     @pytest.mark.asyncio
+    async def test_uses_custom_filename_and_content_type(self):
+        route = respx.post("https://api.groq.com/openai/v1/audio/transcriptions").mock(
+            return_value=httpx.Response(200, json={"text": "ok"})
+        )
+
+        await groq_stt.transcribe_chunk(
+            b"audio",
+            filename="meeting.m4a",
+            content_type="audio/mp4",
+        )
+
+        content = route.calls.last.request.content
+        assert b'filename="meeting.m4a"' in content
+        assert b"Content-Type: audio/mp4" in content
+
+    @respx.mock
+    @pytest.mark.asyncio
     async def test_raises_on_http_error(self):
         respx.post("https://api.groq.com/openai/v1/audio/transcriptions").mock(
             return_value=httpx.Response(429, json={"error": "rate limited"})

@@ -1,27 +1,46 @@
-from fastapi import APIRouter, Depends
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from ..schemas import AiEditRequest, AiEditResponse
 from ..auth import get_current_user, check_usage, AuthUser
 from ..providers import openai_llm
 from ..db import get_supabase_or_none
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/ai-edit", tags=["ai-edit"])
+
+MAX_INPUT_CHARS = 8000
 
 
 @router.post("", response_model=AiEditResponse)
 async def edit(payload: AiEditRequest, user: AuthUser = Depends(get_current_user)):
-    token_est = len(payload.text) // 4  # rough estimate: 4 chars per token
+    if len(payload.text) > MAX_INPUT_CHARS:
+        raise HTTPException(400, f"Text too long ({len(payload.text)} chars). Max {MAX_INPUT_CHARS}.")
+
+    # Count input + estimated output tokens (output ≈ input for transformations)
+    input_tokens = len(payload.text) // 4
+    token_est = input_tokens * 2  # input + output
     check_usage(user, "ai_edit_tokens", token_est)
 
-    text = await openai_llm.edit_text(payload.text, payload.mode)
+    try:
+        text = await openai_llm.edit_text(payload.text, payload.mode, payload.prompt)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error("AI edit failed: %s", exc)
+        raise HTTPException(500, "AI editing failed") from exc
 
     db = get_supabase_or_none()
     if db:
-        db.rpc("increment_usage", {"p_user_id": user.user_id, "p_ai_edit_tokens": token_est}).execute()
-        db.table("history").insert({
-            "user_id": user.user_id, "module": "ai_edit",
-            "input_text": payload.text, "output_text": text,
-            "metadata": {"mode": payload.mode},
-        }).execute()
+        try:
+            db.rpc("increment_usage", {"p_user_id": user.user_id, "p_ai_edit_tokens": token_est}).execute()
+            db.table("history").insert({
+                "user_id": user.user_id, "module": "ai_edit",
+                "input_text": payload.text[:500], "output_text": text[:500],
+                "metadata": {"mode": payload.mode, "tokens": token_est},
+            }).execute()
+        except Exception:
+            pass
 
     return AiEditResponse(text=text)

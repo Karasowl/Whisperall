@@ -21,6 +21,11 @@ declare global {
       setOverlayIgnoreMouse: (ignore: boolean) => void;
       onOverlayVisible: (cb: (visible: boolean) => void) => Unsubscribe;
       onOverlaySwitchModule: (cb: (module: string) => void) => Unsubscribe;
+      sendSubtitleText: (text: string) => void;
+      onSubtitleText: (cb: (text: string) => void) => Unsubscribe;
+
+      // Auth
+      onAuthCallback: (cb: (url: string) => void) => Unsubscribe;
 
       // Tray
       updateTraySettings: (settings: { minimizeToTray?: boolean; showNotifications?: boolean }) => void;
@@ -35,6 +40,9 @@ declare global {
       notify: (payload: { title?: string; body?: string }) => void;
       openExternal: (url: string) => Promise<void>;
       updateTitleBar: (colors: { color: string; symbolColor: string }) => void;
+
+      // Desktop Capturer
+      getDesktopSources: () => Promise<Array<{ id: string; name: string }>>;
     };
   }
 }

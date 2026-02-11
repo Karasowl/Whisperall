@@ -33,9 +33,16 @@ export type TranscribeRunParams = {
   max_chunks?: number;
 };
 
+export type TranscribeUrlParams = {
+  url: string;
+  language?: string;
+  enable_diarization?: boolean;
+};
+
 export type TTSParams = {
   text: string;
   voice?: string;
+  language?: string;
 };
 
 export type TranslateParams = {
@@ -46,6 +53,7 @@ export type TranslateParams = {
 export type AiEditParams = {
   text: string;
   mode?: string;
+  prompt?: string;
 };
 
 // ── Response Types ───────────────────────────────────────
@@ -60,6 +68,7 @@ export type LiveChunkResponse = {
   segment_id: string;
   text: string;
   translated_text?: string;
+  segments?: Array<{ speaker?: string; text: string; start?: number; end?: number }>;
 };
 
 export type TranscribeJobResponse = {
@@ -130,6 +139,60 @@ export type UsageRecord = {
   translate_chars: number;
   transcribe_seconds: number;
   ai_edit_tokens: number;
+  notes_count: number;
 };
 
 export type PlanLimits = Record<UserPlan, UsageRecord>;
+
+// ── History ──────────────────────────────────────────
+
+export type HistoryEntry = {
+  id: string;
+  module: string;
+  input_text: string | null;
+  output_text: string | null;
+  audio_url: string | null;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+};
+
+// ── Usage API ──────────────────────────────────────────
+
+export type UsageResponse = {
+  plan: UserPlan;
+  usage: UsageRecord;
+  limits: UsageRecord;
+  period_start: string;
+  period_end: string;
+  next_reset_at: string;
+  generated_at: string;
+};
+
+// ── Documents ──────────────────────────────────────────
+
+export type DocumentSource = 'dictation' | 'live' | 'transcription' | 'manual';
+
+export type Document = {
+  id: string;
+  user_id: string;
+  title: string;
+  content: string;
+  source: DocumentSource | null;
+  source_id: string | null;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateDocumentParams = {
+  title: string;
+  content: string;
+  source?: DocumentSource;
+  tags?: string[];
+};
+
+export type UpdateDocumentParams = {
+  title?: string;
+  content?: string;
+  tags?: string[];
+};

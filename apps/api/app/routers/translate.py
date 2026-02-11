@@ -16,11 +16,14 @@ async def translate(payload: TranslateRequest, user: AuthUser = Depends(get_curr
 
     db = get_supabase_or_none()
     if db:
-        db.rpc("increment_usage", {"p_user_id": user.user_id, "p_translate_chars": len(payload.text)}).execute()
-        db.table("history").insert({
-            "user_id": user.user_id, "module": "translate",
-            "input_text": payload.text, "output_text": text,
-            "metadata": {"target_language": payload.target_language},
-        }).execute()
+        try:
+            db.rpc("increment_usage", {"p_user_id": user.user_id, "p_translate_chars": len(payload.text)}).execute()
+            db.table("history").insert({
+                "user_id": user.user_id, "module": "translate",
+                "input_text": payload.text, "output_text": text,
+                "metadata": {"target_language": payload.target_language},
+            }).execute()
+        except Exception:
+            pass
 
     return TranslateResponse(text=text)

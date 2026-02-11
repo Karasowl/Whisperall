@@ -26,6 +26,7 @@ describe('IPC channel registration', () => {
       'overlay:toggle',
       'overlay:resize',
       'overlay:ignore-mouse',
+      'overlay:subtitle',
       'update-tray-settings',
       'clipboard:read',
       'clipboard:paste',

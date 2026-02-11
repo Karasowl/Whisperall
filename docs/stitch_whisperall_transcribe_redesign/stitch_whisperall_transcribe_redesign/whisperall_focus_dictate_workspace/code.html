@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Whisperall Focus Dictate Workspace</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#137fec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101922",
+                        "surface-dark": "#1c242c",
+                        "surface-light": "#ffffff",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "2xl": "1rem", "full": "9999px" },
+                },
+            },
+        }
+    </script>
+<style>
+        /* Custom scrollbar for a cleaner look */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3b4754;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4b5a69;
+        }
+        /* Subtle paper texture approximation */
+        .paper-texture {
+            background-image: radial-gradient(#3b4754 0.5px, transparent 0.5px);
+            background-size: 24px 24px;
+        }
+        .dark .paper-texture {
+            background-image: radial-gradient(#2a343e 0.5px, transparent 0.5px);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-50 font-display min-h-screen flex overflow-hidden">
+<!-- Side Navigation -->
+<aside class="w-64 flex flex-col justify-between border-r border-slate-200 dark:border-slate-800 bg-surface-light dark:bg-[#111418] shrink-0 z-20">
+<div class="flex flex-col gap-6 p-4">
+<!-- App Header -->
+<div class="flex items-center gap-3 px-2">
+<div class="bg-primary/20 flex items-center justify-center rounded-xl h-10 w-10 shrink-0">
+<span class="material-symbols-outlined text-primary text-2xl">graphic_eq</span>
+</div>
+<div class="flex flex-col">
+<h1 class="text-base font-bold leading-tight">Whisperall</h1>
+<p class="text-slate-500 dark:text-slate-400 text-xs font-medium">Pro Workspace</p>
+</div>
+</div>
+<!-- Navigation Links -->
+<nav class="flex flex-col gap-1">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-primary/10 text-primary dark:bg-[#283039] dark:text-white transition-colors group" href="#">
+<span class="material-symbols-outlined text-[24px] fill-1">mic</span>
+<span class="text-sm font-semibold">Dictate</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#1c2127] hover:text-slate-900 dark:hover:text-white transition-colors" href="#">
+<span class="material-symbols-outlined text-[24px]">description</span>
+<span class="text-sm font-medium">Transcribe</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#1c2127] hover:text-slate-900 dark:hover:text-white transition-colors" href="#">
+<span class="material-symbols-outlined text-[24px]">history</span>
+<span class="text-sm font-medium">History</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#1c2127] hover:text-slate-900 dark:hover:text-white transition-colors" href="#">
+<span class="material-symbols-outlined text-[24px]">folder_open</span>
+<span class="text-sm font-medium">Library</span>
+</a>
+</nav>
+</div>
+<!-- Bottom Actions -->
+<div class="flex flex-col gap-1 p-4 border-t border-slate-200 dark:border-slate-800">
+<!-- Storage Usage -->
+<div class="px-3 py-2 mb-2">
+<div class="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
+<span>Usage</span>
+<span>75%</span>
+</div>
+<div class="h-1.5 w-full bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+<div class="h-full bg-primary w-3/4 rounded-full"></div>
+</div>
+</div>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-[#1c2127] transition-colors" href="#">
+<span class="material-symbols-outlined text-[24px]">settings</span>
+<span class="text-sm font-medium">Settings</span>
+</a>
+<div class="flex items-center gap-3 px-3 py-3 mt-2 border-t border-slate-200 dark:border-slate-800 pt-4">
+<div class="h-8 w-8 rounded-full bg-slate-300 dark:bg-slate-700 bg-cover bg-center" data-alt="User Avatar" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuB5zXXxLq3C6IhmJ2v8dsSUcDHVzA3OUHvHbaPhdKjuYhiGZHQ_2ckDU_xDdhm0LSY52WkVGw1Miyj-XVsjxnPBeGnG0IHrEaCaiCD5VYUUWIHT0qTcqsvm6L_J2U0ksxT0IjTmhz-041Kmzy-BImKL4r2LrYlFkWJyTzXU37LgCSwQ--E06aa5jaNTMVWC4SqhjeEsCBVzo3_dEzYKHRX7X-qz7LamYB6HkDuu1eB99h9DpRSj9aNNf9yZi4uAqd3GWbRVIaWTal0');"></div>
+<div class="flex flex-col">
+<span class="text-sm font-medium text-slate-900 dark:text-white">Alex Morgan</span>
+<span class="text-xs text-slate-500 dark:text-slate-400">Pro Plan</span>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 relative flex flex-col h-full overflow-hidden paper-texture bg-slate-50 dark:bg-[#161b22]">
+<!-- Top Bar: Status & Actions -->
+<header class="h-16 shrink-0 flex items-center justify-between px-8 border-b border-transparent dark:border-slate-800/50">
+<div class="flex items-center gap-2">
+<span class="flex h-2.5 w-2.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse"></span>
+<span class="text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wide uppercase">Focus Mode Active</span>
+</div>
+<div class="flex items-center gap-4">
+<button class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+<span class="material-symbols-outlined">download</span>
+</button>
+<button class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+<span class="material-symbols-outlined">share</span>
+</button>
+<div class="h-4 w-px bg-slate-300 dark:bg-slate-700 mx-2"></div>
+<button class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</header>
+<!-- Centered Workspace -->
+<div class="flex-1 overflow-y-auto px-8 pb-32 pt-8 flex justify-center">
+<div class="w-full max-w-3xl flex flex-col gap-6">
+<!-- Title Input -->
+<input class="bg-transparent border-none text-4xl font-black text-slate-900 dark:text-white focus:ring-0 px-0 placeholder-slate-300 dark:placeholder-slate-600" placeholder="Untitled Session" type="text" value="Q3 Strategic Planning Meeting"/>
+<!-- Metadata Row -->
+<div class="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400 pb-4 border-b border-slate-200 dark:border-slate-800">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px]">calendar_today</span>
+<span>Oct 24, 2023</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px]">schedule</span>
+<span>10:30 AM</span>
+</div>
+<div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-primary text-xs font-medium">
+<span>English (US)</span>
+</div>
+</div>
+<!-- Text Editor Area -->
+<div class="relative min-h-[500px] text-lg leading-relaxed text-slate-700 dark:text-slate-300 font-normal">
+<p class="mb-4">Okay, let's get started. The primary objective for this quarter is to streamline our operational overhead by approximately 15%. We've noticed some redundancies in the supply chain logistics.</p>
+<p class="mb-4">Ideally, if we implement the new AI-driven sorting mechanism by next month, we should see a preliminary uptick in efficiency. <span class="bg-primary/20 text-slate-900 dark:text-white px-1 rounded mx-0.5">Does everyone agree with this timeline?</span></p>
+<p class="mb-4 text-slate-400 dark:text-slate-500 italic">
+                        [Pause for discussion]
+                    </p>
+<p class="mb-4">Great. Moving on to the budget allocation. Sarah, can you pull up the figures from last year's Q3 review? I want to compare our marketing spend specifically.</p>
+<!-- Real-time transcription appearing -->
+<p class="text-slate-900 dark:text-slate-100 animate-pulse">
+                        Furthermore, we need to address the...
+                        <span class="inline-block w-0.5 h-5 ml-1 align-middle bg-primary animate-blink"></span>
+</p>
+</div>
+</div>
+</div>
+<!-- Floating Command Bar -->
+<div class="absolute bottom-8 left-0 right-0 flex justify-center px-4 pointer-events-none">
+<div class="pointer-events-auto flex items-center gap-2 p-2 rounded-2xl bg-surface-light/90 dark:bg-[#1c2127]/90 backdrop-blur-md shadow-2xl border border-slate-200/50 dark:border-slate-700/50 max-w-2xl w-full">
+<!-- Model Settings -->
+<div class="flex items-center gap-2 px-2 border-r border-slate-200 dark:border-slate-700 pr-4">
+<button class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300">
+<span class="material-symbols-outlined text-[20px]">tune</span>
+<span class="text-sm font-medium hidden sm:inline">High Accuracy</span>
+</button>
+<button class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300">
+<span class="material-symbols-outlined text-[20px]">language</span>
+<span class="text-sm font-medium hidden sm:inline">EN-US</span>
+</button>
+</div>
+<!-- Central Record Button -->
+<div class="flex-1 flex justify-center">
+<button class="group relative flex items-center justify-center h-14 w-14 rounded-full bg-red-500 hover:bg-red-600 text-white shadow-lg transition-all hover:scale-105 active:scale-95">
+<span class="absolute inset-0 rounded-full bg-red-500 opacity-20 animate-ping group-hover:opacity-30"></span>
+<span class="material-symbols-outlined text-[28px] fill-1">mic</span>
+</button>
+</div>
+<!-- Right Actions -->
+<div class="flex items-center gap-2 px-2 border-l border-slate-200 dark:border-slate-700 pl-4 justify-end">
+<button class="p-2.5 rounded-lg text-slate-500 hover:text-primary hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors" title="AI Summary">
+<span class="material-symbols-outlined text-[20px]">auto_awesome</span>
+</button>
+<button class="p-2.5 rounded-lg text-slate-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors" title="Clear">
+<span class="material-symbols-outlined text-[20px]">delete</span>
+</button>
+<button class="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors font-medium text-sm px-4">
+                        Stop
+                    </button>
+</div>
+</div>
+</div>
+<!-- Floating Info Toast (Optional enhancement for "Focus Mode") -->
+<div class="absolute top-8 right-8 bg-surface-light dark:bg-[#1c2127] border border-slate-200 dark:border-slate-700 shadow-lg rounded-lg p-4 max-w-xs animate-fade-in-down opacity-90 hidden xl:block">
+<div class="flex gap-3">
+<div class="bg-blue-100 dark:bg-blue-900/30 text-primary p-2 rounded-md h-fit">
+<span class="material-symbols-outlined text-[20px]">tips_and_updates</span>
+</div>
+<div>
+<h4 class="text-sm font-semibold text-slate-900 dark:text-white mb-1">Live Suggestion</h4>
+<p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        You mentioned "budget allocation". Would you like to tag this section as <span class="text-primary cursor-pointer hover:underline">#Finance</span>?
+                    </p>
+</div>
+<button class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 h-fit">
+<span class="material-symbols-outlined text-[16px]">close</span>
+</button>
+</div>
+</div>
+</main>
+<style>
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .animate-blink {
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes fade-in-down {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 0.9;
+                transform: translateY(0);
+            }
+        }
+        .animate-fade-in-down {
+            animation: fade-in-down 0.5s ease-out forwards;
+        }
+    </style>
+</body></html>

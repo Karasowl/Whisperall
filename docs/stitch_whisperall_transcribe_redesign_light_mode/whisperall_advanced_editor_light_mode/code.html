@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Whisperall Advanced Editor</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#13a4ec",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101c22",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .waveform-bar {
+            transition: height 0.2s ease;
+        }
+        .transcript-line:hover .timestamp-btn {
+            opacity: 1;
+        }
+        .active-word {
+            background-color: rgba(19, 164, 236, 0.15);
+            border-bottom: 2px solid #13a4ec;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 antialiased overflow-hidden h-screen flex flex-col">
+<!-- Top Navigation Bar -->
+<header class="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3 z-30">
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-3">
+<div class="bg-primary p-1.5 rounded-lg text-white flex items-center justify-center">
+<span class="material-symbols-outlined !text-[24px]">graphic_eq</span>
+</div>
+<h1 class="text-slate-900 text-lg font-bold tracking-tight">Whisperall</h1>
+</div>
+<nav class="flex items-center gap-6">
+<a class="text-slate-500 hover:text-primary text-sm font-medium transition-colors" href="#">Projects</a>
+<a class="text-slate-500 hover:text-primary text-sm font-medium transition-colors" href="#">Settings</a>
+<a class="text-slate-500 hover:text-primary text-sm font-medium transition-colors" href="#">Help</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center bg-slate-100 rounded-lg px-3 py-1.5 border border-slate-200">
+<span class="material-symbols-outlined text-slate-400 text-[20px]">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-sm w-48 placeholder:text-slate-400" placeholder="Search transcript..." type="text"/>
+</div>
+<div class="h-6 w-[1px] bg-slate-200 mx-2"></div>
+<button class="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-all">
+<span class="material-symbols-outlined text-[18px]">ios_share</span>
+<span>Export</span>
+</button>
+<div class="bg-slate-200 rounded-full h-9 w-9 overflow-hidden">
+<img class="h-full w-full object-cover" data-alt="User profile avatar placeholder" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDrIBtR_G8iamMEdO_kwQZ7y3oLi5IeZ5htlQCQmCNgCgd3yaC7WgTJp6NBzUYfjNEYIHxnwzPYJ3W4pjFHrHYOiQKuN1K281roxUmvbBBxHjUTyigDUUpsRsfXPc6uGQ2PVlMJeK0bE_SFLR9hhy9Ac1AY88mLyNGHEDvo457J8yjQ2TdATdGj-k3JHVzZhnUdSYdwWZS-YZOyQvHUdyiU6n3xB_TMLO98ZzFt394zXphYEMlywluqVY4kgkfXhxo4Ri4IjuqCG20"/>
+</div>
+</div>
+</header>
+<!-- Project Breadcrumb/Title Area -->
+<div class="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between shadow-sm z-20">
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-2 text-xs font-medium text-slate-400 uppercase tracking-wider">
+<span>My Projects</span>
+<span class="material-symbols-outlined !text-[14px]">chevron_right</span>
+<span>Interviews 2024</span>
+</div>
+<h2 class="text-xl font-bold text-slate-900 flex items-center gap-3">
+                Interview_01_Product_Strategy_Recording.mp3
+                <span class="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-tight">Completed</span>
+</h2>
+</div>
+<div class="flex items-center gap-3">
+<button class="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors" title="Bookmark">
+<span class="material-symbols-outlined">bookmark</span>
+</button>
+<button class="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors" title="Share link">
+<span class="material-symbols-outlined">share</span>
+</button>
+<button class="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-medium transition-colors">
+<span class="material-symbols-outlined text-[18px]">group_add</span>
+                Invite
+            </button>
+</div>
+</div>
+<!-- Main Content Layout -->
+<main class="flex-1 flex overflow-hidden relative">
+<!-- Left Sidebar: Tools & Navigation -->
+<aside class="w-16 border-r border-slate-200 bg-white flex flex-col items-center py-6 gap-6 z-10">
+<button class="p-2 bg-primary/10 text-primary rounded-xl" title="Transcription">
+<span class="material-symbols-outlined">description</span>
+</button>
+<button class="p-2 text-slate-400 hover:bg-slate-100 rounded-xl" title="Analytics">
+<span class="material-symbols-outlined">analytics</span>
+</button>
+<button class="p-2 text-slate-400 hover:bg-slate-100 rounded-xl" title="Speakers">
+<span class="material-symbols-outlined">groups</span>
+</button>
+<button class="p-2 text-slate-400 hover:bg-slate-100 rounded-xl" title="Comments">
+<span class="material-symbols-outlined">chat_bubble</span>
+</button>
+<div class="mt-auto flex flex-col items-center gap-6">
+<button class="p-2 text-slate-400 hover:bg-slate-100 rounded-xl">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+</aside>
+<!-- Central Transcript Editor -->
+<section class="flex-1 bg-white overflow-y-auto relative scroll-smooth px-12 py-10">
+<!-- Formatting Floating Toolbar -->
+<div class="absolute top-8 left-1/2 -translate-x-1/2 bg-white border border-slate-200 shadow-xl rounded-xl px-2 py-2 flex items-center gap-1 z-40">
+<button class="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><span class="material-symbols-outlined">format_bold</span></button>
+<button class="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><span class="material-symbols-outlined">format_italic</span></button>
+<div class="w-[1px] h-6 bg-slate-200 mx-1"></div>
+<button class="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><span class="material-symbols-outlined">format_list_bulleted</span></button>
+<button class="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><span class="material-symbols-outlined">format_quote</span></button>
+<div class="w-[1px] h-6 bg-slate-200 mx-1"></div>
+<button class="px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-xs font-bold flex items-center gap-1">
+<span class="material-symbols-outlined !text-[16px]">auto_fix_high</span> AI Rewrite
+                </button>
+</div>
+<div class="max-w-3xl mx-auto flex flex-col gap-12 mt-16 pb-40">
+<!-- Speaker Segment 1 -->
+<div class="transcript-line group flex gap-6">
+<div class="w-32 flex-shrink-0">
+<div class="bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-lg">
+<span class="text-indigo-700 text-xs font-bold block truncate">Dr. Sarah Chen</span>
+<span class="text-indigo-400 text-[10px] font-mono">00:00:12</span>
+</div>
+</div>
+<div class="flex-1">
+<p class="text-slate-800 leading-relaxed text-lg font-normal">
+                            Good morning everyone. Today we're going to dive deep into the <span class="active-word">architectural</span> considerations for the new Whisperall engine. The primary goal is reducing latency while maintaining the extremely high accuracy that our users expect from the Whisper model benchmarks.
+                        </p>
+</div>
+</div>
+<!-- Speaker Segment 2 -->
+<div class="transcript-line group flex gap-6">
+<div class="w-32 flex-shrink-0">
+<div class="bg-amber-50 border border-amber-100 px-3 py-1.5 rounded-lg">
+<span class="text-amber-700 text-xs font-bold block truncate">Marcus Miller</span>
+<span class="text-amber-400 text-[10px] font-mono">00:00:45</span>
+</div>
+</div>
+<div class="flex-1 relative">
+<!-- Comment Bubble -->
+<div class="absolute -right-48 top-0 w-40 bg-white border border-slate-200 shadow-md rounded-xl p-3 text-xs text-slate-600">
+<div class="flex items-center gap-2 mb-2">
+<span class="material-symbols-outlined !text-[14px] text-primary">auto_awesome</span>
+<span class="font-bold">AI Insight</span>
+</div>
+                            Technical term "FP16 quantization" detected.
+                        </div>
+<p class="text-slate-800 leading-relaxed text-lg font-normal">
+                            Sarah, if we move towards full FP16 quantization across the pipeline, what kind of performance impact are we looking at on mobile chipsets? We need to ensure the real-time feedback loop remains under 200 milliseconds for the best user experience.
+                        </p>
+</div>
+</div>
+<!-- Speaker Segment 3 -->
+<div class="transcript-line group flex gap-6">
+<div class="w-32 flex-shrink-0">
+<div class="bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-lg">
+<span class="text-indigo-700 text-xs font-bold block truncate">Dr. Sarah Chen</span>
+<span class="text-indigo-400 text-[10px] font-mono">00:01:22</span>
+</div>
+</div>
+<div class="flex-1">
+<p class="text-slate-800 leading-relaxed text-lg font-normal">
+                            That's a valid concern. We've been running some tests on the latest A-series chips. Initial results show that by leveraging the Neural Engine specifically for the transformer heads, we can actually see a 40% speedup without a significant drop in word error rate. 
+                        </p>
+</div>
+</div>
+<!-- Speaker Segment 4 -->
+<div class="transcript-line group flex gap-6 opacity-60">
+<div class="w-32 flex-shrink-0">
+<div class="bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg">
+<span class="text-slate-600 text-xs font-bold block truncate">Speaker 3</span>
+<span class="text-slate-400 text-[10px] font-mono">00:02:05</span>
+</div>
+</div>
+<div class="flex-1">
+<p class="text-slate-800 leading-relaxed text-lg font-normal">
+                            Could we also discuss the multi-language support? The marketing team is asking about the simultaneous translation feature for the European release next quarter.
+                        </p>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Sidebar: AI Metadata & Insights -->
+<aside class="w-80 border-l border-slate-200 bg-background-light overflow-y-auto p-5 flex flex-col gap-6">
+<!-- Summary Card -->
+<div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+<div class="flex items-center justify-between mb-3">
+<h3 class="text-sm font-bold text-slate-900">AI Summary</h3>
+<span class="material-symbols-outlined text-primary !text-[18px]">summarize</span>
+</div>
+<p class="text-xs text-slate-500 leading-relaxed">
+                    Discussion centers on technical optimization of the Whisperall engine. Key topics include FP16 quantization, mobile chipset performance (200ms target), and potential 40% speedup using specialized Neural Engines.
+                </p>
+</div>
+<!-- Sentiment & Confidence -->
+<div class="grid grid-cols-2 gap-3">
+<div class="bg-white rounded-xl p-3 shadow-sm border border-slate-200">
+<span class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Confidence</span>
+<div class="flex items-end gap-1">
+<span class="text-xl font-bold text-slate-900">98.4</span>
+<span class="text-xs text-emerald-500 font-bold mb-1">%</span>
+</div>
+</div>
+<div class="bg-white rounded-xl p-3 shadow-sm border border-slate-200">
+<span class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Sentiment</span>
+<div class="flex items-center gap-1">
+<span class="material-symbols-outlined text-emerald-500 !text-[18px]">sentiment_satisfied</span>
+<span class="text-sm font-bold text-slate-900">Positive</span>
+</div>
+</div>
+</div>
+<!-- Keywords -->
+<div class="flex flex-col gap-2">
+<h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">Keywords</h3>
+<div class="flex flex-wrap gap-2">
+<span class="bg-white border border-slate-200 px-3 py-1 rounded-full text-xs font-medium text-slate-600">Quantization</span>
+<span class="bg-white border border-slate-200 px-3 py-1 rounded-full text-xs font-medium text-slate-600">Latency</span>
+<span class="bg-white border border-slate-200 px-3 py-1 rounded-full text-xs font-medium text-slate-600">Neural Engine</span>
+<span class="bg-white border border-slate-200 px-3 py-1 rounded-full text-xs font-medium text-slate-600">Transformer</span>
+<span class="bg-white border border-slate-200 px-3 py-1 rounded-full text-xs font-medium text-slate-600">A-series chips</span>
+</div>
+</div>
+<!-- Speakers Section -->
+<div class="flex flex-col gap-3">
+<h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">Identified Speakers</h3>
+<div class="space-y-2">
+<div class="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-200">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs font-bold">SC</div>
+<div>
+<p class="text-xs font-bold text-slate-900 leading-none">Dr. Sarah Chen</p>
+<p class="text-[10px] text-slate-400">Lead Researcher</p>
+</div>
+</div>
+<span class="text-[10px] font-bold text-slate-400">4:12m</span>
+</div>
+<div class="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-200">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center text-white text-xs font-bold">MM</div>
+<div>
+<p class="text-xs font-bold text-slate-900 leading-none">Marcus Miller</p>
+<p class="text-[10px] text-slate-400">Product Lead</p>
+</div>
+</div>
+<span class="text-[10px] font-bold text-slate-400">1:45m</span>
+</div>
+</div>
+</div>
+<!-- Action Button -->
+<button class="mt-auto w-full py-3 bg-white border border-primary text-primary hover:bg-primary hover:text-white rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined !text-[20px]">smart_toy</span>
+                Generate AI Notes
+            </button>
+</aside>
+</main>
+<!-- Bottom Media Player Bar -->
+<footer class="h-24 bg-slate-50 border-t border-slate-200 px-8 flex items-center gap-8 shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] z-40">
+<!-- Controls -->
+<div class="flex items-center gap-4 min-w-[140px]">
+<button class="text-slate-400 hover:text-slate-900 transition-colors">
+<span class="material-symbols-outlined !text-[28px]">replay_10</span>
+</button>
+<button class="bg-primary text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg shadow-primary/30 hover:scale-105 transition-transform">
+<span class="material-symbols-outlined !text-[32px] ml-1">play_arrow</span>
+</button>
+<button class="text-slate-400 hover:text-slate-900 transition-colors">
+<span class="material-symbols-outlined !text-[28px]">forward_30</span>
+</button>
+</div>
+<!-- Waveform Visualizer -->
+<div class="flex-1 flex flex-col gap-2">
+<div class="flex items-end justify-between gap-[2px] h-12 w-full px-2">
+<!-- Static Waveform Mockup -->
+<div class="waveform-bar w-full bg-slate-200 h-2 rounded-full relative">
+<div class="absolute left-0 top-0 h-full w-[35%] bg-primary rounded-full"></div>
+<div class="absolute left-[35%] top-1/2 -translate-y-1/2 w-4 h-4 bg-white border-2 border-primary rounded-full shadow-md cursor-pointer"></div>
+</div>
+</div>
+<div class="flex items-center justify-between px-1">
+<span class="text-[11px] font-mono font-bold text-slate-400">01:32</span>
+<span class="text-[11px] font-mono font-bold text-slate-400">12:45</span>
+</div>
+</div>
+<!-- Right Side Settings -->
+<div class="flex items-center gap-6 min-w-[200px] justify-end">
+<div class="flex items-center gap-2 text-slate-500">
+<span class="material-symbols-outlined !text-[20px]">volume_up</span>
+<div class="w-16 h-1 bg-slate-200 rounded-full">
+<div class="w-3/4 h-full bg-slate-400 rounded-full"></div>
+</div>
+</div>
+<button class="flex items-center gap-1 px-3 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors">
+                1.0x <span class="material-symbols-outlined !text-[16px]">expand_more</span>
+</button>
+<button class="text-slate-400 hover:text-slate-900 transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</footer>
+</body></html>

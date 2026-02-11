@@ -67,7 +67,7 @@ class TestLiveUsage:
 
     def test_rejects_when_translate_limit_exceeded(self, client):
         _override_user(_make_user_at_limit("translate_chars"))
-        with patch("app.routers.live.deepgram.transcribe_chunk", new_callable=AsyncMock, return_value="text"), \
+        with patch("app.routers.live.openai_stt.diarize", new_callable=AsyncMock, return_value=[{"speaker": "A", "text": "text"}]), \
              patch("app.routers.live.get_supabase_or_none", return_value=None):
             res = client.post(
                 "/v1/live/chunk",

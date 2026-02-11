@@ -5,30 +5,31 @@ test.describe('Dictate Page', () => {
     await page.goto('/');
   });
 
-  test('shows record button and language selector', async ({ page }) => {
-    await expect(page.locator('.btn-record')).toBeVisible();
-    await expect(page.locator('.btn-record')).toHaveText(/Record/);
-    await expect(page.locator('select')).toHaveValue('en');
+  test('shows new note and voice note buttons in list mode', async ({ page }) => {
+    await expect(page.getByTestId('new-note-btn')).toBeVisible();
+    await expect(page.getByTestId('voice-note-btn')).toBeVisible();
   });
 
-  test('language selector has expected options', async ({ page }) => {
-    const options = page.locator('select option');
+  test('shows language selector with default EN-US', async ({ page }) => {
+    const select = page.getByTestId('language-select');
+    await expect(select).toBeVisible();
+    await expect(select).toHaveValue('en');
+  });
+
+  test('language selector has 7 options', async ({ page }) => {
+    const options = page.getByTestId('language-select').locator('option');
     await expect(options).toHaveCount(7);
-    await expect(options.first()).toHaveText('English');
   });
 
-  test('clear button is visible', async ({ page }) => {
-    await expect(page.locator('.btn-ghost', { hasText: 'Clear' })).toBeVisible();
+  test('new note opens editor with voice toolbar', async ({ page }) => {
+    await page.getByTestId('new-note-btn').click();
+    await expect(page.getByTestId('voice-toolbar')).toBeVisible();
+    await expect(page.getByTestId('record-btn')).toBeVisible();
   });
 
-  test('output textarea has placeholder', async ({ page }) => {
-    const textarea = page.locator('.text-output');
-    await expect(textarea).toBeVisible();
-    await expect(textarea).toHaveAttribute('placeholder', 'Dictated text will appear here...');
-  });
-
-  test('paste and copy buttons are disabled when no text', async ({ page }) => {
-    await expect(page.locator('.btn-primary', { hasText: 'Paste' })).toBeDisabled();
-    await expect(page.locator('.btn-ghost', { hasText: 'Copy' })).toBeDisabled();
+  test('editor has copy and save buttons', async ({ page }) => {
+    await page.getByTestId('new-note-btn').click();
+    await expect(page.getByTestId('copy-btn')).toBeVisible();
+    await expect(page.getByTestId('save-btn')).toBeVisible();
   });
 });

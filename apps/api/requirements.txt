@@ -10,3 +10,5 @@ pytest==8.3.3
 pytest-asyncio==0.24.0
 pytest-cov==6.0.0
 respx==0.22.0
+websockets>=13.0
+edge-tts>=6.1.0

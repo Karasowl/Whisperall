@@ -1,6 +1,6 @@
 import { globalShortcut } from 'electron';
 import { getMainWindow, showMainWindow } from './windows.js';
-import { showOverlay, getOverlayWindow } from './overlay.js';
+import { showOverlay, getOverlayWindow, toggleOverlay } from './overlay.js';
 import { pasteText } from './clipboard.js';
 
 export interface HotkeyConfig {
@@ -11,6 +11,7 @@ export interface HotkeyConfig {
   stop?: string;
   ai_edit?: string;
   translate?: string;
+  overlay_toggle?: string;
 }
 
 interface SttSettings {
@@ -22,6 +23,8 @@ let currentHotkeys: HotkeyConfig = {
   dictate: 'Alt+X',
   read_clipboard: 'Ctrl+Shift+R',
   stt_paste: 'Alt+Shift+S',
+  translate: 'Alt+T',
+  overlay_toggle: 'Alt+W',
 };
 
 let sttSettings: SttSettings = {
@@ -38,6 +41,7 @@ const ACTION_MAP: Record<string, string> = {
   stt_paste: 'stt-paste',
   ai_edit: 'ai-edit',
   translate: 'translate',
+  overlay_toggle: 'overlay-toggle',
   pause: 'pause',
   stop: 'stop',
 };
@@ -58,7 +62,8 @@ function sendToOverlay(action: string): void {
   if (!win) return;
   const send = () => win.webContents.send('hotkey', action);
   if (win.webContents.isLoading()) {
-    win.webContents.once('did-finish-load', send);
+    // Delay after load so React effects have time to register IPC listeners
+    win.webContents.once('did-finish-load', () => setTimeout(send, 150));
   } else {
     send();
   }
@@ -70,7 +75,8 @@ export function registerHotkeys(): void {
   for (const [key, accelerator] of Object.entries(currentHotkeys)) {
     if (!accelerator) continue;
     try {
-      globalShortcut.register(accelerator, () => {
+      const ok = globalShortcut.register(accelerator, () => {
+        console.log(`[Hotkey] ${accelerator} pressed -> ${ACTION_MAP[key] ?? key}`);
         let action = ACTION_MAP[key] ?? key;
 
         // Dictation mode handling
@@ -101,9 +107,25 @@ export function registerHotkeys(): void {
           return;
         }
 
+        if (action === 'overlay-toggle') {
+          toggleOverlay();
+          return;
+        }
+
+        if (action === 'translate') {
+          showOverlay('translator');
+          sendToOverlay('translate');
+          return;
+        }
+
         sendToMain(action, !BACKGROUND_ACTIONS.has(action));
         sendToOverlay(action);
       });
+      if (ok) {
+        console.log(`[Hotkey] Registered ${accelerator} -> ${key}`);
+      } else {
+        console.warn(`[Hotkey] FAILED to register ${accelerator} — already in use by another app`);
+      }
     } catch (err) {
       console.error(`[Hotkey] Failed to register ${accelerator}:`, (err as Error).message);
     }

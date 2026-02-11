@@ -1,7 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob:; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://*.supabase.co wss://*.supabase.co https://api.deepgram.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+    />
     <title>Whisperall Widget</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -14,9 +18,18 @@
         background: transparent !important;
         overflow: hidden;
         font-family: 'Inter', system-ui, sans-serif;
-        color: rgba(255, 255, 255, 0.92);
       }
     </style>
+    <script>
+      try {
+        var s = JSON.parse(localStorage.getItem('whisperall-settings') || '{}');
+        var t = s.theme || 'dark';
+        var r = t === 'system'
+          ? (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light')
+          : t;
+        document.documentElement.className = r;
+      } catch(e) { document.documentElement.classList.add('dark'); }
+    </script>
   </head>
   <body>
     <div id="root"></div>

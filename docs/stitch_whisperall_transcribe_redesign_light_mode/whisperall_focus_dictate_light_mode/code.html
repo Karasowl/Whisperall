@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Whisperall Focus Dictate</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#135bec",
+                        "background-light": "#f6f6f8",
+                        "background-dark": "#101622",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "2xl": "1rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(19, 91, 236, 0.1);
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .sidebar-item-active {
+            background-color: rgba(19, 91, 236, 0.08);
+            color: #135bec;
+        }
+        .ghost-text {
+            color: #9CA3AF;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-[#1F2937]">
+<div class="flex h-screen overflow-hidden">
+<!-- Sidebar -->
+<aside class="w-64 flex-shrink-0 bg-[#F9FAFB] border-r border-[#E5E7EB] flex flex-col">
+<div class="p-6 flex items-center gap-3">
+<div class="size-8 bg-primary rounded-lg flex items-center justify-center text-white">
+<span class="material-symbols-outlined !text-xl">graphic_eq</span>
+</div>
+<h1 class="text-lg font-bold tracking-tight text-[#111318]">Whisperall</h1>
+</div>
+<nav class="flex-1 px-4 space-y-1 overflow-y-auto">
+<div class="text-[11px] font-bold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-4">Workspace</div>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg sidebar-item-active transition-colors" href="#">
+<span class="material-symbols-outlined !text-xl">description</span>
+<span class="text-sm font-medium">All Documents</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors" href="#">
+<span class="material-symbols-outlined !text-xl">folder</span>
+<span class="text-sm font-medium">Client Meetings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors" href="#">
+<span class="material-symbols-outlined !text-xl">mic</span>
+<span class="text-sm font-medium">Drafts</span>
+</a>
+<div class="text-[11px] font-bold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-8">Recent</div>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors truncate" href="#">
+<span class="material-symbols-outlined !text-base">article</span>
+<span class="text-sm">Q4 Strategy Session</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors truncate" href="#">
+<span class="material-symbols-outlined !text-base">article</span>
+<span class="text-sm">Product Roadmap 2025</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors truncate" href="#">
+<span class="material-symbols-outlined !text-base">article</span>
+<span class="text-sm">Design Workshop</span>
+</a>
+</nav>
+<div class="p-4 border-t border-[#E5E7EB]">
+<div class="bg-primary/5 rounded-xl p-4 mb-4">
+<p class="text-xs font-semibold text-primary mb-1">PRO PLAN</p>
+<p class="text-[11px] text-gray-500 mb-3">24.2 / 50 hours used</p>
+<div class="w-full bg-primary/10 rounded-full h-1.5">
+<div class="bg-primary h-1.5 rounded-full w-1/2"></div>
+</div>
+</div>
+<button class="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors">
+<span class="material-symbols-outlined !text-xl">settings</span>
+<span class="text-sm font-medium">Settings</span>
+</button>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col bg-white overflow-hidden relative">
+<!-- Header Nav -->
+<header class="h-16 flex items-center justify-between px-8 border-b border-[#E5E7EB] bg-white/80 backdrop-blur-sm z-10">
+<div class="flex items-center gap-4">
+<nav class="flex items-center gap-2 text-sm text-gray-400">
+<span>Workspace</span>
+<span class="material-symbols-outlined !text-sm">chevron_right</span>
+<span class="text-[#1F2937] font-medium">Client Meeting Notes - Q4 Strategy</span>
+</nav>
+</div>
+<div class="flex items-center gap-3">
+<div class="flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 text-green-600 text-[11px] font-bold">
+<span class="size-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                        LIVE SYNC
+                    </div>
+<div class="h-6 w-px bg-gray-200 mx-2"></div>
+<button class="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">
+<span class="material-symbols-outlined">ios_share</span>
+</button>
+<button class="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-sm">
+<span>Export</span>
+<span class="material-symbols-outlined !text-base">expand_more</span>
+</button>
+<div class="size-8 rounded-full bg-gray-200 bg-cover bg-center border border-white" data-alt="User profile avatar photo" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBjKqZHGSoUhQSQGrGItQh2oYqUFKhDYQ6f99qRYVZ7jVkKjGSRzIvrtat-Kz0J5X3lpjtI0sXjkuYPeJ1ef-K7i41Rzv9mZ4kyOZcv9K5l5JudQ67M8pqnqvTUaJ59Mqe7jbuu6hGlwmqWWo1kjEmv18E_k3qkNEXGbM1ssgnw13Pln9XBQ6a-1FPBOI0smZmKa2R3xflyQHWgxvOzss_JFhzYn4d1RBeZu7uQ4m0PavXdlvuWfDt7qthMHrjcO8hTe60r_yzrAo4')"></div>
+</div>
+</header>
+<!-- Editor Canvas -->
+<div class="flex-1 overflow-y-auto pt-12 pb-32 px-4 scroll-smooth">
+<div class="max-w-[800px] mx-auto">
+<input class="w-full text-4xl font-bold border-none focus:ring-0 placeholder:text-gray-200 text-[#1F2937] mb-8" placeholder="Untitled Document" type="text" value="Client Meeting Notes - Q4 Strategy"/>
+<div class="space-y-6 text-lg leading-relaxed text-[#1F2937]/90">
+<p>The team discussed the expansion into the EMEA market. We need to finalize the budget by next Friday. The focus should be on high-growth regions like Germany and the UAE. Potential risks include regulatory changes in the fintech sector and fluctuating currency values.</p>
+<div class="flex gap-4">
+<span class="font-bold text-primary min-w-[80px]">Sarah:</span>
+<p>We need to ensure the local compliance teams are fully briefed on the new directives coming from the central authority. Let's aim for a preliminary report by Wednesday morning.</p>
+</div>
+<div class="flex gap-4">
+<span class="font-bold text-primary min-w-[80px]">James:</span>
+<p>Agreed. I'll take lead on the German market analysis. We've already seen some strong signals from the Berlin tech hub, and our partners there are ready to scale.</p>
+</div>
+<div class="flex gap-4">
+<span class="font-bold text-primary min-w-[80px]">AI:</span>
+<p class="ghost-text italic">Sarah suggests prioritizing compliance briefings for Wednesday. James will lead the German market analysis, citing strong signals from Berlin partners... |</p>
+</div>
+<div class="pt-8 border-t border-gray-100 mt-12">
+<h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4">Key Takeaways</h3>
+<ul class="space-y-3">
+<li class="flex items-start gap-3">
+<span class="material-symbols-outlined text-primary !text-xl">check_circle</span>
+<span>Finalize EMEA expansion budget by next Friday.</span>
+</li>
+<li class="flex items-start gap-3">
+<span class="material-symbols-outlined text-primary !text-xl">check_circle</span>
+<span>Schedule compliance briefing for Wednesday morning.</span>
+</li>
+<li class="flex items-start gap-3 text-gray-400">
+<span class="material-symbols-outlined !text-xl">pending</span>
+<span>Identify local partners in UAE (Assigned to James).</span>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+<!-- Floating Command Bar -->
+<div class="absolute bottom-8 left-1/2 -translate-x-1/2 w-full max-w-[700px] px-4">
+<div class="glass-panel rounded-2xl shadow-2xl p-3 flex items-center gap-4">
+<div class="flex-1 flex items-center gap-3 bg-gray-50/50 rounded-xl px-4 py-2.5 border border-gray-100">
+<span class="material-symbols-outlined text-gray-400 !text-xl">auto_fix_high</span>
+<input class="bg-transparent border-none focus:ring-0 w-full text-sm text-[#1F2937]" placeholder="Ask AI to summarize, fix grammar, or change tone..." type="text"/>
+</div>
+<div class="h-10 w-px bg-gray-200"></div>
+<div class="flex items-center gap-4 pr-2">
+<div class="flex flex-col items-end">
+<span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Recording</span>
+<span class="text-sm font-mono font-medium text-primary">04:12</span>
+</div>
+<!-- Pulse Mic Button -->
+<button class="relative group">
+<div class="absolute inset-0 bg-primary/20 rounded-full animate-ping scale-150 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="size-12 bg-primary text-white rounded-full flex items-center justify-center shadow-lg shadow-primary/30 relative z-10 transition-transform active:scale-95">
+<span class="material-symbols-outlined !text-2xl">mic</span>
+</div>
+</button>
+<div class="flex items-center gap-1">
+<button class="p-2 text-gray-400 hover:text-primary transition-colors">
+<span class="material-symbols-outlined">pause</span>
+</button>
+<button class="p-2 text-gray-400 hover:text-red-500 transition-colors">
+<span class="material-symbols-outlined">stop</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Transcription Waveform Preview -->
+<div class="mt-4 flex justify-center">
+<div class="flex items-center gap-1 h-4">
+<div class="w-1 bg-primary/40 rounded-full h-2 animate-[pulse_1s_infinite]"></div>
+<div class="w-1 bg-primary/60 rounded-full h-3 animate-[pulse_1.2s_infinite]"></div>
+<div class="w-1 bg-primary/80 rounded-full h-4 animate-[pulse_0.8s_infinite]"></div>
+<div class="w-1 bg-primary rounded-full h-3 animate-[pulse_1.5s_infinite]"></div>
+<div class="w-1 bg-primary/60 rounded-full h-2 animate-[pulse_1.1s_infinite]"></div>
+<div class="w-1 bg-primary/40 rounded-full h-3 animate-[pulse_1.3s_infinite]"></div>
+<div class="w-1 bg-primary/20 rounded-full h-1 animate-[pulse_1s_infinite]"></div>
+</div>
+<span class="text-[10px] font-bold text-primary/60 ml-3 tracking-widest uppercase">Listening...</span>
+</div>
+</div>
+<!-- Quick Access Tools (Right Floating) -->
+<div class="absolute right-6 top-1/2 -translate-y-1/2 flex flex-col gap-2">
+<button class="size-10 bg-white border border-[#E5E7EB] text-gray-500 rounded-lg flex items-center justify-center shadow-sm hover:border-primary hover:text-primary transition-all">
+<span class="material-symbols-outlined !text-xl">history</span>
+</button>
+<button class="size-10 bg-white border border-[#E5E7EB] text-gray-500 rounded-lg flex items-center justify-center shadow-sm hover:border-primary hover:text-primary transition-all">
+<span class="material-symbols-outlined !text-xl">bookmark</span>
+</button>
+<button class="size-10 bg-white border border-[#E5E7EB] text-gray-500 rounded-lg flex items-center justify-center shadow-sm hover:border-primary hover:text-primary transition-all">
+<span class="material-symbols-outlined !text-xl">translate</span>
+</button>
+</div>
+</main>
+</div>
+</body></html>

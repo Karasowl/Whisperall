@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('whisperall', {
     ipcRenderer.on('overlay:switch-module', handler);
     return () => ipcRenderer.removeListener('overlay:switch-module', handler);
   },
+  sendSubtitleText: (text: string) => ipcRenderer.send('overlay:subtitle', text),
+  onSubtitleText: (cb: (text: string) => void): Unsubscribe => {
+    const handler = (_e: Electron.IpcRendererEvent, text: string) => cb(text);
+    ipcRenderer.on('overlay:subtitle', handler);
+    return () => ipcRenderer.removeListener('overlay:subtitle', handler);
+  },
 
   // ── Tray ───────────────────────────────────────────────────
   updateTraySettings: (settings: { minimizeToTray?: boolean; showNotifications?: boolean }) => {
@@ -48,11 +54,21 @@ contextBridge.exposeInMainWorld('whisperall', {
   pasteText: (text: string) => ipcRenderer.send('clipboard:paste', text),
   undoPaste: () => ipcRenderer.send('clipboard:undo'),
 
+  // ── Auth ───────────────────────────────────────────────────
+  onAuthCallback: (cb: (url: string) => void): Unsubscribe => {
+    const handler = (_e: Electron.IpcRendererEvent, url: string) => cb(url);
+    ipcRenderer.on('auth:callback', handler);
+    return () => ipcRenderer.removeListener('auth:callback', handler);
+  },
+
   // ── Shell ──────────────────────────────────────────────────
   showMainWindow: () => ipcRenderer.send('show-main-window'),
   notify: (payload: { title?: string; body?: string }) => ipcRenderer.send('notify', payload),
-  openExternal: (url: string) => ipcRenderer.invoke('open-external') as Promise<void>,
+  openExternal: (url: string) => ipcRenderer.invoke('open-external', url) as Promise<void>,
   updateTitleBar: (colors: { color: string; symbolColor: string }) => {
     ipcRenderer.send('update-title-bar', colors);
   },
+
+  // ── Desktop Capturer ───────────────────────────────────────
+  getDesktopSources: () => ipcRenderer.invoke('desktop-sources') as Promise<Array<{ id: string; name: string }>>,
 });

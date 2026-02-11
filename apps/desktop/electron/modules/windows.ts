@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, desktopCapturer, session } from 'electron';
 import path from 'path';
 
 let mainWindow: BrowserWindow | null = null;
@@ -34,12 +34,12 @@ export function createMainWindow(): BrowserWindow {
     minWidth: 800,
     minHeight: 600,
     show: false,
-    backgroundColor: '#030711',
+    backgroundColor: '#101922',
     title: 'Whisperall',
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#030711',
+      color: '#101922',
       symbolColor: '#94a3b8',
       height: 40,
     },
@@ -79,13 +79,23 @@ export function configureMediaPermissions(): void {
   const defaultSession = session.defaultSession;
   if (!defaultSession) return;
 
-  defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-    const mediaTypes = (details as { mediaTypes?: string[] })?.mediaTypes ?? [];
-    callback(permission === 'media' && mediaTypes.includes('audio'));
+  // Grant all media + screen capture permissions (mic, system audio, desktop capture)
+  const ALLOWED_PERMISSIONS = new Set(['media', 'display-capture', 'screen']);
+  defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(ALLOWED_PERMISSIONS.has(permission as string));
   });
 
-  defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) => {
-    const mediaType = (details as { mediaType?: string })?.mediaType;
-    return permission === 'media' && mediaType === 'audio';
+  defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    return ALLOWED_PERMISSIONS.has(permission as string);
+  });
+
+  // Electron 33+: auto-grant getDisplayMedia requests with system audio loopback
+  defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    if (sources.length > 0) {
+      callback({ video: sources[0], audio: 'loopback' });
+    } else {
+      callback({});
+    }
   });
 }

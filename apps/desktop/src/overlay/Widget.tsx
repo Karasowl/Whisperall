@@ -1,62 +1,85 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { useWidgetStore, PILL_SIZE, EXPANDED_SIZE } from './widget-store';
+import { useEffect, useCallback } from 'react';
+import { useWidgetStore, OVERLAY_BASE_SIZE, EXPANDED_SIZE, SUBTITLE_SIZE } from './widget-store';
+import type { WidgetModule } from './widget-store';
 import { electron } from '../lib/electron';
 import { getMicStream, stopMicStream, createRecorder } from '../lib/audio';
 import { api } from '../lib/api';
+import { playTTS, stopTTS, isTTSPlaying } from '../lib/tts';
+import { useSettingsStore } from '../stores/settings';
+import { requestPlanRefresh } from '../stores/plan';
+import { t as i18nT } from '../lib/i18n';
 
 let recorder: MediaRecorder | null = null;
 let audioChunks: Blob[] = [];
 
+function useWT(): (key: string) => string {
+  const locale = useSettingsStore((s) => s.uiLanguage);
+  return (key: string) => i18nT(key, locale);
+}
+
+function Waveform({ processing }: { processing?: boolean }) {
+  return (
+    <div className={`waveform${processing ? ' processing' : ''}`}>
+      {Array.from({ length: 10 }, (_, i) => <div key={i} className="waveform-bar" />)}
+    </div>
+  );
+}
+
 export function Widget() {
+  const t = useWT();
   const {
-    mode, dictateStatus, text, error, dragging,
-    expand, collapse, startDictation, stopDictation,
-    setDone, setError, setDragging, resetDictation,
+    mode, activeModule, dictateStatus, text, translatedText, error,
+    expand, collapse, hoverIn, hoverOut, switchModule, setTranslatedText,
+    startDictation, stopDictation, setDone, setError, resetDictation,
   } = useWidgetStore();
+  const hotkeyMode = useSettingsStore((s) => s.hotkeyMode);
+  const audioDevice = useSettingsStore((s) => s.audioDevice);
 
-  const dragRef = useRef<{ startX: number; startY: number } | null>(null);
-
-  // Resize overlay window when mode changes
+  // Window size: pill/hover/dictating share one size, expanded/subtitles resize
   useEffect(() => {
-    const size = mode === 'pill' ? PILL_SIZE : EXPANDED_SIZE;
+    const isBase = mode === 'pill' || mode === 'hover' || mode === 'dictating';
+    const size = isBase ? OVERLAY_BASE_SIZE : mode === 'subtitles' ? SUBTITLE_SIZE : EXPANDED_SIZE;
     electron?.resizeOverlay(size);
+    // pill = click-through with forwarded mouse events; hover/dictating = interactive
+    electron?.setOverlayIgnoreMouse(mode === 'pill');
   }, [mode]);
 
-  // Listen for hotkey events from main process
+  // IPC listeners
   useEffect(() => {
     return electron?.onHotkey((action) => {
       if (action === 'dictate-toggle') {
-        const status = useWidgetStore.getState().dictateStatus;
-        if (status === 'recording') {
-          handleStop();
-        } else {
-          handleStart();
-        }
-      } else if (action === 'dictate-start') {
-        handleStart();
-      } else if (action === 'dictate-stop') {
-        handleStop();
-      }
+        const s = useWidgetStore.getState().dictateStatus;
+        if (s === 'recording') handleStop(); else handleStart();
+      } else if (action === 'dictate-start') handleStart();
+      else if (action === 'dictate-stop') handleStop();
+      else if (action === 'read-clipboard') handleReadClipboard();
+      else if (action === 'translate') handleTranslateClipboard();
     });
   }, []);
 
-  // Listen for overlay visibility
   useEffect(() => {
     return electron?.onOverlayVisible((visible) => {
-      if (visible && mode === 'pill') expand();
+      if (visible && mode === 'pill') hoverIn();
     });
-  }, [mode, expand]);
+  }, [mode, hoverIn]);
 
+  useEffect(() => {
+    return electron?.onOverlaySwitchModule((m) => switchModule(m as WidgetModule));
+  }, [switchModule]);
+
+  useEffect(() => {
+    return electron?.onSubtitleText((txt) => setTranslatedText(txt));
+  }, [setTranslatedText]);
+
+  // ── Actions ──
   const handleStart = useCallback(async () => {
     startDictation();
     try {
       audioChunks = [];
-      const stream = await getMicStream();
+      const stream = await getMicStream(audioDevice);
       recorder = createRecorder(stream, (chunk) => audioChunks.push(chunk), 30_000);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, [startDictation, setError]);
+    } catch (err) { setError((err as Error).message); }
+  }, [startDictation, setError, audioDevice]);
 
   const handleStop = useCallback(() => {
     if (!recorder || recorder.state === 'inactive') return;
@@ -66,134 +89,177 @@ export function Widget() {
       const blob = new Blob(audioChunks, { type: 'audio/webm' });
       try {
         const res = await api.dictate.send({ audio: blob });
+        requestPlanRefresh();
         setDone(res.text);
         electron?.setDictationText(res.text);
-      } catch (err) {
-        setError((err as Error).message);
-      }
+      } catch (err) { setError((err as Error).message); }
     };
     recorder.stop();
     recorder = null;
   }, [stopDictation, setDone, setError]);
 
-  const handlePaste = () => {
-    if (text) electron?.pasteText(text);
-  };
-
-  const handleDismiss = () => {
+  const handleCancel = useCallback(() => {
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.onstop = null;
+      recorder.stop();
+      recorder = null;
+    }
+    stopMicStream();
     resetDictation();
     collapse();
-    electron?.hideOverlay();
-  };
+  }, [resetDictation, collapse]);
 
-  // ── Drag handling ──
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (mode === 'expanded') return;
-    dragRef.current = { startX: e.clientX, startY: e.clientY };
-    setDragging(true);
-    electron?.setOverlayIgnoreMouse(false);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  };
+  const handleReadClipboard = useCallback(async () => {
+    try {
+      const clip = await navigator.clipboard.readText();
+      if (clip) isTTSPlaying() ? stopTTS() : await playTTS(clip);
+    } catch { /* clipboard access may fail */ }
+  }, []);
 
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!dragRef.current || !dragging) return;
-    const dx = e.clientX - dragRef.current.startX;
-    const dy = e.clientY - dragRef.current.startY;
-    // Move is relative; accumulate via screenX/screenY
-    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
-      electron?.resizeOverlay(PILL_SIZE); // keep pill size during drag
-    }
-  };
+  const handleTranslateClipboard = useCallback(async () => {
+    try {
+      const clip = await navigator.clipboard.readText();
+      if (!clip) return;
+      const targetLang = useSettingsStore.getState().translateTo || 'es';
+      const res = await api.translate.translate({ text: clip, target_language: targetLang });
+      requestPlanRefresh();
+      setTranslatedText(res.text);
+    } catch { /* translation may fail */ }
+  }, [setTranslatedText]);
 
-  const onPointerUp = () => {
-    dragRef.current = null;
-    setDragging(false);
-    electron?.setOverlayIgnoreMouse(true);
-  };
+  const handleDismiss = () => { resetDictation(); collapse(); electron?.hideOverlay(); };
 
-  // ── Mouse enter/leave for click-through ──
-  const onMouseEnter = () => {
-    electron?.setOverlayIgnoreMouse(false);
-  };
-
-  const onMouseLeave = () => {
-    if (!dragging) electron?.setOverlayIgnoreMouse(true);
-  };
-
-  if (mode === 'pill') {
+  // ── Subtitles (own window size) ──
+  if (mode === 'subtitles') {
     return (
-      <div
-        className="widget-pill"
-        data-dragging={dragging}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-        onClick={() => expand()}
-      >
-        <div className="pill-surface" />
+      <div className="widget-subtitles">
+        <button className="widget-btn-icon widget-subtitle-close" onClick={handleDismiss}>
+          <span className="material-symbols-outlined">close</span>
+        </button>
+        <div className={`subtitle-line${translatedText ? '' : ' subtitle-placeholder'}`}>
+          {translatedText || t('widget.subtitlesPlaceholder')}
+        </div>
       </div>
     );
   }
 
-  return (
-    <div
-      className="widget-expanded"
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      <div className="widget-header">
-        <span className="widget-title">Whisperall</span>
-        <button className="widget-btn-icon" onClick={handleDismiss} title="Minimize">
-          <span className="material-symbols-outlined">close</span>
-        </button>
-      </div>
-
-      <div className="widget-body">
-        {dictateStatus === 'idle' && (
-          <button className="widget-btn-record" onClick={handleStart}>
-            <span className="material-symbols-outlined">mic</span>
-            Dictate
+  // ── Expanded (own window size) ──
+  if (mode === 'expanded') {
+    const TABS: { module: WidgetModule; icon: string }[] = [
+      { module: 'dictate', icon: 'mic' },
+      { module: 'reader', icon: 'volume_up' },
+      { module: 'translator', icon: 'translate' },
+      { module: 'subtitles', icon: 'subtitles' },
+    ];
+    return (
+      <div className="widget-expanded">
+        <div className="widget-header">
+          <div className="widget-tabs">
+            {TABS.map((tab) => (
+              <button key={tab.module} className={`widget-tab ${activeModule === tab.module ? 'active' : ''}`}
+                onClick={() => switchModule(tab.module)} title={tab.module}>
+                <span className="material-symbols-outlined">{tab.icon}</span>
+              </button>
+            ))}
+          </div>
+          <button className="widget-btn-icon" onClick={handleDismiss} title={t('widget.minimize')}>
+            <span className="material-symbols-outlined">close</span>
           </button>
-        )}
-
-        {dictateStatus === 'recording' && (
-          <div className="widget-recording">
-            <div className="recording-indicator" />
-            <span>Recording...</span>
-            <button className="widget-btn-stop" onClick={handleStop}>
-              <span className="material-symbols-outlined">stop</span>
+        </div>
+        <div className="widget-body">
+          {activeModule === 'dictate' && (
+            <>
+              {dictateStatus === 'idle' && (
+                <button className="widget-btn-record" onClick={handleStart}>
+                  <span className="material-symbols-outlined">mic</span> {t('widget.dictate')}
+                </button>
+              )}
+              {dictateStatus === 'done' && text && (
+                <div className="widget-result">
+                  <p className="widget-text">{text}</p>
+                  <div className="widget-actions">
+                    <button className="widget-btn-primary" onClick={() => electron?.pasteText(text)}>
+                      <span className="material-symbols-outlined">content_paste</span> {t('widget.paste')}
+                    </button>
+                    <button className="widget-btn-ghost" onClick={resetDictation}>{t('widget.again')}</button>
+                  </div>
+                </div>
+              )}
+              {dictateStatus === 'error' && (
+                <div className="widget-error">
+                  <span>{error}</span>
+                  <button className="widget-btn-ghost" onClick={resetDictation}>{t('widget.retry')}</button>
+                </div>
+              )}
+            </>
+          )}
+          {activeModule === 'reader' && (
+            <button className="widget-btn-record" onClick={handleReadClipboard}>
+              <span className="material-symbols-outlined">volume_up</span> {t('widget.readClipboard')}
             </button>
-          </div>
-        )}
-
-        {dictateStatus === 'processing' && (
-          <div className="widget-status">Processing...</div>
-        )}
-
-        {dictateStatus === 'done' && text && (
-          <div className="widget-result">
-            <p className="widget-text">{text}</p>
-            <div className="widget-actions">
-              <button className="widget-btn-primary" onClick={handlePaste}>
-                <span className="material-symbols-outlined">content_paste</span>
-                Paste
+          )}
+          {activeModule === 'translator' && (
+            <div className="widget-result">
+              <button className="widget-btn-record" onClick={handleTranslateClipboard}>
+                <span className="material-symbols-outlined">translate</span> {t('widget.translateClipboard')}
               </button>
-              <button className="widget-btn-ghost" onClick={resetDictation}>
-                Again
-              </button>
+              {translatedText && <p className="widget-text">{translatedText}</p>}
             </div>
-          </div>
-        )}
-
-        {dictateStatus === 'error' && (
-          <div className="widget-error">
-            <span>{error}</span>
-            <button className="widget-btn-ghost" onClick={resetDictation}>Retry</button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+    );
+  }
+
+  // ── Base container (pill / hover / dictating) — same window size ──
+  return (
+    <div className="widget-base">
+      {mode === 'pill' && (
+        <div className="barrita" onMouseEnter={hoverIn}>
+          {Array.from({ length: 8 }, (_, i) => <span key={i} className="barrita-dot" />)}
+        </div>
+      )}
+
+      {mode === 'hover' && (
+        <div className="hover-bar" onMouseLeave={hoverOut}>
+          <button className="hover-btn primary" onClick={handleStart} title={t('widget.dictate')}>
+            <span className="material-symbols-outlined">mic</span>
+          </button>
+          <button className="hover-btn" onClick={() => switchModule('reader')} title="TTS">
+            <span className="material-symbols-outlined">volume_up</span>
+          </button>
+          <button className="hover-btn" onClick={() => switchModule('translator')} title="Translate">
+            <span className="material-symbols-outlined">translate</span>
+          </button>
+          <button className="hover-btn" onClick={() => switchModule('subtitles')} title="Subtitles">
+            <span className="material-symbols-outlined">subtitles</span>
+          </button>
+          <button className="hover-btn" onClick={() => expand()} title={t('widget.minimize')}>
+            <span className="material-symbols-outlined">open_in_full</span>
+          </button>
+        </div>
+      )}
+
+      {mode === 'dictating' && (
+        <div className="dictating-wrap">
+          <div className="dictating-label">
+            {dictateStatus === 'processing' ? t('widget.processing') : t('widget.dictatingLabel')}
+          </div>
+          <div className="dictating-controls">
+            {hotkeyMode === 'toggle' && (
+              <button className="dictating-cancel" onClick={handleCancel} title={t('widget.cancel')}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            )}
+            <Waveform processing={dictateStatus === 'processing'} />
+            {hotkeyMode === 'toggle' && dictateStatus === 'recording' && (
+              <button className="dictating-stop" onClick={handleStop} title={t('widget.stop')}>
+                <span className="material-symbols-outlined">stop</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

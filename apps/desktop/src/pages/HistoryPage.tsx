@@ -1,63 +1,81 @@
-import { useEffect, useState } from 'react';
-import { getSupabase } from '../lib/supabase';
-import { useAuthStore } from '../stores/auth';
+import { useEffect, useState, useCallback } from 'react';
+import { api } from '../lib/api';
+import { SearchBar } from '../components/history/SearchBar';
+import { FilterPills } from '../components/history/FilterPills';
+import { HistoryTable } from '../components/history/HistoryTable';
+import { PreviewPanel } from '../components/history/PreviewPanel';
+import { useT } from '../lib/i18n';
 
-type HistoryEntry = {
-  id: string;
-  operation: string;
-  detail: string;
-  created_at: string;
-};
+export type HistoryEntry = { id: string; module: string; output_text: string | null; input_text: string | null; audio_url: string | null; created_at: string };
 
 export function HistoryPage() {
-  const user = useAuthStore((s) => s.user);
+  const t = useT();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<'all' | 'today' | 'memo' | 'meeting'>('all');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user) return;
-    const sb = getSupabase();
-    if (!sb) return;
-
+  const fetchHistory = useCallback(() => {
     setLoading(true);
-    sb.from('history')
-      .select('id, operation, detail, created_at')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(50)
-      .then(({ data }) => {
-        setEntries((data as HistoryEntry[]) ?? []);
-        setLoading(false);
-      });
-  }, [user]);
+    setError(null);
+    api.history.list(50)
+      .then((data) => { setEntries(data as HistoryEntry[]); })
+      .catch((err) => setError((err as Error).message))
+      .finally(() => setLoading(false));
+  }, []);
 
-  if (!user) {
-    return (
-      <div className="page">
-        <h2>History</h2>
-        <p className="empty-state">Sign in to view your operation history.</p>
-      </div>
-    );
-  }
+  useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+  const filtered = entries.filter((e) => {
+    const text = (e.output_text ?? '').toLowerCase();
+    if (search && !text.includes(search.toLowerCase()) && !e.module.includes(search.toLowerCase())) return false;
+    if (filter === 'today') return new Date(e.created_at).toDateString() === new Date().toDateString();
+    if (filter === 'memo') return e.module === 'dictate';
+    if (filter === 'meeting') return e.module === 'transcribe' || e.module === 'live';
+    return true;
+  });
+
+  const selected = entries.find((e) => e.id === selectedId) ?? null;
 
   return (
-    <div className="page">
-      <h2>History</h2>
-      {loading && <p className="status-text">Loading...</p>}
-      {entries.length === 0 && !loading && (
-        <p className="empty-state">No history yet. Start using Whisperall to see your operations here.</p>
-      )}
-      <div className="history-list">
-        {entries.map((entry) => (
-          <div key={entry.id} className="history-card">
-            <span className="history-op">{entry.operation}</span>
-            <span className="history-detail">{entry.detail}</span>
-            <span className="history-time">
-              {new Date(entry.created_at).toLocaleString()}
-            </span>
+    <div className="flex-1 flex overflow-hidden" data-testid="history-page">
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+        <div className="px-8 pt-12 pb-4">
+          <div className="flex justify-between items-start mb-6">
+            <div>
+              <h2 className="text-3xl font-black tracking-tight mb-2">{t('history.title')}</h2>
+              <p className="text-muted">{t('history.desc')}</p>
+            </div>
           </div>
-        ))}
+          <div className="flex flex-col gap-4">
+            <SearchBar value={search} onChange={setSearch} />
+            <FilterPills active={filter} onChange={setFilter} />
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto px-8 pb-8">
+          {loading && <p className="text-primary text-sm mb-4">{t('history.loading')}</p>}
+          {error && (
+            <div className="flex flex-col items-center gap-3 py-12 text-center">
+              <span className="material-symbols-outlined text-[48px] text-red-400">error</span>
+              <p className="text-sm text-muted max-w-md">{error}</p>
+              <button onClick={fetchHistory}
+                className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors">
+                {t('history.retry')}
+              </button>
+            </div>
+          )}
+          {!loading && !error && filtered.length === 0 && (
+            <div className="text-center py-16 text-muted">
+              <span className="material-symbols-outlined text-[48px] mb-4 block">history</span>
+              <p>{(search || filter !== 'all') ? t('history.noResults') : t('history.empty')}</p>
+            </div>
+          )}
+          {!error && filtered.length > 0 && <HistoryTable entries={filtered} selectedId={selectedId} onSelect={setSelectedId} />}
+        </div>
       </div>
+      <PreviewPanel entry={selected} onClose={() => setSelectedId(null)} />
     </div>
   );
 }

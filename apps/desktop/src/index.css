@@ -1,0 +1,216 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* ── Theme Variables ─────────────────────────────── */
+:root {
+  --theme-base: #f6f7f8;
+  --theme-surface: #ffffff;
+  --theme-surface-alt: #F9FAFB;
+  --theme-edge: #E5E7EB;
+  --theme-muted: #9CA3AF;
+  --theme-text: #1F2937;
+  --theme-text-secondary: #6B7280;
+  --theme-glass-bg: rgba(255, 255, 255, 0.7);
+  --theme-paper-dot: #d1d5db;
+  --theme-scrollbar-track: #f6f7f8;
+  --theme-scrollbar-thumb: #d1d5db;
+  --theme-scrollbar-hover: #9ca3af;
+}
+
+html.dark {
+  --theme-base: #101922;
+  --theme-surface: #1c242c;
+  --theme-surface-alt: #111418;
+  --theme-edge: #283039;
+  --theme-muted: #9dabb9;
+  --theme-text: #f1f5f9;
+  --theme-text-secondary: #cbd5e1;
+  --theme-glass-bg: rgba(28, 36, 44, 0.6);
+  --theme-paper-dot: #2a343e;
+  --theme-scrollbar-track: #101922;
+  --theme-scrollbar-thumb: #283039;
+  --theme-scrollbar-hover: #3b4754;
+}
+
+/* ── Design Tokens (Tailwind v4) ─────────────────── */
+@theme {
+  --color-primary: #137fec;
+  --color-base: var(--theme-base);
+  --color-surface: var(--theme-surface);
+  --color-surface-alt: var(--theme-surface-alt);
+  --color-edge: var(--theme-edge);
+  --color-muted: var(--theme-muted);
+  --color-text: var(--theme-text);
+  --color-text-secondary: var(--theme-text-secondary);
+  --font-family-display: "Inter", system-ui, sans-serif;
+  --radius-DEFAULT: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --animate-blink: blink 1s step-end infinite;
+  --animate-shimmer: shimmer 2s infinite;
+  --animate-fade-in-down: fade-in-down 0.5s ease-out forwards;
+}
+
+@keyframes blink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fade-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 0.9;
+    transform: translateY(0);
+  }
+}
+
+/* ── Scrollbar (Electron/WebKit) ──────────────────── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--theme-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--theme-scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-scrollbar-hover);
+}
+
+/* ── Glass panel ──────────────────────────────────── */
+.glass-panel {
+  background: var(--theme-glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Paper texture (dictate workspace bg) ─────────── */
+.paper-texture {
+  background-image: radial-gradient(var(--theme-paper-dot) 0.5px, transparent 0.5px);
+  background-size: 24px 24px;
+}
+
+/* ── Active word highlight (editor sync) ──────────── */
+.active-word {
+  background-color: rgba(19, 127, 236, 0.2);
+  color: #137fec;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* ── Material Symbols ─────────────────────────────── */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.fill-1 {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* ── Electron window drag ─────────────────────────── */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+::selection {
+  background: #137fec;
+  color: white;
+}
+
+/* ── TipTap Editor ───────────────────────────────── */
+.prose-editor h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 1rem 0 0.5rem;
+  color: var(--theme-text);
+}
+
+.prose-editor p { margin: 0.25rem 0; }
+
+.prose-editor ul, .prose-editor ol {
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.prose-editor blockquote {
+  border-left: 3px solid #137fec;
+  padding-left: 1rem;
+  margin: 0.5rem 0;
+  color: var(--theme-muted);
+  font-style: italic;
+}
+
+.prose-editor pre {
+  background: var(--theme-surface-alt);
+  border: 1px solid var(--theme-edge);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  overflow-x: auto;
+}
+
+.prose-editor code {
+  background: var(--theme-surface-alt);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.85em;
+}
+
+.prose-editor mark {
+  background: rgba(19, 127, 236, 0.25);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.prose-editor hr {
+  border: none;
+  border-top: 1px solid var(--theme-edge);
+  margin: 1rem 0;
+}
+
+.prose-editor strong { color: var(--theme-text); }
+
+.prose-editor .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--theme-muted);
+  pointer-events: none;
+  height: 0;
+}
