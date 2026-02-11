@@ -1,0 +1,27 @@
+{
+  "agents": [
+    {
+      "id": "claude-agent",
+      "instructionFile": "CLAUDE.md",
+      "description": "Claude Code (Anthropic) - reads CLAUDE.md at session start"
+    },
+    {
+      "id": "codex-agent",
+      "instructionFile": "AGENTS.md",
+      "description": "Codex (OpenAI) - reads AGENTS.md at session start"
+    }
+  ],
+  "testCommands": [
+    { "name": "typecheck", "command": "cd apps/desktop && npx tsc --noEmit" },
+    { "name": "desktop-tests", "command": "cd apps/desktop && npx vitest run" },
+    { "name": "build", "command": "cd apps/desktop && npx vite build" },
+    { "name": "api-tests", "command": "cd apps/api && python -m pytest tests/ -x -q" }
+  ],
+  "coordination": {
+    "lockFile": ".agent-locks.json",
+    "mailFile": ".agent-mail.json",
+    "conflictResolution": "first-commit-wins, second-agent-rebases",
+    "lockGranularity": "per-file"
+  },
+  "lastSync": null
+}

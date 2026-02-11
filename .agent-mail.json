@@ -1,0 +1,11 @@
+{
+  "messages": [],
+  "schema": {
+    "from": "claude-agent | codex-agent",
+    "to": "claude-agent | codex-agent",
+    "subject": "string - brief subject line",
+    "body": "string - detailed message",
+    "timestamp": "ISO 8601 timestamp (e.g. 2026-02-10T14:35:00Z)",
+    "read": "boolean - false when sent, receiver sets to true after reading"
+  }
+}

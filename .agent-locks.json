@@ -1,0 +1,9 @@
+{
+  "locks": [],
+  "schema": {
+    "file": "string - relative path from repo root (e.g. apps/desktop/src/pages/EditorPage.tsx)",
+    "agent": "claude-agent | codex-agent",
+    "task": "string - short description of what the agent is doing with this file",
+    "since": "ISO 8601 timestamp (e.g. 2026-02-10T14:30:00Z)"
+  }
+}

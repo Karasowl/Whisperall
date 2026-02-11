@@ -1,6 +1,19 @@
 .vscode
 .claude
 
+# Multi-agent coordination files — TRACKED (do NOT ignore)
+!.agent-locks.json
+!.agent-mail.json
+!.agent-config.json
+!AGENTS.md
+
+# Environment secrets
+.env
+.env.local
+.env.*.local
+apps/api/.env
+apps/desktop/.env
+
 # Pylance
 pyrightconfig.json
 
@@ -68,6 +81,9 @@ electron/dist/
 electron/out/
 electron/frontend/
 electron/dist-msi*/
+apps/desktop/electron-dist/*.js
+apps/desktop/electron-dist/*.js.map
+apps/desktop/electron-dist/modules/
 
 # Packaged backend artifacts
 backend-dist/
