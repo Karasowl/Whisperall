@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type WidgetMode = 'pill' | 'hover' | 'dictating' | 'expanded' | 'subtitles';
+export type WidgetMode = 'bar' | 'dictating' | 'panel' | 'subtitles';
 export type DictateStatus = 'idle' | 'recording' | 'processing' | 'done' | 'error';
 export type WidgetModule = 'dictate' | 'reader' | 'translator' | 'subtitles';
 
@@ -16,8 +16,6 @@ export type WidgetState = {
   expand: () => void;
   collapse: () => void;
   toggle: () => void;
-  hoverIn: () => void;
-  hoverOut: () => void;
   switchModule: (module: WidgetModule) => void;
   setTranslatedText: (text: string) => void;
   startDictation: () => void;
@@ -29,13 +27,12 @@ export type WidgetState = {
   setDragging: (dragging: boolean) => void;
 };
 
-/** pill, hover, dictating share this size — NO window resize between them */
-export const OVERLAY_BASE_SIZE = { width: 280, height: 100 };
-export const EXPANDED_SIZE = { width: 260, height: 148 };
-export const SUBTITLE_SIZE = { width: 600, height: 56 };
+/** bar/panel/dictating share one size to avoid jumpy resize transitions. */
+export const OVERLAY_BASE_SIZE = { width: 360, height: 120 };
+export const SUBTITLE_SIZE = { width: 760, height: 84 };
 
 export const useWidgetStore = create<WidgetState>((set, get) => ({
-  mode: 'pill',
+  mode: 'bar',
   activeModule: 'dictate',
   dictateStatus: 'idle',
   text: '',
@@ -43,24 +40,16 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   error: null,
   dragging: false,
 
-  expand: () => set({ mode: 'expanded' }),
-  collapse: () => set({ mode: 'pill', dictateStatus: 'idle' }),
-  hoverIn: () => {
-    const { mode } = get();
-    if (mode === 'pill') set({ mode: 'hover' });
-  },
-  hoverOut: () => {
-    const { mode } = get();
-    if (mode === 'hover') set({ mode: 'pill' });
-  },
+  expand: () => set({ mode: 'panel' }),
+  collapse: () => set({ mode: 'bar', dictateStatus: 'idle' }),
   switchModule: (module) => {
-    const mode = module === 'subtitles' ? 'subtitles' : 'expanded';
+    const mode = module === 'subtitles' ? 'subtitles' : 'panel';
     set({ activeModule: module, mode });
   },
   setTranslatedText: (translatedText) => set({ translatedText }),
   toggle: () => {
     const { mode } = get();
-    set({ mode: mode === 'pill' || mode === 'hover' ? 'expanded' : 'pill' });
+    set({ mode: mode === 'bar' ? 'panel' : 'bar' });
   },
 
   startDictation: () => {
@@ -75,9 +64,9 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
 
   setProcessing: () => set({ dictateStatus: 'processing' }),
 
-  setDone: (text) => set({ mode: 'expanded', dictateStatus: 'done', text }),
+  setDone: (text) => set({ mode: 'panel', dictateStatus: 'done', text }),
 
-  setError: (error) => set({ mode: 'expanded', dictateStatus: 'error', error }),
+  setError: (error) => set({ mode: 'panel', dictateStatus: 'error', error }),
 
   resetDictation: () => set({ dictateStatus: 'idle', text: '', error: null }),
 

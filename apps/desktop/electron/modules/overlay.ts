@@ -3,9 +3,13 @@ import path from 'path';
 import fs from 'fs';
 
 const isDev = !app.isPackaged;
+const DEFAULT_WIDTH = 360;
+const DEFAULT_HEIGHT = 120;
+const TOP_MARGIN = 20;
 
 let overlayWindow: BrowserWindow | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let dragState: { offsetX: number; offsetY: number } | null = null;
 
 const statePath = path.join(app.getPath('userData'), 'overlay-state.json');
 
@@ -20,8 +24,8 @@ interface OverlayState {
 let state: OverlayState = {
   x: null,
   y: null,
-  width: 280,
-  height: 100,
+  width: DEFAULT_WIDTH,
+  height: DEFAULT_HEIGHT,
   lastModule: 'dictate',
 };
 
@@ -65,47 +69,50 @@ function scheduleSave(): void {
   }, 250);
 }
 
-/** Check if a point is actually inside some real display (not just the combined bounding box). */
-function isOnAnyDisplay(x: number, y: number): boolean {
+function intersectsAnyDisplay(bounds: { x: number; y: number; width: number; height: number }): boolean {
+  const right = bounds.x + bounds.width;
+  const bottom = bounds.y + bounds.height;
   return screen.getAllDisplays().some((d) => {
     const a = d.workArea;
-    return x >= a.x && x < a.x + a.width && y >= a.y && y < a.y + a.height;
+    const aRight = a.x + a.width;
+    const aBottom = a.y + a.height;
+    return right > a.x && bounds.x < aRight && bottom > a.y && bounds.y < aBottom;
   });
 }
 
-/** Get centered position on the display nearest to the mouse cursor. */
-function centerOnCursorDisplay(w: number, h: number) {
-  const cursor = screen.getCursorScreenPoint();
-  const display = screen.getDisplayNearestPoint(cursor);
+function defaultPosition(w: number, h: number) {
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const a = display.workArea;
   return {
     x: Math.round(a.x + (a.width - w) / 2),
-    y: Math.round(a.y + (a.height - h) / 2),
+    y: a.y + TOP_MARGIN,
     width: w,
     height: h,
   };
 }
 
-function clampToWorkArea(bounds: { x?: number | null; y?: number | null; width: number; height: number }) {
+function resolveSafeBounds(bounds: { x?: number | null; y?: number | null; width: number; height: number }) {
   const w = Math.round(bounds.width);
   const h = Math.round(bounds.height);
 
   try {
     const hasPos = Number.isFinite(bounds.x as number) && Number.isFinite(bounds.y as number);
 
-    // No saved position → center on display where cursor is
-    if (!hasPos) return centerOnCursorDisplay(w, h);
+    // No saved position -> use default on cursor display.
+    if (!hasPos) return defaultPosition(w, h);
 
     const x = Math.round(bounds.x as number);
     const y = Math.round(bounds.y as number);
 
-    // Saved position is NOT on any real display → recenter
-    if (!isOnAnyDisplay(x, y)) return centerOnCursorDisplay(w, h);
+    // Keep freeform position as long as any part intersects a real display.
+    if (intersectsAnyDisplay({ x, y, width: w, height: h })) {
+      return { x, y, width: w, height: h };
+    }
 
-    // Valid saved position — keep it
-    return { x, y, width: w, height: h };
+    // Saved position is fully off-screen (e.g. monitor unplugged) -> fallback.
+    return defaultPosition(w, h);
   } catch {
-    return centerOnCursorDisplay(w, h);
+    return defaultPosition(w, h);
   }
 }
 
@@ -113,7 +120,7 @@ function ensureWindow(): BrowserWindow {
   if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow;
 
   loadState();
-  const bounds = clampToWorkArea({ x: state.x, y: state.y, width: state.width, height: state.height });
+  const bounds = resolveSafeBounds({ x: state.x, y: state.y, width: state.width, height: state.height });
 
   overlayWindow = new BrowserWindow({
     ...bounds,
@@ -135,7 +142,7 @@ function ensureWindow(): BrowserWindow {
     },
   });
 
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  overlayWindow.setIgnoreMouseEvents(false);
   overlayWindow.setAlwaysOnTop(true, 'floating');
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
@@ -187,15 +194,13 @@ function ensureWindow(): BrowserWindow {
 
 export function showOverlay(module?: string): void {
   const win = ensureWindow();
-  // Always validate position — clampToWorkArea recenters if off-display
-  const clamped = clampToWorkArea(win.getBounds());
-  win.setBounds(clamped);
+  const safeBounds = resolveSafeBounds(win.getBounds());
+  win.setBounds(safeBounds);
 
   if (!win.isVisible()) {
-    win.show();
+    win.showInactive();
     console.log(`[Overlay] Window shown at ${JSON.stringify(win.getBounds())}`);
   }
-  // Don't set ignoreMouseEvents here — Widget controls it based on mode
 
   if (module) {
     safeSend(win, 'overlay:switch-module', module);
@@ -205,7 +210,10 @@ export function showOverlay(module?: string): void {
 }
 
 export function hideOverlay(): void {
-  getOverlayWindow()?.hide();
+  const win = getOverlayWindow();
+  if (!win) return;
+  win.hide();
+  safeSend(win, 'overlay:visible', false);
 }
 
 export function toggleOverlay(module?: string): void {
@@ -222,7 +230,7 @@ export function resizeOverlay(width: number, height: number): void {
   const win = getOverlayWindow();
   if (!win) return;
   const bounds = win.getBounds();
-  const newBounds = clampToWorkArea({ x: bounds.x, y: bounds.y, width, height });
+  const newBounds = resolveSafeBounds({ x: bounds.x, y: bounds.y, width, height });
   console.log(`[Overlay] resizeOverlay ${bounds.width}x${bounds.height} -> ${width}x${height} at (${newBounds.x},${newBounds.y})`);
   win.setBounds(newBounds);
 }
@@ -241,4 +249,42 @@ export function sendSubtitleText(text: string): void {
 
 export function preCreateOverlay(): void {
   ensureWindow();
+}
+
+export function startOverlayDrag(screenX: number, screenY: number): void {
+  const win = getOverlayWindow();
+  if (!win) return;
+  const bounds = win.getBounds();
+  dragState = {
+    offsetX: Math.round(screenX) - bounds.x,
+    offsetY: Math.round(screenY) - bounds.y,
+  };
+}
+
+export function moveOverlayDrag(screenX: number, screenY: number): void {
+  const win = getOverlayWindow();
+  if (!win || !dragState) return;
+  const bounds = win.getBounds();
+  const next = {
+    x: Math.round(screenX) - dragState.offsetX,
+    y: Math.round(screenY) - dragState.offsetY,
+    width: bounds.width,
+    height: bounds.height,
+  };
+  win.setBounds(next);
+}
+
+export function endOverlayDrag(): void {
+  dragState = null;
+  scheduleSave();
+}
+
+export function resetOverlayPosition(): void {
+  const win = ensureWindow();
+  const current = win.getBounds();
+  const reset = defaultPosition(current.width, current.height);
+  state = { ...state, ...reset };
+  saveState();
+  win.setBounds(reset);
+  showOverlay(state.lastModule);
 }

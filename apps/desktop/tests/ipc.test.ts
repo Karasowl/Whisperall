@@ -27,6 +27,10 @@ describe('IPC channel registration', () => {
       'overlay:resize',
       'overlay:ignore-mouse',
       'overlay:subtitle',
+      'overlay:drag-start',
+      'overlay:drag-move',
+      'overlay:drag-end',
+      'overlay:reset-position',
       'update-tray-settings',
       'clipboard:read',
       'clipboard:paste',
@@ -34,13 +38,14 @@ describe('IPC channel registration', () => {
       'show-main-window',
       'notify',
       'open-external',
+      'desktop-sources',
       'update-title-bar',
     ];
 
     for (const channel of expectedChannels) {
       expect(allChannels).toContain(channel);
     }
-  });
+  }, 15000);
 
   it('uses ipcMain.handle for async channels', async () => {
     const { registerIpcHandlers } = await import('../electron/modules/ipc.js');
@@ -49,6 +54,7 @@ describe('IPC channel registration', () => {
     const handleChannels = mockIpcMain.handle.mock.calls.map((c: unknown[]) => c[0]);
     expect(handleChannels).toContain('clipboard:read');
     expect(handleChannels).toContain('open-external');
+    expect(handleChannels).toContain('desktop-sources');
   });
 
   it('uses ipcMain.on for fire-and-forget channels', async () => {

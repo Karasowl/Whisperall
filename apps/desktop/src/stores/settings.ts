@@ -20,6 +20,7 @@ export type SettingsState = {
   setUiLanguage: (lang: UiLocale) => void;
   setHotkeyMode: (mode: 'toggle' | 'hold') => void;
   setOverlayEnabled: (enabled: boolean) => void;
+  resetOverlayPosition: () => void;
   setMinimizeToTray: (enabled: boolean) => void;
   setShowNotifications: (enabled: boolean) => void;
   setHotkey: (action: string, accelerator: string) => void;
@@ -107,6 +108,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ overlayEnabled });
     persist({ overlayEnabled });
     electron?.updateSttSettings({ overlay_enabled: overlayEnabled });
+    if (overlayEnabled) electron?.showOverlay?.();
+    else electron?.hideOverlay?.();
+  },
+
+  resetOverlayPosition: () => {
+    electron?.resetOverlayPosition?.();
   },
 
   setMinimizeToTray: (minimizeToTray) => {
@@ -154,6 +161,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (saved.hotkeys) electron?.updateHotkeys(saved.hotkeys as Record<string, string>);
     if (saved.minimizeToTray !== undefined) electron?.updateTraySettings({ minimizeToTray: saved.minimizeToTray as boolean });
     if (saved.hotkeyMode) electron?.updateSttSettings({ hotkey_mode: saved.hotkeyMode as string });
-    if (saved.overlayEnabled !== undefined) electron?.updateSttSettings({ overlay_enabled: saved.overlayEnabled as boolean });
+    if (saved.overlayEnabled !== undefined) {
+      const enabled = saved.overlayEnabled as boolean;
+      electron?.updateSttSettings({ overlay_enabled: enabled });
+      if (enabled) electron?.showOverlay?.();
+      else electron?.hideOverlay?.();
+    }
   },
 }));

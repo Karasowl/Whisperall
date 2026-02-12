@@ -197,10 +197,21 @@ export function SettingsModal({ onClose, onOpenPricing }: Props) {
               </Toggle>
               <ToggleSwitch label={t('settings.overlayWidget')} checked={settings.overlayEnabled} onChange={settings.setOverlayEnabled} />
               {settings.overlayEnabled && (
-                <button onClick={() => electron?.showOverlay()} data-testid="show-widget-btn"
-                  className="flex items-center justify-center gap-2 py-2.5 bg-base border border-edge rounded-lg text-sm text-text-secondary hover:border-primary/40 hover:text-primary transition-colors">
-                  <span className="material-symbols-outlined text-[18px]">widgets</span> {t('settings.showWidget')}
-                </button>
+                <>
+                  <button onClick={() => electron?.showOverlay()} data-testid="show-widget-btn"
+                    className="flex items-center justify-center gap-2 py-2.5 bg-base border border-edge rounded-lg text-sm text-text-secondary hover:border-primary/40 hover:text-primary transition-colors">
+                    <span className="material-symbols-outlined text-[18px]">widgets</span> {t('settings.showWidget')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={settings.resetOverlayPosition}
+                    data-testid="overlay-reset-btn"
+                    className="flex items-center justify-center gap-2 py-2.5 bg-base border border-edge rounded-lg text-sm text-text-secondary hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">center_focus_strong</span>
+                    {t('settings.overlayResetPosition')}
+                  </button>
+                </>
               )}
               <ToggleSwitch label={t('settings.minimizeTray')} checked={settings.minimizeToTray} onChange={settings.setMinimizeToTray} />
               <ToggleSwitch label={t('settings.notifications')} checked={settings.showNotifications} onChange={settings.setShowNotifications} />

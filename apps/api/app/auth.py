@@ -1,5 +1,7 @@
+import hashlib
+import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -8,6 +10,9 @@ import jwt
 
 from .config import settings
 from .db import get_supabase_or_none
+
+log = logging.getLogger(__name__)
+API_KEY_PREFIX = "wsp_live_"
 
 PLAN_LIMITS = {
     "free":  {"stt_seconds": 1800,   "tts_chars": 50_000,  "translate_chars": 50_000,  "transcribe_seconds": 600,    "ai_edit_tokens": 50_000,  "notes_count": 50},
@@ -29,6 +34,8 @@ class AuthUser:
     email: str | None = None
     plan: str = "free"
     usage: dict = field(default_factory=dict)
+    is_owner: bool = False
+    is_admin: bool = False
 
 
 security = HTTPBearer(auto_error=False)
@@ -76,6 +83,37 @@ def _fetch_user_payload_from_supabase(token: str) -> dict | None:
     return {"sub": user_id, "email": data.get("email")}
 
 
+def authenticate_token(token: str) -> AuthUser:
+    if settings.auth_disabled:
+        return AuthUser(user_id="00000000-0000-0000-0000-000000000000")
+
+    # ── API Key path (wsp_live_*) ────────────────────────────
+    if token.startswith(API_KEY_PREFIX):
+        return _authenticate_api_key(token)
+
+    # ── JWT path (existing) ──────────────────────────────────
+    if not settings.supabase_jwt_secret:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="JWT secret not configured")
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.supabase_jwt_secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
+    except jwt.InvalidTokenError:
+        payload = _fetch_user_payload_from_supabase(token)
+        if not payload:
+            _raise_unauthorized("Invalid or expired token")
+
+    user_id = payload.get("sub") or payload.get("user_id")
+    if not user_id:
+        _raise_unauthorized("Invalid token payload")
+
+    return _load_user_profile(user_id, email=payload.get("email"))
+
+
 def get_current_user(
     creds: HTTPAuthorizationCredentials = Depends(security),
 ) -> AuthUser:
@@ -85,43 +123,91 @@ def get_current_user(
     if not creds or not creds.credentials:
         _raise_unauthorized("Missing bearer token", error="invalid_request")
 
-    if not settings.supabase_jwt_secret:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="JWT secret not configured")
+    return authenticate_token(creds.credentials)
 
+
+def _authenticate_api_key(token: str) -> AuthUser:
+    """Validate an API key (wsp_live_*) and return the associated user."""
+    db = get_supabase_or_none()
+    if not db:
+        _raise_unauthorized("API key authentication requires database")
+
+    key_hash = hashlib.sha256(token.encode()).hexdigest()
     try:
-        payload = jwt.decode(
-            creds.credentials,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            options={"verify_aud": False},
-        )
-    except jwt.InvalidTokenError:
-        payload = _fetch_user_payload_from_supabase(creds.credentials)
-        if not payload:
-            _raise_unauthorized("Invalid or expired token")
+        row = db.table("api_keys").select("user_id").eq(
+            "key_hash", key_hash
+        ).is_("revoked_at", "null").maybe_single().execute()
+    except Exception:
+        _raise_unauthorized("API key validation failed")
 
-    user_id = payload.get("sub") or payload.get("user_id")
-    if not user_id:
-        _raise_unauthorized("Invalid token payload")
+    if not row.data:
+        _raise_unauthorized("Invalid or revoked API key")
 
+    user_id = row.data["user_id"]
+
+    # Update last_used_at (fire-and-forget, don't block auth)
+    try:
+        db.table("api_keys").update(
+            {"last_used_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("key_hash", key_hash).execute()
+    except Exception:
+        log.warning("Failed to update api_key last_used_at")
+
+    return _load_user_profile(user_id)
+
+
+def _load_user_profile(user_id: str, email: str | None = None) -> AuthUser:
+    """Load plan and usage for a user from the database."""
     plan = "free"
     usage = {}
+    is_owner = False
+    is_admin = False
     db = get_supabase_or_none()
     if db:
         try:
-            row = db.table("profiles").select("plan").eq("id", user_id).maybe_single().execute()
+            row = db.table("profiles").select("plan,is_owner,is_admin").eq("id", user_id).maybe_single().execute()
             if row.data:
                 plan = normalize_plan(row.data.get("plan"))
+                is_owner = bool(row.data.get("is_owner"))
+                is_admin = bool(row.data.get("is_admin"))
         except Exception:
             plan = "free"
         try:
-            usage_row = db.table("usage").select("*").eq("user_id", user_id).order("month", desc=True).limit(1).maybe_single().execute()
+            now = datetime.now(timezone.utc)
+            month_start = date(now.year, now.month, 1).isoformat()
+            usage_row = (
+                db.table("usage")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("month", month_start)
+                .maybe_single()
+                .execute()
+            )
             if usage_row.data:
                 usage = usage_row.data
         except Exception:
             usage = {}
 
-    return AuthUser(user_id=user_id, email=payload.get("email"), plan=normalize_plan(plan), usage=usage)
+    # Owner override via env (sets a persistent flag in DB when possible).
+    db_owner_flag = is_owner
+    if email and settings.owner_email and email.strip().lower() == settings.owner_email.strip().lower():
+        is_owner = True
+        is_admin = True
+        if db and not db_owner_flag:
+            # Best-effort: persist so API keys (no email) still grant owner access.
+            try:
+                db.table("profiles").update({"is_owner": True}).eq("id", user_id).execute()
+            except Exception:
+                pass
+
+    return AuthUser(
+        user_id=user_id,
+        email=email,
+        plan=normalize_plan(plan),
+        usage=usage,
+        is_owner=is_owner,
+        is_admin=is_admin,
+    )
 
 
 def check_usage(user: AuthUser, resource: str, amount: int = 1) -> None:

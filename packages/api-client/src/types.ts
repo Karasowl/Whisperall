@@ -168,6 +168,62 @@ export type UsageResponse = {
   generated_at: string;
 };
 
+// ── Admin API ──────────────────────────────────────────
+
+export type AdminPricingEntry = {
+  provider: string;
+  resource: string;
+  model: string | null;
+  unit: string;
+  usd_per_unit: number;
+  effective_from: string; // YYYY-MM-DD
+  updated_at: string | null;
+};
+
+export type AdminPricingUpsertParams = {
+  provider: string;
+  resource: string;
+  model?: string | null;
+  unit: string;
+  usd_per_unit: number;
+  effective_from?: string; // YYYY-MM-DD
+};
+
+export type AdminInvoiceEntry = {
+  provider: string;
+  period: string; // YYYY-MM-DD (month start)
+  amount_usd: number;
+  currency: string;
+  notes: string | null;
+  updated_at: string | null;
+};
+
+export type AdminInvoiceUpsertParams = {
+  provider: string;
+  period?: string; // YYYY-MM-DD (month start)
+  amount_usd: number;
+  currency?: string;
+  notes?: string | null;
+};
+
+export type AdminCostBreakdown = {
+  total_usd: number;
+  by_provider: Record<string, number>;
+};
+
+export type AdminOverviewResponse = {
+  period_start: string;
+  period_end: string;
+  generated_at: string;
+  users_total: number;
+  users_active_30d: number;
+  usage_total: UsageRecord;
+  estimated_cost: AdminCostBreakdown;
+  real_cost: AdminCostBreakdown;
+  pricing: AdminPricingEntry[];
+  invoices: AdminInvoiceEntry[];
+};
+
 // ── Documents ──────────────────────────────────────────
 
 export type DocumentSource = 'dictation' | 'live' | 'transcription' | 'manual';
@@ -195,4 +251,23 @@ export type UpdateDocumentParams = {
   title?: string;
   content?: string;
   tags?: string[];
+};
+
+// ── API Keys ──────────────────────────────────────────
+
+export type ApiKey = {
+  id: string;
+  name: string;
+  key_prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+};
+
+export type CreateApiKeyParams = {
+  name?: string;
+};
+
+export type CreateApiKeyResponse = ApiKey & {
+  key: string; // full key, shown once
 };

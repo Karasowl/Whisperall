@@ -19,6 +19,10 @@ declare global {
       toggleOverlay: (module?: string) => void;
       resizeOverlay: (dims: { width: number; height: number }) => void;
       setOverlayIgnoreMouse: (ignore: boolean) => void;
+      overlayDragStart: (payload: { screenX: number; screenY: number }) => void;
+      overlayDragMove: (payload: { screenX: number; screenY: number }) => void;
+      overlayDragEnd: () => void;
+      resetOverlayPosition: () => void;
       onOverlayVisible: (cb: (visible: boolean) => void) => Unsubscribe;
       onOverlaySwitchModule: (cb: (module: string) => void) => Unsubscribe;
       sendSubtitleText: (text: string) => void;

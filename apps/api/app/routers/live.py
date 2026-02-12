@@ -9,10 +9,11 @@ from fastapi import APIRouter, UploadFile, File, Depends, Form, HTTPException, W
 import websockets
 
 from ..schemas import LiveChunkResponse
-from ..auth import get_current_user, check_usage, AuthUser
+from ..auth import get_current_user, check_usage, AuthUser, authenticate_token, PLAN_LIMITS, normalize_plan
 from ..config import settings
 from ..providers import openai_stt, deepl
 from ..db import get_supabase_or_none
+from ..usage_events import record_usage_event
 
 log = logging.getLogger(__name__)
 
@@ -36,27 +37,162 @@ async def live_stream(ws: WebSocket):
     """Proxy audio from client to Deepgram and return real-time transcripts."""
     await ws.accept()
 
+    # Authenticate (browser WebSocket API cannot set headers; token is passed via query string).
+    token = ws.query_params.get("token") or ""
+    if not token and not settings.auth_disabled:
+        await ws.send_json({"type": "error", "message": "Missing token"})
+        await ws.close()
+        return
+    try:
+        user = authenticate_token(token) if token else authenticate_token("")
+    except HTTPException as exc:
+        await ws.send_json({"type": "error", "message": str(exc.detail)})
+        await ws.close()
+        return
+
     if not settings.deepgram_api_key:
         await ws.send_json({"type": "error", "message": "Deepgram API key not configured"})
         await ws.close()
         return
 
+    db = get_supabase_or_none()
+    stream_id = str(uuid.uuid4())
+    chunk_ms = 500  # default; client may override via meta message
+    total_audio_ms = 0
+    unflushed_seconds = 0
+    flushed_seconds = 0
+    used_start = int((user.usage or {}).get("stt_seconds", 0) or 0)
+    limits = PLAN_LIMITS.get(normalize_plan(user.plan), PLAN_LIMITS["free"])
+    limit_seconds = limits.get("stt_seconds")
+    flush_target = 60  # seconds per DB write batch
+
     headers = {"Authorization": f"Token {settings.deepgram_api_key}"}
     try:
-        async with websockets.connect(DG_URL, additional_headers=headers) as dg:
+        async with websockets.connect(DG_URL, extra_headers=headers) as dg:
             log.info("[live/stream] connected to Deepgram")
+
+            async def flush_seconds(force: bool = False) -> bool:
+                """Flush unflushed STT seconds to DB. Returns False if stream should stop."""
+                nonlocal unflushed_seconds, flushed_seconds
+                if not db:
+                    # Still enforce limits, but skip DB writes.
+                    if limit_seconds is not None and used_start + flushed_seconds + unflushed_seconds > int(limit_seconds):
+                        await ws.send_json({"type": "error", "message": "Plan limit exceeded"})
+                        try:
+                            await ws.close(code=1008)
+                        except Exception:
+                            pass
+                        return False
+                    return True
+
+                if unflushed_seconds <= 0:
+                    return True
+
+                # Enforce plan limit (best-effort).
+                if limit_seconds is not None:
+                    remaining = int(limit_seconds) - used_start - flushed_seconds
+                    if remaining <= 0:
+                        await ws.send_json({"type": "error", "message": "Plan limit exceeded"})
+                        try:
+                            await ws.close(code=1008)
+                        except Exception:
+                            pass
+                        return False
+                    if unflushed_seconds > remaining:
+                        # Flush what we can, then stop.
+                        to_flush = remaining
+                        should_stop = True
+                    else:
+                        to_flush = unflushed_seconds
+                        should_stop = False
+                else:
+                    to_flush = unflushed_seconds
+                    should_stop = False
+
+                if to_flush > 0:
+                    try:
+                        db.rpc("increment_usage", {"p_user_id": user.user_id, "p_stt_seconds": int(to_flush)}).execute()
+                    except Exception:
+                        pass
+                    record_usage_event(
+                        db,
+                        user_id=user.user_id,
+                        module="live_stream",
+                        provider="deepgram",
+                        model="nova-2",
+                        resource="stt_seconds",
+                        units=int(to_flush),
+                        metadata={"stream_id": stream_id, "chunk_ms": chunk_ms},
+                    )
+                    flushed_seconds += int(to_flush)
+                    unflushed_seconds -= int(to_flush)
+
+                if should_stop:
+                    await ws.send_json({"type": "error", "message": "Plan limit exceeded"})
+                    try:
+                        await ws.close(code=1008)
+                    except Exception:
+                        pass
+                    return False
+                return True
 
             async def forward_audio():
                 """Client → Deepgram: forward binary audio frames."""
+                nonlocal total_audio_ms, unflushed_seconds, chunk_ms
                 try:
                     while True:
-                        data = await ws.receive_bytes()
-                        await dg.send(data)
+                        msg = await ws.receive()
+                        if msg.get("bytes") is not None:
+                            data = msg["bytes"]
+                            if data:
+                                await dg.send(data)
+                            # Account audio time in seconds (chunked by client timeslice).
+                            total_audio_ms_delta = int(chunk_ms)
+                            if total_audio_ms_delta < 50 or total_audio_ms_delta > 10_000:
+                                total_audio_ms_delta = 500
+                            total_audio_ms += total_audio_ms_delta
+                            whole_seconds = total_audio_ms // 1000
+                            already_accounted = flushed_seconds + unflushed_seconds
+                            new_seconds = whole_seconds - already_accounted
+                            if new_seconds > 0:
+                                unflushed_seconds += int(new_seconds)
+
+                            # Stop quickly if over limit (best-effort).
+                            if limit_seconds is not None and used_start + flushed_seconds + unflushed_seconds > int(limit_seconds):
+                                ok = await flush_seconds(force=True)
+                                if not ok:
+                                    break
+
+                            if unflushed_seconds >= flush_target:
+                                ok = await flush_seconds()
+                                if not ok:
+                                    break
+
+                        elif msg.get("text") is not None:
+                            # Optional metadata message from client
+                            try:
+                                payload = json.loads(msg["text"])
+                                if payload.get("type") == "meta":
+                                    next_chunk_ms = int(payload.get("chunk_ms") or 0)
+                                    if 50 <= next_chunk_ms <= 10_000:
+                                        chunk_ms = next_chunk_ms
+                            except Exception:
+                                pass
                 except WebSocketDisconnect:
                     log.info("[live/stream] client disconnected")
                 except Exception:
                     pass
                 finally:
+                    # Final flush (ceil to avoid undercounting partial seconds).
+                    try:
+                        final_seconds = (int(total_audio_ms) + 999) // 1000
+                        already_accounted = flushed_seconds + unflushed_seconds
+                        extra = final_seconds - already_accounted
+                        if extra > 0:
+                            unflushed_seconds += int(extra)
+                        await flush_seconds(force=True)
+                    except Exception:
+                        pass
                     try:
                         await dg.send(json.dumps({"type": "CloseStream"}))
                     except Exception:

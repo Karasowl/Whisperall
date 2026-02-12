@@ -45,6 +45,9 @@ class Settings(BaseSettings):
 
     encryption_key: str | None = Field(default=None, alias='ENCRYPTION_KEY')
 
+    # Admin / owner access (business dashboard)
+    owner_email: str | None = Field(default=None, alias='OWNER_EMAIL')
+
     auth_disabled: bool = Field(default=False, alias='AUTH_DISABLED')
     usage_limits_disabled: bool = Field(default=False, alias='USAGE_LIMITS_DISABLED')
 

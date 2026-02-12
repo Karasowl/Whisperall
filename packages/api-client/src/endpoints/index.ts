@@ -7,3 +7,5 @@ export { createAiEditEndpoint } from "./ai-edit";
 export { createDocumentsEndpoint } from "./documents";
 export { createHistoryEndpoint } from "./history";
 export { createUsageEndpoint } from "./usage";
+export { createApiKeysEndpoint } from "./api-keys";
+export { createAdminEndpoint } from "./admin";

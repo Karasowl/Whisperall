@@ -2,7 +2,7 @@ import { app, BrowserWindow, globalShortcut } from 'electron';
 import { createMainWindow, showMainWindow, setQuitting, configureMediaPermissions } from './modules/windows.js';
 import { registerHotkeys } from './modules/hotkeys.js';
 import { syncTray } from './modules/tray.js';
-// overlay is created on-demand by hotkeys/IPC, not pre-created
+import { preCreateOverlay, showOverlay } from './modules/overlay.js';
 import { registerIpcHandlers } from './modules/ipc.js';
 import { initAutoUpdater } from './modules/updater.js';
 import { registerProtocol, handleAuthUrl } from './modules/auth.js';
@@ -50,9 +50,9 @@ app.whenReady().then(() => {
   registerHotkeys();
   syncTray();
 
-  // Don't pre-create overlay — it's created on first hotkey press.
-  // Pre-creating loads Vite HMR which causes rapid GPU compositing cycles
-  // on the transparent window, triggering PCIe recovery errors on some laptops.
+  // Keep widget integrated and available immediately when the app starts.
+  preCreateOverlay();
+  showOverlay();
 
   // Auto-updater (no-op in dev)
   initAutoUpdater();

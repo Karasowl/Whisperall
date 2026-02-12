@@ -1,6 +1,9 @@
 import { ipcMain, desktopCapturer, Notification, shell } from 'electron';
 import { showMainWindow, getMainWindow } from './windows.js';
-import { showOverlay, hideOverlay, toggleOverlay, resizeOverlay, setOverlayIgnoreMouse, sendSubtitleText } from './overlay.js';
+import {
+  showOverlay, hideOverlay, toggleOverlay, resizeOverlay, setOverlayIgnoreMouse, sendSubtitleText,
+  startOverlayDrag, moveOverlayDrag, endOverlayDrag, resetOverlayPosition,
+} from './overlay.js';
 import { updateHotkeys, updateSttSettings, setLastDictationText } from './hotkeys.js';
 import { updateTraySettings, getTraySettings } from './tray.js';
 import { pasteText, undoPaste, readClipboard } from './clipboard.js';
@@ -42,6 +45,22 @@ export function registerIpcHandlers(): void {
 
   ipcMain.on('overlay:subtitle', (_e, text: string) => {
     sendSubtitleText(text);
+  });
+
+  ipcMain.on('overlay:drag-start', (_e, payload: { screenX: number; screenY: number }) => {
+    startOverlayDrag(payload.screenX, payload.screenY);
+  });
+
+  ipcMain.on('overlay:drag-move', (_e, payload: { screenX: number; screenY: number }) => {
+    moveOverlayDrag(payload.screenX, payload.screenY);
+  });
+
+  ipcMain.on('overlay:drag-end', () => {
+    endOverlayDrag();
+  });
+
+  ipcMain.on('overlay:reset-position', () => {
+    resetOverlayPosition();
   });
 
   // --- Tray ---

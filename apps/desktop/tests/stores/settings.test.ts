@@ -5,6 +5,9 @@ vi.mock('../../src/lib/electron', () => ({
     updateHotkeys: vi.fn(),
     updateSttSettings: vi.fn(),
     updateTraySettings: vi.fn(),
+    showOverlay: vi.fn(),
+    hideOverlay: vi.fn(),
+    resetOverlayPosition: vi.fn(),
   },
 }));
 
@@ -61,6 +64,8 @@ describe('Settings store', () => {
         dictate: 'Alt+X',
         read_clipboard: 'Ctrl+Shift+R',
         stt_paste: 'Alt+Shift+S',
+        translate: 'Alt+T',
+        overlay_toggle: 'Alt+W',
       },
     });
   });
@@ -104,6 +109,12 @@ describe('Settings store', () => {
     useSettingsStore.getState().setOverlayEnabled(false);
     expect(useSettingsStore.getState().overlayEnabled).toBe(false);
     expect(electron?.updateSttSettings).toHaveBeenCalledWith({ overlay_enabled: false });
+    expect(electron?.hideOverlay).toHaveBeenCalled();
+  });
+
+  it('resetOverlayPosition syncs to Electron', () => {
+    useSettingsStore.getState().resetOverlayPosition();
+    expect(electron?.resetOverlayPosition).toHaveBeenCalled();
   });
 
   it('setMinimizeToTray syncs to Electron', () => {
@@ -158,6 +169,7 @@ describe('Settings store', () => {
     useSettingsStore.getState().load();
     expect(useSettingsStore.getState().overlayEnabled).toBe(false);
     expect(electron?.updateSttSettings).toHaveBeenCalledWith({ overlay_enabled: false });
+    expect(electron?.hideOverlay).toHaveBeenCalled();
   });
 
   it('applyTheme sets correct class for dark', () => {

@@ -1,6 +1,7 @@
 'use client';
 
 import { AuthGuard } from '@/components/auth/AuthGuard';
+import { ApiKeysSection } from '@/components/dashboard/ApiKeysSection';
 import { PlanCard } from '@/components/dashboard/PlanCard';
 import { UsageMeter } from '@/components/dashboard/UsageMeter';
 import { Button } from '@/components/shared/Button';
@@ -22,6 +23,8 @@ export default function DashboardPage() {
             <h2 className="text-sm font-bold text-text mb-4">Usage this month</h2>
             <UsageMeter />
           </div>
+
+          <ApiKeysSection />
 
           <div className="flex flex-col sm:flex-row gap-3">
             <Button href="/download" variant="secondary" size="md">

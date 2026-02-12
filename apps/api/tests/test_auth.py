@@ -82,7 +82,7 @@ def test_plan_lookup_from_db():
     profiles_chain.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data={"plan": "pro"})
 
     usage_chain = MagicMock()
-    usage_chain.select.return_value.eq.return_value.order.return_value.limit.return_value.maybe_single.return_value.execute.return_value = MagicMock(data={"stt_seconds": 100})
+    usage_chain.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data={"stt_seconds": 100})
 
     def table_dispatch(name):
         if name == "profiles":
@@ -105,7 +105,7 @@ def test_plan_lookup_from_db_normalizes_case_and_spaces():
     profiles_chain.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data={"plan": " BASIC "})
 
     usage_chain = MagicMock()
-    usage_chain.select.return_value.eq.return_value.order.return_value.limit.return_value.maybe_single.return_value.execute.return_value = MagicMock(data={})
+    usage_chain.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data={})
 
     def table_dispatch(name):
         if name == "profiles":
@@ -127,7 +127,7 @@ def test_plan_lookup_from_db_falls_back_to_free_on_unknown_plan():
     profiles_chain.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data={"plan": "enterprise"})
 
     usage_chain = MagicMock()
-    usage_chain.select.return_value.eq.return_value.order.return_value.limit.return_value.maybe_single.return_value.execute.return_value = MagicMock(data={})
+    usage_chain.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data={})
 
     def table_dispatch(name):
         if name == "profiles":

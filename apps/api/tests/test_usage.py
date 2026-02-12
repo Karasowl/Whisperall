@@ -54,7 +54,7 @@ def test_usage_normalizes_db_values_and_plan(client, auth_headers):
     )
 
     usage_chain = MagicMock()
-    usage_chain.select.return_value.eq.return_value.order.return_value.limit.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+    usage_chain.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
         data={
             "stt_seconds": None,
             "tts_chars": "12",

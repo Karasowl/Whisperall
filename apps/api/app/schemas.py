@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -112,6 +112,62 @@ class UsageResponse(BaseModel):
     period_end: datetime
     next_reset_at: datetime
     generated_at: datetime
+
+
+# ── Admin / Business ────────────────────────────────────────
+
+class AdminPricingEntry(BaseModel):
+    provider: str
+    resource: str
+    model: str | None = None
+    unit: str
+    usd_per_unit: float
+    effective_from: date
+    updated_at: datetime | None = None
+
+
+class AdminPricingUpsertRequest(BaseModel):
+    provider: str
+    resource: str
+    model: str | None = None
+    unit: str
+    usd_per_unit: float
+    effective_from: date | None = None
+
+
+class AdminInvoiceEntry(BaseModel):
+    provider: str
+    period: date
+    amount_usd: float
+    currency: str = "USD"
+    notes: str | None = None
+    updated_at: datetime | None = None
+
+
+class AdminInvoiceUpsertRequest(BaseModel):
+    provider: str
+    period: date | None = None
+    amount_usd: float
+    currency: str = "USD"
+    notes: str | None = None
+
+
+class AdminCostBreakdown(BaseModel):
+    total_usd: float
+    by_provider: dict[str, float]
+
+
+class AdminOverviewResponse(BaseModel):
+    period_start: datetime
+    period_end: datetime
+    generated_at: datetime
+    users_total: int
+    users_active_30d: int
+    usage_total: UsageRecordResponse
+    estimated_cost: AdminCostBreakdown
+    real_cost: AdminCostBreakdown
+    pricing: list[AdminPricingEntry]
+    invoices: list[AdminInvoiceEntry]
 
 
 # ── Shared ────────────────────────────────────────────────

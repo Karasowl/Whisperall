@@ -11,6 +11,7 @@ import { electron } from '../lib/electron';
 import { useDocumentsStore } from './documents';
 import { formatDocDate } from '../lib/format-date';
 import { requestPlanRefresh } from './plan';
+import { useAuthStore } from './auth';
 
 export type LiveStatus = 'idle' | 'recording' | 'error';
 
@@ -59,8 +60,10 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         'active =', stream.active,
         stream.getAudioTracks().map(t => `${t.label} enabled=${t.enabled} muted=${t.muted}`));
 
+      const token = useAuthStore.getState().session?.access_token;
+      const wsUrl = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
       dgStream = new DeepgramStream({
-        url: WS_URL,
+        url: wsUrl,
         onEvent: (event) => {
           if (event.type === 'transcript') {
             if (event.isFinal && event.text) {

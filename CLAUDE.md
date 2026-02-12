@@ -57,7 +57,8 @@ apps/api/app/         FastAPI — routers/ providers/ (7 each), auth.py, db.py, 
 apps/desktop/electron/ Electron main + 7 modules (TS source)
 apps/desktop/electron-dist/ Compiled CJS output (tsc -p tsconfig.electron.json)
 apps/desktop/src/     React + Tailwind v4 — pages/ stores/ lib/ components/ overlay/
-packages/api-client/  Typed TS endpoints for all 6 API routers
+packages/api-client/  Typed TS endpoints for all 9 API routers
+packages/mcp-server/  MCP server — 13 tools wrapping api-client (stdio, any MCP client)
 supabase/migrations/  DB schema
 ```
 
@@ -85,6 +86,8 @@ cd apps/api && python -m pytest tests/ -x -q      # 82 API tests
 cd apps/desktop && npx vitest run                   # 102 desktop tests
 cd apps/desktop && npx vite build                   # production build
 cd apps/desktop && npx tsc --noEmit                 # typecheck
+cd packages/mcp-server && npx vitest run            # 25 MCP server tests
+cd packages/mcp-server && npx tsc --noEmit          # MCP typecheck
 ```
 
 ## Rules

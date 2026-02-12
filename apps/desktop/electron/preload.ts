@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('whisperall', {
   toggleOverlay: (module?: string) => ipcRenderer.send('overlay:toggle', module),
   resizeOverlay: (dims: { width: number; height: number }) => ipcRenderer.send('overlay:resize', dims),
   setOverlayIgnoreMouse: (ignore: boolean) => ipcRenderer.send('overlay:ignore-mouse', ignore),
+  overlayDragStart: (payload: { screenX: number; screenY: number }) => ipcRenderer.send('overlay:drag-start', payload),
+  overlayDragMove: (payload: { screenX: number; screenY: number }) => ipcRenderer.send('overlay:drag-move', payload),
+  overlayDragEnd: () => ipcRenderer.send('overlay:drag-end'),
+  resetOverlayPosition: () => ipcRenderer.send('overlay:reset-position'),
   onOverlayVisible: (cb: (visible: boolean) => void): Unsubscribe => {
     const handler = (_e: Electron.IpcRendererEvent, visible: boolean) => cb(visible);
     ipcRenderer.on('overlay:visible', handler);
