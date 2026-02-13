@@ -4,6 +4,7 @@ from ..schemas import DictateResponse
 from ..auth import get_current_user, check_usage, AuthUser
 from ..providers import openai_stt
 from ..db import get_supabase_or_none
+from ..usage_events import record_usage_event
 
 router = APIRouter(prefix="/v1/dictate", tags=["dictate"])
 
@@ -29,6 +30,16 @@ async def dictate(
     if db:
         try:
             db.rpc("increment_usage", {"p_user_id": user.user_id, "p_stt_seconds": duration_est}).execute()
+            record_usage_event(
+                db,
+                user_id=user.user_id,
+                module="dictate",
+                provider="openai",
+                model="gpt-4o-mini-transcribe",
+                resource="stt_seconds",
+                units=duration_est,
+                metadata={"language": language, "has_prompt": bool(prompt)},
+            )
             db.table("history").insert({
                 "user_id": user.user_id, "module": "dictate",
                 "output_text": text, "metadata": {"language": language, "is_final": is_final},

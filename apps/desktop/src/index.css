@@ -10,18 +10,20 @@ body,
 
 /* ── Theme Variables ─────────────────────────────── */
 :root {
-  --theme-base: #f6f7f8;
+  --theme-base: #F6F8FB;
   --theme-surface: #ffffff;
-  --theme-surface-alt: #F9FAFB;
-  --theme-edge: #E5E7EB;
-  --theme-muted: #9CA3AF;
-  --theme-text: #1F2937;
-  --theme-text-secondary: #6B7280;
-  --theme-glass-bg: rgba(255, 255, 255, 0.7);
-  --theme-paper-dot: #d1d5db;
-  --theme-scrollbar-track: #f6f7f8;
-  --theme-scrollbar-thumb: #d1d5db;
-  --theme-scrollbar-hover: #9ca3af;
+  --theme-surface-alt: #F1F5F9;
+  --theme-edge: #CBD5E1;
+  --theme-muted: #475569;
+  --theme-text: #0F172A;
+  --theme-text-secondary: #334155;
+  --theme-glass-bg: rgba(255, 255, 255, 0.85);
+  --theme-paper-dot: #CBD5E1;
+  --theme-scrollbar-track: #F6F8FB;
+  --theme-scrollbar-thumb: #CBD5E1;
+  --theme-scrollbar-hover: #94A3B8;
+  --theme-shadow-soft: 0 2px 15px -3px rgba(0, 0, 0, 0.07), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --theme-shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
 }
 
 html.dark {
@@ -37,6 +39,8 @@ html.dark {
   --theme-scrollbar-track: #101922;
   --theme-scrollbar-thumb: #283039;
   --theme-scrollbar-hover: #3b4754;
+  --theme-shadow-soft: 0 2px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+  --theme-shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.2);
 }
 
 /* ── Design Tokens (Tailwind v4) ─────────────────── */
@@ -54,6 +58,8 @@ html.dark {
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
   --radius-2xl: 1rem;
+  --shadow-soft: var(--theme-shadow-soft);
+  --shadow-inner-soft: var(--theme-shadow-inner);
   --animate-blink: blink 1s step-end infinite;
   --animate-shimmer: shimmer 2s infinite;
   --animate-fade-in-down: fade-in-down 0.5s ease-out forwards;

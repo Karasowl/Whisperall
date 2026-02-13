@@ -54,6 +54,7 @@ describe('Settings store', () => {
     useSettingsStore.setState({
       theme: 'dark',
       uiLanguage: 'en',
+      ttsLanguage: 'auto',
       hotkeyMode: 'toggle',
       overlayEnabled: true,
       minimizeToTray: true,
@@ -74,6 +75,7 @@ describe('Settings store', () => {
     const s = useSettingsStore.getState();
     expect(s.theme).toBe('dark');
     expect(s.uiLanguage).toBe('en');
+    expect(s.ttsLanguage).toBe('auto');
     expect(s.hotkeyMode).toBe('toggle');
     expect(s.overlayEnabled).toBe(true);
     expect(s.hotkeys.dictate).toBe('Alt+X');
@@ -96,6 +98,12 @@ describe('Settings store', () => {
   it('setUiLanguage updates and persists', () => {
     useSettingsStore.getState().setUiLanguage('es');
     expect(useSettingsStore.getState().uiLanguage).toBe('es');
+    expect(localStorage.setItem).toHaveBeenCalled();
+  });
+
+  it('setTtsLanguage updates and persists', () => {
+    useSettingsStore.getState().setTtsLanguage('es');
+    expect(useSettingsStore.getState().ttsLanguage).toBe('es');
     expect(localStorage.setItem).toHaveBeenCalled();
   });
 
@@ -135,6 +143,7 @@ describe('Settings store', () => {
     store['whisperall-settings'] = JSON.stringify({
       theme: 'light',
       uiLanguage: 'es',
+      ttsLanguage: 'fr',
       hotkeyMode: 'hold',
       hotkeys: { dictate: 'Ctrl+F' },
     });
@@ -143,6 +152,7 @@ describe('Settings store', () => {
 
     expect(useSettingsStore.getState().theme).toBe('light');
     expect(useSettingsStore.getState().uiLanguage).toBe('es');
+    expect(useSettingsStore.getState().ttsLanguage).toBe('fr');
     expect(useSettingsStore.getState().hotkeyMode).toBe('hold');
     expect(electron?.updateHotkeys).toHaveBeenCalled();
   });

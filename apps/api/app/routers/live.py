@@ -40,19 +40,19 @@ async def live_stream(ws: WebSocket):
     # Authenticate (browser WebSocket API cannot set headers; token is passed via query string).
     token = ws.query_params.get("token") or ""
     if not token and not settings.auth_disabled:
-        await ws.send_json({"type": "error", "message": "Missing token"})
-        await ws.close()
+        await ws.send_json({"type": "error", "message": "Missing token", "code": "AUTH_REQUIRED"})
+        await ws.close(code=1008)
         return
     try:
         user = authenticate_token(token) if token else authenticate_token("")
     except HTTPException as exc:
-        await ws.send_json({"type": "error", "message": str(exc.detail)})
-        await ws.close()
+        await ws.send_json({"type": "error", "message": str(exc.detail), "code": "AUTH_INVALID"})
+        await ws.close(code=1008)
         return
 
     if not settings.deepgram_api_key:
-        await ws.send_json({"type": "error", "message": "Deepgram API key not configured"})
-        await ws.close()
+        await ws.send_json({"type": "error", "message": "Deepgram API key not configured", "code": "CONFIG_MISSING"})
+        await ws.close(code=1011)
         return
 
     db = get_supabase_or_none()
@@ -77,7 +77,7 @@ async def live_stream(ws: WebSocket):
                 if not db:
                     # Still enforce limits, but skip DB writes.
                     if limit_seconds is not None and used_start + flushed_seconds + unflushed_seconds > int(limit_seconds):
-                        await ws.send_json({"type": "error", "message": "Plan limit exceeded"})
+                        await ws.send_json({"type": "error", "message": "Plan limit exceeded", "code": "PLAN_LIMIT_EXCEEDED"})
                         try:
                             await ws.close(code=1008)
                         except Exception:
@@ -92,7 +92,7 @@ async def live_stream(ws: WebSocket):
                 if limit_seconds is not None:
                     remaining = int(limit_seconds) - used_start - flushed_seconds
                     if remaining <= 0:
-                        await ws.send_json({"type": "error", "message": "Plan limit exceeded"})
+                        await ws.send_json({"type": "error", "message": "Plan limit exceeded", "code": "PLAN_LIMIT_EXCEEDED"})
                         try:
                             await ws.close(code=1008)
                         except Exception:
@@ -128,7 +128,7 @@ async def live_stream(ws: WebSocket):
                     unflushed_seconds -= int(to_flush)
 
                 if should_stop:
-                    await ws.send_json({"type": "error", "message": "Plan limit exceeded"})
+                    await ws.send_json({"type": "error", "message": "Plan limit exceeded", "code": "PLAN_LIMIT_EXCEEDED"})
                     try:
                         await ws.close(code=1008)
                     except Exception:
@@ -235,8 +235,8 @@ async def live_stream(ws: WebSocket):
     except Exception as exc:
         log.error("[live/stream] Deepgram connection failed: %s", exc)
         try:
-            await ws.send_json({"type": "error", "message": str(exc)})
-            await ws.close()
+            await ws.send_json({"type": "error", "message": str(exc), "code": "DEEPGRAM_CONNECT_FAILED"})
+            await ws.close(code=1011)
         except Exception:
             pass
 
@@ -285,6 +285,27 @@ async def live_chunk(
                 "p_stt_seconds": duration_est,
                 "p_translate_chars": len(text) if translate_to else 0,
             }).execute()
+            record_usage_event(
+                db,
+                user_id=user.user_id,
+                module="live_chunk",
+                provider="openai",
+                model="gpt-4o-transcribe-diarize",
+                resource="stt_seconds",
+                units=duration_est,
+                metadata={"session_id": session_id, "chunk_index": chunk_index},
+            )
+            if translate_to and text:
+                record_usage_event(
+                    db,
+                    user_id=user.user_id,
+                    module="live_chunk",
+                    provider="deepl",
+                    model="deepl",
+                    resource="translate_chars",
+                    units=len(text),
+                    metadata={"target_language": translate_to, "session_id": session_id, "chunk_index": chunk_index},
+                )
             db.table("history").insert({
                 "user_id": user.user_id, "module": "live",
                 "output_text": text,

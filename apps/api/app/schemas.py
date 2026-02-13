@@ -157,6 +157,28 @@ class AdminCostBreakdown(BaseModel):
     by_provider: dict[str, float]
 
 
+class AdminRevenueEntry(BaseModel):
+    period: date
+    source: str = "total"
+    amount_usd: float
+    currency: str = "USD"
+    notes: str | None = None
+    updated_at: datetime | None = None
+
+
+class AdminRevenueUpsertRequest(BaseModel):
+    period: date | None = None
+    source: str | None = None
+    amount_usd: float
+    currency: str = "USD"
+    notes: str | None = None
+
+
+class AdminRevenueBreakdown(BaseModel):
+    total_usd: float
+    by_source: dict[str, float]
+
+
 class AdminOverviewResponse(BaseModel):
     period_start: datetime
     period_end: datetime
@@ -166,8 +188,12 @@ class AdminOverviewResponse(BaseModel):
     usage_total: UsageRecordResponse
     estimated_cost: AdminCostBreakdown
     real_cost: AdminCostBreakdown
+    revenue: AdminRevenueBreakdown
+    profit_real_usd: float
+    profit_estimated_usd: float
     pricing: list[AdminPricingEntry]
     invoices: list[AdminInvoiceEntry]
+    revenue_entries: list[AdminRevenueEntry]
 
 
 # ── Shared ────────────────────────────────────────────────

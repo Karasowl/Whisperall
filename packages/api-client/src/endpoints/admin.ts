@@ -5,6 +5,8 @@ import type {
   AdminOverviewResponse,
   AdminPricingEntry,
   AdminPricingUpsertParams,
+  AdminRevenueEntry,
+  AdminRevenueUpsertParams,
 } from "../types";
 
 export function createAdminEndpoint(client: ApiClient) {
@@ -17,6 +19,7 @@ export function createAdminEndpoint(client: ApiClient) {
       client.postJson<AdminPricingEntry>("/v1/admin/pricing", body),
     upsertInvoice: (body: AdminInvoiceUpsertParams) =>
       client.postJson<AdminInvoiceEntry>("/v1/admin/invoices", body),
+    upsertRevenue: (body: AdminRevenueUpsertParams) =>
+      client.postJson<AdminRevenueEntry>("/v1/admin/revenue", body),
   };
 }
-

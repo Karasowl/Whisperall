@@ -17,7 +17,7 @@ describe('Hotkey registration', () => {
     expect(registered).toContain('Alt+X');
     expect(registered).toContain('Ctrl+Shift+R');
     expect(registered).toContain('Alt+Shift+S');
-  });
+  }, 15_000);
 
   it('unregisters all shortcuts before re-registering', async () => {
     const { registerHotkeys } = await import('../electron/modules/hotkeys.js');

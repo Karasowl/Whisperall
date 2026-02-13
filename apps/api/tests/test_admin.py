@@ -121,6 +121,18 @@ def test_admin_overview_contract(client, auth_headers):
                     }
                 ]
             ),
+            "revenue_entries": _Query(
+                data=[
+                    {
+                        "period": month_start.isoformat(),
+                        "source": "total",
+                        "amount_usd": 100.00,
+                        "currency": "USD",
+                        "notes": "Test revenue",
+                        "updated_at": now.isoformat(),
+                    }
+                ]
+            ),
         }
     )
 
@@ -137,13 +149,20 @@ def test_admin_overview_contract(client, auth_headers):
     assert "usage_total" in payload
     assert "estimated_cost" in payload
     assert "real_cost" in payload
+    assert "revenue" in payload
+    assert "profit_real_usd" in payload
+    assert "profit_estimated_usd" in payload
     assert "pricing" in payload
     assert "invoices" in payload
+    assert "revenue_entries" in payload
 
     assert payload["users_total"] == 2
     assert payload["users_active_30d"] == 2
     assert payload["usage_total"]["stt_seconds"] == 15
     assert payload["estimated_cost"]["total_usd"] == pytest.approx(0.17, abs=1e-9)
+    assert payload["revenue"]["total_usd"] == pytest.approx(100.0, abs=1e-9)
+    assert payload["profit_real_usd"] == pytest.approx(87.66, abs=1e-9)
+    assert payload["profit_estimated_usd"] == pytest.approx(99.83, abs=1e-9)
 
 
 def test_admin_upsert_pricing(client, auth_headers):
@@ -204,3 +223,33 @@ def test_admin_upsert_invoice(client, auth_headers):
     payload = res.json()
     assert payload["provider"] == "openai"
     assert float(payload["amount_usd"]) == 99.99
+
+
+def test_admin_upsert_revenue(client, auth_headers):
+    now = datetime.now(timezone.utc)
+    month_start = date(now.year, now.month, 1)
+
+    mock_db = _DB(
+        {
+            "revenue_entries": _Query(data=[]),
+        }
+    )
+
+    with patch.object(settings, "owner_email", "test@example.com"), \
+         patch("app.routers.admin.get_supabase_or_none", return_value=mock_db):
+        res = client.post(
+            "/v1/admin/revenue",
+            headers=auth_headers,
+            json={
+                "period": month_start.isoformat(),
+                "source": "total",
+                "amount_usd": 123.45,
+                "currency": "USD",
+                "notes": "Feb revenue",
+            },
+        )
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["source"] == "total"
+    assert float(payload["amount_usd"]) == 123.45

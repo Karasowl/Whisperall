@@ -7,6 +7,7 @@ from ..schemas import TranscribeJobRequest, TranscribeChunkRegister, TranscribeR
 from ..db import get_supabase_or_none
 from ..providers import groq_stt, deepgram
 from ..config import settings
+from ..usage_events import record_usage_event
 
 router = APIRouter(prefix="/v1/transcribe", tags=["transcribe"])
 
@@ -392,6 +393,27 @@ async def run_job(job_id: str, payload: TranscribeRunRequest, user: AuthUser = D
 
         if total_seconds > 0:
             db.rpc("increment_usage", {"p_user_id": user.user_id, "p_transcribe_seconds": total_seconds}).execute()
+            record_usage_event(
+                db,
+                user_id=user.user_id,
+                module="transcribe",
+                provider="groq",
+                model="whisper-large-v3-turbo",
+                resource="transcribe_seconds",
+                units=total_seconds,
+                metadata={"job_id": job_id, "chunks_processed": processed, "enable_diarization": enable_diarization},
+            )
+            if enable_diarization:
+                record_usage_event(
+                    db,
+                    user_id=user.user_id,
+                    module="transcribe",
+                    provider="deepgram",
+                    model="nova-2",
+                    resource="transcribe_seconds",
+                    units=total_seconds,
+                    metadata={"job_id": job_id, "chunks_processed": processed, "enable_diarization": True},
+                )
 
         if new_status == "completed":
             all_chunks = db.table("transcribe_chunks").select("index,result_json").eq("job_id", job_id).order("index").execute()
@@ -501,6 +523,27 @@ async def transcribe_from_url(payload: TranscribeUrlRequest, user: AuthUser = De
         segments = None
 
     db.rpc("increment_usage", {"p_user_id": user.user_id, "p_transcribe_seconds": 300}).execute()
+    record_usage_event(
+        db,
+        user_id=user.user_id,
+        module="transcribe_from_url",
+        provider="groq",
+        model="whisper-large-v3-turbo",
+        resource="transcribe_seconds",
+        units=300,
+        metadata={"url": payload.url, "enable_diarization": payload.enable_diarization},
+    )
+    if payload.enable_diarization:
+        record_usage_event(
+            db,
+            user_id=user.user_id,
+            module="transcribe_from_url",
+            provider="deepgram",
+            model="nova-2",
+            resource="transcribe_seconds",
+            units=300,
+            metadata={"url": payload.url, "enable_diarization": True},
+        )
     try:
         db.table("history").insert({
             "user_id": user.user_id, "module": "transcribe",

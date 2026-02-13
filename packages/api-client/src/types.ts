@@ -211,6 +211,28 @@ export type AdminCostBreakdown = {
   by_provider: Record<string, number>;
 };
 
+export type AdminRevenueEntry = {
+  period: string; // YYYY-MM-DD (month start)
+  source: string; // total | stripe | appstore | ...
+  amount_usd: number;
+  currency: string;
+  notes: string | null;
+  updated_at: string | null;
+};
+
+export type AdminRevenueUpsertParams = {
+  period?: string; // YYYY-MM-DD (month start)
+  source?: string | null;
+  amount_usd: number;
+  currency?: string;
+  notes?: string | null;
+};
+
+export type AdminRevenueBreakdown = {
+  total_usd: number;
+  by_source: Record<string, number>;
+};
+
 export type AdminOverviewResponse = {
   period_start: string;
   period_end: string;
@@ -220,8 +242,12 @@ export type AdminOverviewResponse = {
   usage_total: UsageRecord;
   estimated_cost: AdminCostBreakdown;
   real_cost: AdminCostBreakdown;
+  revenue: AdminRevenueBreakdown;
+  profit_real_usd: number;
+  profit_estimated_usd: number;
   pricing: AdminPricingEntry[];
   invoices: AdminInvoiceEntry[];
+  revenue_entries: AdminRevenueEntry[];
 };
 
 // ── Documents ──────────────────────────────────────────

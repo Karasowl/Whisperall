@@ -10,6 +10,7 @@ import { requestPlanRefresh, usePlanStore } from './stores/plan';
 import { useSettingsStore } from './stores/settings';
 import { electron } from './lib/electron';
 import { playTTS } from './lib/tts';
+import { inferTTSLanguage } from './lib/lang-detect';
 import { useT } from './lib/i18n';
 import { PricingContext } from './lib/pricing-context';
 
@@ -43,7 +44,12 @@ export default function App() {
       if (action === 'open-settings') setShowSettings(true);
       else if (action === 'read-clipboard') {
         const text = await electron!.readClipboard();
-        if (text) playTTS(text);
+        if (text) {
+          const s = useSettingsStore.getState();
+          const forced = s.ttsLanguage && s.ttsLanguage !== 'auto' ? s.ttsLanguage : undefined;
+          const lang = forced ?? inferTTSLanguage(text, { fallback: s.uiLanguage });
+          playTTS(text, undefined, lang);
+        }
       }
     });
   }, []);

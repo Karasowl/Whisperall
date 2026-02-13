@@ -5,6 +5,7 @@ import type {
   AdminInvoiceEntry,
   AdminOverviewResponse,
   AdminPricingEntry,
+  AdminRevenueEntry,
 } from '@whisperall/api-client';
 import { ApiError } from '@whisperall/api-client';
 import { AuthGuard } from '@/components/auth/AuthGuard';
@@ -53,6 +54,7 @@ function AdminDashboardInner() {
   const [overview, setOverview] = useState<AdminOverviewResponse | null>(null);
   const [pricing, setPricing] = useState<AdminPricingEntry[]>([]);
   const [invoices, setInvoices] = useState<AdminInvoiceEntry[]>([]);
+  const [revenueEntries, setRevenueEntries] = useState<AdminRevenueEntry[]>([]);
   const [error, setError] = useState<{ message: string; kind: string; code?: string } | null>(null);
   const [newPricing, setNewPricing] = useState({
     provider: '',
@@ -64,6 +66,13 @@ function AdminDashboardInner() {
   });
   const [newInvoice, setNewInvoice] = useState({
     provider: '',
+    amount_usd: 0,
+    currency: 'USD',
+    notes: '',
+    period: '',
+  });
+  const [newRevenue, setNewRevenue] = useState({
+    source: 'total',
     amount_usd: 0,
     currency: 'USD',
     notes: '',
@@ -87,6 +96,7 @@ function AdminDashboardInner() {
     if (!periodStartDate) return;
     setNewPricing((p) => ({ ...p, effective_from: p.effective_from || periodStartDate }));
     setNewInvoice((i) => ({ ...i, period: i.period || periodStartDate }));
+    setNewRevenue((r) => ({ ...r, period: r.period || periodStartDate }));
   }, [periodStartDate]);
 
   const refresh = useCallback(async () => {
@@ -99,6 +109,7 @@ function AdminDashboardInner() {
       setOverview(data);
       setPricing(data.pricing || []);
       setInvoices(data.invoices || []);
+      setRevenueEntries(data.revenue_entries || []);
       setError(null);
     } catch (e) {
       const base = classifyApiError(e);
@@ -107,6 +118,7 @@ function AdminDashboardInner() {
       setOverview(null);
       setPricing([]);
       setInvoices([]);
+      setRevenueEntries([]);
     } finally {
       setLoading(false);
     }
@@ -153,6 +165,26 @@ function AdminDashboardInner() {
       });
       setInvoices((prev) => prev.map((inv) => (
         inv.provider === saved.provider && inv.period === saved.period ? saved : inv
+      )));
+      await refresh();
+    } catch (e) {
+      const base = classifyApiError(e);
+      const code = e instanceof ApiError ? e.code : undefined;
+      setError({ ...base, code });
+    }
+  }, [refresh]);
+
+  const handleSaveRevenue = useCallback(async (row: AdminRevenueEntry) => {
+    try {
+      const saved = await api.admin.upsertRevenue({
+        source: row.source,
+        period: row.period,
+        amount_usd: row.amount_usd,
+        currency: row.currency,
+        notes: row.notes ?? null,
+      });
+      setRevenueEntries((prev) => prev.map((rev) => (
+        rev.source === saved.source && rev.period === saved.period ? saved : rev
       )));
       await refresh();
     } catch (e) {
@@ -220,10 +252,11 @@ function AdminDashboardInner() {
         {periodLabel && <MonthPill text={periodLabel} />}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <SummaryCard title="Users (total)" value={`${overview.users_total}`} />
         <SummaryCard title="Active users (30d)" value={`${overview.users_active_30d}`} />
-        <SummaryCard title="Est. cost (month)" value={usd(overview.estimated_cost.total_usd)} sub="From usage + pricing table" />
+        <SummaryCard title="Revenue (month)" value={usd(overview.revenue.total_usd)} sub="Manual entries" />
+        <SummaryCard title="Profit (real)" value={usd(overview.profit_real_usd)} sub="Revenue - real invoices" />
       </div>
 
       <div className="p-5 rounded-2xl border border-edge bg-surface">
@@ -238,7 +271,7 @@ function AdminDashboardInner() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
           <div className="p-4 rounded-xl border border-edge bg-base/50">
             <div className="text-xs text-muted">Real spend (month)</div>
             <div className="text-xl font-black text-text mt-1">{usd(overview.real_cost.total_usd)}</div>
@@ -268,6 +301,33 @@ function AdminDashboardInner() {
               {Object.keys(overview.estimated_cost.by_provider || {}).length === 0 && (
                 <div>Set pricing rows (usd_per_unit) to enable estimates.</div>
               )}
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl border border-edge bg-base/50">
+            <div className="text-xs text-muted">Revenue (month)</div>
+            <div className="text-xl font-black text-text mt-1">{usd(overview.revenue.total_usd)}</div>
+            <div className="mt-3 space-y-1 text-xs text-muted">
+              {Object.entries(overview.revenue.by_source || {}).map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between gap-2">
+                  <span className="truncate">{k}</span>
+                  <span className="text-text">{usd(v)}</span>
+                </div>
+              ))}
+              {Object.keys(overview.revenue.by_source || {}).length === 0 && (
+                <div>No revenue entries yet.</div>
+              )}
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl border border-edge bg-base/50">
+            <div className="text-xs text-muted">Profit (month)</div>
+            <div className="text-xl font-black text-text mt-1">{usd(overview.profit_real_usd)}</div>
+            <div className="mt-3 space-y-1 text-xs text-muted">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate">Profit (estimated)</span>
+                <span className="text-text">{usd(overview.profit_estimated_usd)}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -488,6 +548,102 @@ function AdminDashboardInner() {
               placeholder="notes (optional)"
               value={newInvoice.notes}
               onChange={(e) => setNewInvoice((i) => ({ ...i, notes: e.target.value }))}
+              className="w-full bg-base border border-edge text-text text-sm rounded-lg px-3 py-2 outline-none"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 rounded-2xl border border-edge bg-surface">
+        <h2 className="text-sm font-bold text-text mb-4">Revenue entries (month)</h2>
+        <div className="space-y-3">
+          {revenueEntries.map((rev) => (
+            <div key={`${rev.source}:${rev.period}`} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-xl border border-edge bg-base/50">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-text truncate">
+                  {rev.source}
+                </div>
+                <div className="text-xs text-muted truncate">
+                  Period: {rev.period}{rev.notes ? ` · ${rev.notes}` : ''}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={String(rev.amount_usd ?? 0)}
+                  onChange={(e) => {
+                    const next = clampNum(e.target.value, 0);
+                    setRevenueEntries((prev) => prev.map((x) => (x === rev ? { ...x, amount_usd: next } : x)));
+                  }}
+                  className="w-28 bg-base border border-edge text-text text-sm rounded-lg px-3 py-2 outline-none"
+                  inputMode="decimal"
+                />
+                <button
+                  type="button"
+                  onClick={() => { void handleSaveRevenue(rev); }}
+                  className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          ))}
+          {revenueEntries.length === 0 && (
+            <div className="text-sm text-muted">No revenue entries yet.</div>
+          )}
+        </div>
+
+        <div className="mt-5 pt-5 border-t border-edge">
+          <div className="text-xs font-bold tracking-widest uppercase text-muted mb-3">Add or update revenue entry</div>
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+            <input
+              placeholder="source (total, stripe...)"
+              value={newRevenue.source}
+              onChange={(e) => setNewRevenue((r) => ({ ...r, source: e.target.value }))}
+              className="bg-base border border-edge text-text text-sm rounded-lg px-3 py-2 outline-none sm:col-span-2"
+            />
+            <input
+              type="date"
+              value={newRevenue.period || periodStartDate}
+              onChange={(e) => setNewRevenue((r) => ({ ...r, period: e.target.value }))}
+              className="bg-base border border-edge text-text text-sm rounded-lg px-3 py-2 outline-none"
+            />
+            <input
+              placeholder="amount_usd"
+              value={String(newRevenue.amount_usd)}
+              onChange={(e) => setNewRevenue((r) => ({ ...r, amount_usd: clampNum(e.target.value, 0) }))}
+              className="bg-base border border-edge text-text text-sm rounded-lg px-3 py-2 outline-none"
+              inputMode="decimal"
+            />
+            <button
+              type="button"
+              onClick={async () => {
+                const source = newRevenue.source.trim() || 'total';
+                try {
+                  await api.admin.upsertRevenue({
+                    source,
+                    period: (newRevenue.period || periodStartDate || '').trim() || undefined,
+                    amount_usd: newRevenue.amount_usd,
+                    currency: newRevenue.currency || 'USD',
+                    notes: newRevenue.notes?.trim() || null,
+                  });
+                  setNewRevenue((r) => ({ ...r, source: 'total', notes: '', amount_usd: 0 }));
+                  await refresh();
+                } catch (e) {
+                  const base = classifyApiError(e);
+                  const code = e instanceof ApiError ? e.code : undefined;
+                  setError({ ...base, code });
+                }
+              }}
+              className="px-3 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+            >
+              Save
+            </button>
+          </div>
+          <div className="mt-2">
+            <input
+              placeholder="notes (optional)"
+              value={newRevenue.notes}
+              onChange={(e) => setNewRevenue((r) => ({ ...r, notes: e.target.value }))}
               className="w-full bg-base border border-edge text-text text-sm rounded-lg px-3 py-2 outline-none"
             />
           </div>

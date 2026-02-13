@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import { electron } from '../lib/electron';
+import { normalizeLanguageCode, type TTSSupportedLanguage } from '../lib/lang-detect';
 
 export type Theme = 'light' | 'dark' | 'system';
 export type UiLocale = 'en' | 'es';
+export type TtsLanguage = 'auto' | TTSSupportedLanguage;
 
 export type SettingsState = {
   theme: Theme;
   uiLanguage: UiLocale;
+  ttsLanguage: TtsLanguage;
   hotkeyMode: 'toggle' | 'hold';
   overlayEnabled: boolean;
   minimizeToTray: boolean;
@@ -18,6 +21,7 @@ export type SettingsState = {
 
   setTheme: (theme: Theme) => void;
   setUiLanguage: (lang: UiLocale) => void;
+  setTtsLanguage: (lang: string) => void;
   setHotkeyMode: (mode: 'toggle' | 'hold') => void;
   setOverlayEnabled: (enabled: boolean) => void;
   resetOverlayPosition: () => void;
@@ -47,12 +51,31 @@ function loadFromStorage(): Partial<SettingsState> {
   }
 }
 
+function normalizeTtsLanguage(input: string | undefined): TtsLanguage {
+  const raw = (input ?? '').trim().toLowerCase();
+  if (!raw || raw === 'auto') return 'auto';
+  return normalizeLanguageCode(raw) ?? 'auto';
+}
+
 export function applyTheme(theme: Theme): void {
   const resolved = theme === 'system'
     ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : theme;
   document.documentElement.classList.remove('light', 'dark');
   document.documentElement.classList.add(resolved);
+
+  // Keep native Windows title bar overlay in sync with the active theme.
+  // Important: settings.ts is shared between main window + overlay renderer.
+  // Avoid updating the main window title bar from the overlay renderer.
+  try {
+    const isOverlay = String(window.location?.href ?? '').includes('overlay.html');
+    if (!isOverlay && electron?.platform === 'win32' && electron?.updateTitleBar) {
+      const styles = getComputedStyle(document.documentElement);
+      const color = styles.getPropertyValue('--theme-base').trim() || (resolved === 'dark' ? '#101922' : '#F6F8FB');
+      const symbolColor = styles.getPropertyValue('--theme-muted').trim() || (resolved === 'dark' ? '#9dabb9' : '#475569');
+      electron.updateTitleBar({ color, symbolColor });
+    }
+  } catch { /* ignore */ }
 }
 
 let systemThemeListener: (() => void) | null = null;
@@ -71,6 +94,7 @@ function setupSystemListener(theme: Theme): void {
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   theme: 'dark',
   uiLanguage: 'en',
+  ttsLanguage: 'auto',
   hotkeyMode: 'toggle',
   overlayEnabled: true,
   minimizeToTray: true,
@@ -96,6 +120,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setUiLanguage: (uiLanguage) => {
     set({ uiLanguage });
     persist({ uiLanguage });
+  },
+
+  setTtsLanguage: (ttsLanguage) => {
+    const next = normalizeTtsLanguage(ttsLanguage);
+    set({ ttsLanguage: next });
+    persist({ ttsLanguage: next });
   },
 
   setHotkeyMode: (hotkeyMode) => {
@@ -152,7 +182,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   load: () => {
     const saved = loadFromStorage();
-    set(saved);
+    const ttsLanguage = normalizeTtsLanguage((saved as { ttsLanguage?: string })?.ttsLanguage);
+    set({ ...saved, ttsLanguage });
     // Apply theme
     const theme = (saved.theme as Theme) || 'dark';
     applyTheme(theme);

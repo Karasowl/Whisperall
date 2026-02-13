@@ -22,6 +22,19 @@ const TARGET_LANGS = [
   { value: 'zh', label: '中文' },
 ];
 
+const TTS_LANGS = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Espanol' },
+  { value: 'fr', label: 'Francais' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'pt', label: 'Portugues' },
+  { value: 'it', label: 'Italiano' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'zh', label: '中文' },
+];
+
 const THEMES: { value: Theme; key: string; icon: string }[] = [
   { value: 'light', key: 'settings.light', icon: 'light_mode' },
   { value: 'dark', key: 'settings.dark', icon: 'dark_mode' },
@@ -181,6 +194,27 @@ export function SettingsModal({ onClose, onOpenPricing }: Props) {
                   </select>
                 </Toggle>
               )}
+            </div>
+          </section>
+
+          {/* Text-to-speech */}
+          <section>
+            <h3 className="text-sm font-semibold text-text-secondary mb-3">{t('settings.tts')}</h3>
+            <div className="flex flex-col gap-4">
+              <Toggle label={t('settings.ttsLanguage')} description={t('settings.ttsLanguageDesc')}>
+                <select
+                  value={settings.ttsLanguage}
+                  onChange={(e) => settings.setTtsLanguage(e.target.value)}
+                  className="bg-base border border-edge text-text text-sm rounded-lg px-3 py-1.5 outline-none appearance-none"
+                  data-testid="settings-tts-language"
+                >
+                  {TTS_LANGS.map((l) => (
+                    <option key={l.value} value={l.value}>
+                      {l.value === 'auto' ? t('settings.auto') : l.label}
+                    </option>
+                  ))}
+                </select>
+              </Toggle>
             </div>
           </section>
 

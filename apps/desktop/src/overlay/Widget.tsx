@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { useSettingsStore } from '../stores/settings';
 import { requestPlanRefresh } from '../stores/plan';
 import { t as i18nT } from '../lib/i18n';
+import { inferTTSLanguage } from '../lib/lang-detect';
 
 let recorder: MediaRecorder | null = null;
 let audioChunks: Blob[] = [];
@@ -41,6 +42,7 @@ export function Widget() {
   const audioDevice = useSettingsStore((s) => s.audioDevice);
   const translateTo = useSettingsStore((s) => s.translateTo);
   const uiLanguage = useSettingsStore((s) => s.uiLanguage);
+  const ttsLanguage = useSettingsStore((s) => s.ttsLanguage);
   const readerAudioRef = useRef<HTMLAudioElement | null>(null);
   const subtitleTranslateReq = useRef(0);
   const [selectedPromptId, setSelectedPromptId] = useState('default');
@@ -140,7 +142,9 @@ export function Widget() {
     if (!textToSpeak.trim()) return;
     setReaderStatus('loading');
     try {
-      const res = await api.tts.synthesize({ text: textToSpeak, language: uiLanguage });
+      const forced = ttsLanguage && ttsLanguage.toLowerCase() !== 'auto' ? ttsLanguage : undefined;
+      const language = forced ?? inferTTSLanguage(textToSpeak, { fallback: uiLanguage });
+      const res = await api.tts.synthesize({ text: textToSpeak, language });
       requestPlanRefresh();
       disposeReaderAudio();
       const audio = new Audio(res.audio_url);
@@ -163,7 +167,7 @@ export function Widget() {
     } catch {
       setReaderStatus('error');
     }
-  }, [disposeReaderAudio, readerSpeed, uiLanguage]);
+  }, [disposeReaderAudio, readerSpeed, ttsLanguage, uiLanguage]);
 
   const loadClipboardText = useCallback(async () => {
     try {

@@ -13,6 +13,9 @@ from ..schemas import (
     AdminPricingEntry,
     AdminPricingUpsertRequest,
     AdminCostBreakdown,
+    AdminRevenueBreakdown,
+    AdminRevenueEntry,
+    AdminRevenueUpsertRequest,
     UsageRecordResponse,
 )
 
@@ -212,6 +215,37 @@ def _estimate_cost(
     return AdminCostBreakdown(total_usd=round(total, 4), by_provider=by_provider_rounded)
 
 
+def _sum_revenue(rows: list[dict], month_start: date) -> tuple[AdminRevenueBreakdown, list[AdminRevenueEntry]]:
+    entries: list[AdminRevenueEntry] = []
+    by_source: dict[str, float] = {}
+    for row in rows:
+        try:
+            period_val = date.fromisoformat(str(row.get("period")))
+        except Exception:
+            period_val = month_start
+        source = (row.get("source") or "").strip() or "total"
+        amt = float(row.get("amount_usd") or 0)
+        entries.append(
+            AdminRevenueEntry(
+                period=period_val,
+                source=source,
+                amount_usd=amt,
+                currency=row.get("currency") or "USD",
+                notes=row.get("notes"),
+                updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
+            )
+        )
+        if amt:
+            by_source[source] = by_source.get(source, 0.0) + amt
+
+    breakdown = AdminRevenueBreakdown(
+        total_usd=round(float(sum(by_source.values())), 4),
+        by_source={k: round(v, 4) for k, v in sorted(by_source.items())},
+    )
+    entries.sort(key=lambda e: (e.period, e.source))
+    return breakdown, entries
+
+
 @router.get("/overview", response_model=AdminOverviewResponse)
 async def admin_overview(
     month: str | None = Query(default=None, description="Billing month in YYYY-MM (UTC). Defaults to current month."),
@@ -305,6 +339,21 @@ async def admin_overview(
         by_provider={k: round(v, 4) for k, v in sorted(by_provider_real.items())},
     )
 
+    # Revenue entries for that month (manual entry).
+    try:
+        revenue_rows = _paginate_select_all(
+            db.table("revenue_entries")
+            .select("period,source,amount_usd,currency,notes,updated_at")
+            .eq("period", month_start.isoformat())
+        )
+    except Exception:
+        revenue_rows = []
+
+    revenue, revenue_entries = _sum_revenue(revenue_rows, month_start)
+
+    profit_real_usd = round(float(revenue.total_usd - real_cost.total_usd), 4)
+    profit_estimated_usd = round(float(revenue.total_usd - estimated_cost.total_usd), 4)
+
     return AdminOverviewResponse(
         period_start=period_start,
         period_end=period_end,
@@ -314,8 +363,12 @@ async def admin_overview(
         usage_total=usage_total,
         estimated_cost=estimated_cost,
         real_cost=real_cost,
+        revenue=revenue,
+        profit_real_usd=profit_real_usd,
+        profit_estimated_usd=profit_estimated_usd,
         pricing=pricing,
         invoices=invoices,
+        revenue_entries=revenue_entries,
     )
 
 
@@ -388,6 +441,43 @@ async def upsert_invoice(
     return AdminInvoiceEntry(
         provider=data["provider"],
         period=date.fromisoformat(str(data.get("period") or period.isoformat())),
+        amount_usd=float(data.get("amount_usd") or body.amount_usd),
+        currency=data.get("currency") or body.currency or "USD",
+        notes=data.get("notes"),
+        updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None,
+    )
+
+
+@router.post("/revenue", response_model=AdminRevenueEntry)
+async def upsert_revenue(
+    body: AdminRevenueUpsertRequest,
+    _user: AuthUser = Depends(require_admin),
+):
+    if body.amount_usd < 0:
+        raise HTTPException(status_code=400, detail="amount_usd must be >= 0")
+
+    db = get_supabase_or_none()
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not configured")
+
+    period = body.period or date.today().replace(day=1)
+    source = (body.source or "").strip() or "total"
+    row = {
+        "period": period.isoformat(),
+        "source": source,
+        "amount_usd": body.amount_usd,
+        "currency": body.currency or "USD",
+        "notes": body.notes,
+    }
+    try:
+        res = db.table("revenue_entries").upsert(row, on_conflict="period,source").execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Revenue upsert failed: {exc}") from exc
+
+    data = (res.data or [row])[0]
+    return AdminRevenueEntry(
+        period=date.fromisoformat(str(data.get("period") or period.isoformat())),
+        source=data.get("source") or source,
         amount_usd=float(data.get("amount_usd") or body.amount_usd),
         currency=data.get("currency") or body.currency or "USD",
         notes=data.get("notes"),

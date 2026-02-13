@@ -8,7 +8,7 @@ export type StreamEvent =
   | { type: 'close' };
 
 export type DeepgramStreamOptions = {
-  url: string; // ws://localhost:8080/v1/live/stream
+  url: string | (() => string); // ws://localhost:8080/v1/live/stream
   onEvent: (event: StreamEvent) => void;
 };
 
@@ -32,10 +32,14 @@ export class DeepgramStream {
     this.connect();
   }
 
+  private resolveUrl(): string {
+    return typeof this.opts.url === 'function' ? this.opts.url() : this.opts.url;
+  }
+
   private connect(): void {
     if (this.stopped || !this.stream?.active) return;
 
-    const ws = new WebSocket(this.opts.url);
+    const ws = new WebSocket(this.resolveUrl());
     this.ws = ws;
 
     ws.onopen = () => {
@@ -69,7 +73,13 @@ export class DeepgramStream {
         } else if (data.type === 'utterance_end') {
           this.opts.onEvent({ type: 'utterance_end' });
         } else if (data.type === 'error') {
+          const code = String(data.code || '').toUpperCase();
           this.opts.onEvent({ type: 'error', message: data.message });
+          // Don't reconnect forever on non-retryable errors (auth/plan/config).
+          if (code === 'PLAN_LIMIT_EXCEEDED' || code === 'AUTH_REQUIRED' || code === 'AUTH_INVALID' || code === 'CONFIG_MISSING') {
+            this.stopped = true;
+            try { ws.close(); } catch { /* ignore */ }
+          }
         }
       } catch { /* non-JSON message */ }
     };
@@ -78,8 +88,10 @@ export class DeepgramStream {
       this.opts.onEvent({ type: 'error', message: 'WebSocket connection error' });
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       console.log('[dg-stream] WebSocket closed, stopped=', this.stopped);
+      // 1008 = "policy violation" (we use it for auth/plan-limit errors).
+      if (ev?.code === 1008) this.stopped = true;
       if (this.recorder?.state === 'recording') this.recorder.stop();
       this.recorder = null;
 
