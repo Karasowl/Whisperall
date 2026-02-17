@@ -14,10 +14,10 @@ import { inferTTSLanguage } from './lib/lang-detect';
 import { useT } from './lib/i18n';
 import { PricingContext } from './lib/pricing-context';
 
-export type Page = 'notes' | 'transcribe' | 'reader' | 'history';
+export type Page = 'dictate' | 'transcribe' | 'reader' | 'history';
 
 export default function App() {
-  const [page, setPage] = useState<Page>('notes');
+  const [page, setPage] = useState<Page>('dictate');
   const [showSettings, setShowSettings] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
   const initAuth = useAuthStore((s) => s.init);
@@ -46,9 +46,10 @@ export default function App() {
         const text = await electron!.readClipboard();
         if (text) {
           const s = useSettingsStore.getState();
+          const voice = s.ttsVoice && s.ttsVoice !== 'auto' ? s.ttsVoice : undefined;
           const forced = s.ttsLanguage && s.ttsLanguage !== 'auto' ? s.ttsLanguage : undefined;
-          const lang = forced ?? inferTTSLanguage(text, { fallback: s.uiLanguage });
-          playTTS(text, undefined, lang);
+          const lang = forced ?? inferTTSLanguage(text, { fallback: s.uiLanguage, voice });
+          playTTS(text, voice, lang);
         }
       }
     });
@@ -67,10 +68,12 @@ export default function App() {
 
   if (!user) return <AuthPage />;
 
+  const handleNavigate = (p: Page) => { setPage(p); };
+
   let content: JSX.Element;
   switch (page) {
-    case 'notes': content = <DictatePage />; break;
-    case 'transcribe': content = <TranscribePage onNavigate={setPage} />; break;
+    case 'dictate': content = <DictatePage />; break;
+    case 'transcribe': content = <TranscribePage onNavigate={handleNavigate} />; break;
     case 'reader': content = <ReaderPage />; break;
     case 'history': content = <HistoryPage />; break;
   }
@@ -79,7 +82,7 @@ export default function App() {
 
   return (
     <PricingContext.Provider value={openPricing}>
-      <AppShell page={page} onNavigate={setPage} showSettings={showSettings} onToggleSettings={setShowSettings} showPricing={showPricing} onTogglePricing={setShowPricing}>
+      <AppShell page={page} onNavigate={handleNavigate} showSettings={showSettings} onToggleSettings={setShowSettings} showPricing={showPricing} onTogglePricing={setShowPricing}>
         {content}
       </AppShell>
     </PricingContext.Provider>

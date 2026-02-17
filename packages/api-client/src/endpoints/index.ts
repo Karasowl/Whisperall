@@ -5,6 +5,8 @@ export { createTTSEndpoint } from "./tts";
 export { createTranslateEndpoint } from "./translate";
 export { createAiEditEndpoint } from "./ai-edit";
 export { createDocumentsEndpoint } from "./documents";
+export { createFoldersEndpoint } from "./folders";
+export { createReaderEndpoint } from "./reader";
 export { createHistoryEndpoint } from "./history";
 export { createUsageEndpoint } from "./usage";
 export { createApiKeysEndpoint } from "./api-keys";

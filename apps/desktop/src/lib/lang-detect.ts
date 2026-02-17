@@ -10,9 +10,11 @@ export function normalizeLanguageCode(lang: string | undefined | null): TTSSuppo
 }
 
 function inferLanguageFromVoice(voice: string | undefined): TTSSupportedLanguage | undefined {
-  const m = (voice ?? '').match(/^([a-z]{2})-/i);
+  const m = (voice ?? '').match(/^([a-z]{2,3})-/i);
   if (!m) return undefined;
-  return normalizeLanguageCode(m[1]);
+  const base = m[1].toLowerCase();
+  if (base === 'cmn' || base === 'yue') return 'zh';
+  return normalizeLanguageCode(base);
 }
 
 // Accents + inverted punctuation are strong Spanish signals.

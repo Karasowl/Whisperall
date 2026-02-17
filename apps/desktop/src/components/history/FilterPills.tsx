@@ -1,10 +1,12 @@
 import { useT } from '../../lib/i18n';
 
 const FILTER_KEYS = [
-  { id: 'all', key: 'history.all', icon: '', dot: '' },
-  { id: 'today', key: 'history.today', icon: '', dot: 'bg-green-500' },
-  { id: 'memo', key: 'history.memos', icon: 'mic', dot: '' },
-  { id: 'meeting', key: 'history.meetings', icon: 'groups', dot: '' },
+  { id: 'all', key: 'history.all', icon: '', dot: '', label: '' },
+  { id: 'today', key: 'history.today', icon: '', dot: 'bg-green-500', label: '' },
+  { id: 'dictate', key: '', icon: 'mic', dot: '', label: 'Dictation' },
+  { id: 'transcribe', key: '', icon: 'description', dot: '', label: 'Transcription' },
+  { id: 'live', key: 'history.meetings', icon: 'groups', dot: '', label: '' },
+  { id: 'tts', key: '', icon: 'record_voice_over', dot: '', label: 'Read Aloud' },
 ] as const;
 
 type FilterId = typeof FILTER_KEYS[number]['id'];
@@ -28,7 +30,7 @@ export function FilterPills({ active, onChange }: Props) {
           >
             {f.dot && <span className={`w-2 h-2 rounded-full ${f.dot}`} />}
             {f.icon && <span className="material-symbols-outlined text-[16px]">{f.icon}</span>}
-            {t(f.key)}
+            {f.key ? t(f.key) : f.label}
           </button>
         );
       })}

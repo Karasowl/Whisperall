@@ -6,7 +6,7 @@ import { HistoryTable } from '../components/history/HistoryTable';
 import { PreviewPanel } from '../components/history/PreviewPanel';
 import { useT } from '../lib/i18n';
 
-export type HistoryEntry = { id: string; module: string; output_text: string | null; input_text: string | null; audio_url: string | null; created_at: string };
+export type HistoryEntry = { id: string; module: string; output_text: string | null; input_text: string | null; audio_url: string | null; metadata?: Record<string, unknown>; created_at: string };
 
 export function HistoryPage() {
   const t = useT();
@@ -14,7 +14,7 @@ export function HistoryPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | 'today' | 'memo' | 'meeting'>('all');
+  const [filter, setFilter] = useState<'all' | 'today' | 'dictate' | 'transcribe' | 'live' | 'tts'>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const fetchHistory = useCallback(() => {
@@ -29,11 +29,10 @@ export function HistoryPage() {
   useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
   const filtered = entries.filter((e) => {
-    const text = (e.output_text ?? '').toLowerCase();
+    const text = ((e.output_text ?? '') + ' ' + (e.input_text ?? '')).toLowerCase();
     if (search && !text.includes(search.toLowerCase()) && !e.module.includes(search.toLowerCase())) return false;
     if (filter === 'today') return new Date(e.created_at).toDateString() === new Date().toDateString();
-    if (filter === 'memo') return e.module === 'dictate';
-    if (filter === 'meeting') return e.module === 'transcribe' || e.module === 'live';
+    if (filter === 'dictate' || filter === 'transcribe' || filter === 'live' || filter === 'tts') return e.module === filter;
     return true;
   });
 

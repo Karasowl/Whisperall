@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   getMicStream, stopMicStream,
   getSystemAudioStream, stopSystemStream,
+  getMeetingAudioStream, stopMeetingStream,
 } from '../lib/audio';
 import { useSettingsStore } from './settings';
 import type { AudioSourceType } from '../lib/audio';
@@ -32,10 +33,13 @@ export type LiveState = {
 let dgStream: DeepgramStream | null = null;
 let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
 let usageRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let activeSystemCapture: 'system' | 'meeting' | null = null;
 const AUTO_SAVE_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const USAGE_REFRESH_INTERVAL = 60 * 1000; // 1 minute
 
-const API_URL = import.meta.env.VITE_API_URL as string || 'http://localhost:8000';
+// Keep consistent with src/lib/api.ts. In packaged builds the env var might be missing,
+// so the fallback must match the local dev API started by Whisperall.bat (8080).
+const API_URL = (import.meta.env.VITE_API_URL as string) || 'http://127.0.0.1:8080';
 const WS_URL = API_URL.replace(/^http/, 'ws') + '/v1/live/stream';
 
 export const useLiveStore = create<LiveState>((set, get) => ({
@@ -53,9 +57,20 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     try {
       set({ status: 'recording', error: null, autoSaveError: null, segments: [], interimText: '' });
       console.log('[live] starting, source =', get().source);
-      const stream = get().source === 'system'
-        ? await getSystemAudioStream()
-        : await getMicStream(useSettingsStore.getState().audioDevice);
+      const settings = useSettingsStore.getState();
+      let stream: MediaStream;
+      if (get().source === 'system') {
+        if (settings.systemIncludeMic) {
+          activeSystemCapture = 'meeting';
+          stream = await getMeetingAudioStream(settings.audioDevice);
+        } else {
+          activeSystemCapture = 'system';
+          stream = await getSystemAudioStream();
+        }
+      } else {
+        activeSystemCapture = null;
+        stream = await getMicStream(settings.audioDevice);
+      }
       console.log('[live] got stream, audio tracks =', stream.getAudioTracks().length,
         'active =', stream.active,
         stream.getAudioTracks().map(t => `${t.label} enabled=${t.enabled} muted=${t.muted}`));
@@ -85,12 +100,23 @@ export const useLiveStore = create<LiveState>((set, get) => ({
           } else if (event.type === 'utterance_end') {
             // Speaker paused — just clear interim, text already committed
             set({ interimText: '' });
+          } else if (event.type === 'open') {
+            // Successful (re)connect. Clear previous transient connection errors.
+            set({ error: null });
           } else if (event.type === 'error') {
             console.error('[live] stream error:', event.message);
             set({ error: event.message });
             if (event.message.toLowerCase().includes('plan limit exceeded')) {
               // Stop recording to release audio streams and avoid infinite WS reconnect loops.
               get().stop();
+            }
+          } else if (event.type === 'close') {
+            // DeepgramStream only emits "close" when it gave up reconnecting or stopped due to a
+            // non-retryable error (auth/config). Surface it, otherwise the UI looks "stuck".
+            if (get().status === 'recording') {
+              console.warn('[live] stream closed unexpectedly');
+              get().stop();
+              set({ status: 'error', error: 'WebSocket connection closed' });
             }
           }
         },
@@ -136,8 +162,13 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     dgStream = null;
     if (autoSaveTimer) { clearInterval(autoSaveTimer); autoSaveTimer = null; }
     if (usageRefreshTimer) { clearInterval(usageRefreshTimer); usageRefreshTimer = null; }
-    if (get().source === 'system') stopSystemStream();
-    else stopMicStream();
+    if (get().source === 'system') {
+      if (activeSystemCapture === 'meeting') stopMeetingStream();
+      else stopSystemStream();
+      activeSystemCapture = null;
+    } else {
+      stopMicStream();
+    }
     set({ status: 'idle' });
     requestPlanRefresh();
     // Auto-save as document (non-blocking)

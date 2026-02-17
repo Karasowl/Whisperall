@@ -3,7 +3,10 @@ import type { Document, CreateDocumentParams, UpdateDocumentParams } from "../ty
 
 export function createDocumentsEndpoint(client: ApiClient) {
   return {
-    list: () => client.get<Document[]>("/v1/documents"),
+    list: (folderId?: string) => {
+      const q = folderId ? `?folder_id=${encodeURIComponent(folderId)}` : "";
+      return client.get<Document[]>(`/v1/documents${q}`);
+    },
     get: (id: string) => client.get<Document>(`/v1/documents/${id}`),
     create: (params: CreateDocumentParams) => client.postJson<Document>("/v1/documents", params),
     update: (id: string, params: UpdateDocumentParams) => client.putJson<Document>(`/v1/documents/${id}`, params),

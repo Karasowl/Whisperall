@@ -87,6 +87,18 @@ export type TTSResponse = {
   audio_url: string;
 };
 
+export type TTSVoice = {
+  provider: "google" | "edge";
+  name: string;
+  locale: string;
+  gender?: string | null;
+  label?: string | null;
+};
+
+export type TTSVoicesResponse = {
+  voices: TTSVoice[];
+};
+
 export type TranslateResponse = {
   text: string;
 };
@@ -250,9 +262,22 @@ export type AdminOverviewResponse = {
   revenue_entries: AdminRevenueEntry[];
 };
 
+// ── Folders ──────────────────────────────────────────
+
+export type Folder = {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateFolderParams = { name: string };
+export type UpdateFolderParams = { name: string };
+
 // ── Documents ──────────────────────────────────────────
 
-export type DocumentSource = 'dictation' | 'live' | 'transcription' | 'manual';
+export type DocumentSource = 'dictation' | 'live' | 'transcription' | 'manual' | 'reader';
 
 export type Document = {
   id: string;
@@ -262,6 +287,7 @@ export type Document = {
   source: DocumentSource | null;
   source_id: string | null;
   tags: string[];
+  folder_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -271,12 +297,107 @@ export type CreateDocumentParams = {
   content: string;
   source?: DocumentSource;
   tags?: string[];
+  folder_id?: string;
 };
 
 export type UpdateDocumentParams = {
   title?: string;
   content?: string;
   tags?: string[];
+  folder_id?: string | null;
+};
+
+// ── Reader ──────────────────────────────────────────
+
+export type ReaderDocument = Document & {
+  source: "reader";
+};
+
+export type ReaderImportFileParams = {
+  file: File | Blob;
+  filename?: string;
+  force_ocr?: boolean;
+  language_hint?: string;
+  save?: boolean;
+};
+
+export type ReaderImportUrlParams = {
+  url: string;
+  force_ocr?: boolean;
+  language_hint?: string;
+  save?: boolean;
+};
+
+export type ReaderImportResponse = {
+  text: string;
+  blocks: Array<{ page?: number; text: string }>;
+  pages: number;
+  title: string;
+  source: "file" | "url";
+  document_id?: string | null;
+  warning?: string | null;
+};
+
+export type ReaderProgress = {
+  document_id: string;
+  char_offset: number;
+  playback_seconds: number;
+  section_index: number;
+  updated_at: string;
+};
+
+export type ReaderProgressUpsertParams = {
+  char_offset?: number;
+  playback_seconds?: number;
+  section_index?: number;
+  updated_at_client?: string;
+};
+
+export type ReaderBookmark = {
+  id: string;
+  document_id: string;
+  char_offset: number;
+  label: string;
+  created_at: string;
+};
+
+export type CreateReaderBookmarkParams = {
+  document_id: string;
+  char_offset: number;
+  label?: string;
+};
+
+export type ReaderAnnotation = {
+  id: string;
+  document_id: string;
+  start_offset: number;
+  end_offset: number;
+  note: string;
+  color: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateReaderAnnotationParams = {
+  document_id: string;
+  start_offset: number;
+  end_offset: number;
+  note?: string;
+  color?: string;
+};
+
+export type UpdateReaderAnnotationParams = {
+  note?: string;
+  color?: string;
+};
+
+export type ReaderDisplaySettings = {
+  font_size: number;
+  line_height: number;
+  letter_spacing: number;
+  theme: "paper" | "dark" | "high_contrast";
+  highlight_mode: "word" | "sentence" | "paragraph" | "none";
+  captions_on: boolean;
 };
 
 // ── API Keys ──────────────────────────────────────────

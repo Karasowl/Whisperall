@@ -2,9 +2,9 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..schemas import TTSRequest, TTSResponse
+from ..schemas import TTSRequest, TTSResponse, TTSVoicesResponse
 from ..auth import get_current_user, check_usage, AuthUser
-from ..providers import google_tts
+from ..providers import google_tts, edge_tts_synth
 from ..db import get_supabase_or_none
 from ..usage_events import record_usage_event
 
@@ -45,3 +45,14 @@ async def tts(payload: TTSRequest, user: AuthUser = Depends(get_current_user)):
             pass
 
     return TTSResponse(audio_url=url)
+
+
+@router.get("/voices", response_model=TTSVoicesResponse)
+async def voices(user: AuthUser = Depends(get_current_user)):
+    # Keep this list small enough for UI dropdowns while covering our supported languages.
+    langs = {"en", "es", "fr", "de", "pt", "it", "ja", "ko", "zh"}
+    google = await google_tts.list_voices(languages=langs)
+    edge = await edge_tts_synth.list_voices(languages=langs)
+    # Prefer Edge voices first (friendly names), then Google.
+    voices = edge + google
+    return TTSVoicesResponse(voices=voices)

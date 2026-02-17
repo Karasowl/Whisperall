@@ -349,6 +349,10 @@
   gap: 6px;
 }
 
+.widget-reader-actions {
+  flex-wrap: wrap;
+}
+
 .widget-btn-record,
 .widget-btn-primary,
 .widget-btn-ghost {
@@ -389,6 +393,10 @@
 
 .widget-btn-record .material-symbols-outlined,
 .widget-btn-primary .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.widget-btn-ghost .material-symbols-outlined {
   font-size: 16px;
 }
 

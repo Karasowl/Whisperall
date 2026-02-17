@@ -22,6 +22,7 @@ _REMOTE_KEYS = {
     'GROQ_API_KEY': 'groq_api_key',
     'DEEPGRAM_API_KEY': 'deepgram_api_key',
     'GOOGLE_TTS_API_KEY': 'google_tts_api_key',
+    'GOOGLE_OCR_API_KEY': 'google_ocr_api_key',
     'DEEPL_API_KEY': 'deepl_api_key',
     'DEEPSEEK_API_KEY': 'deepseek_api_key',
 }
@@ -40,6 +41,7 @@ class Settings(BaseSettings):
     groq_api_key: str | None = Field(default=None, alias='GROQ_API_KEY')
     deepgram_api_key: str | None = Field(default=None, alias='DEEPGRAM_API_KEY')
     google_tts_api_key: str | None = Field(default=None, alias='GOOGLE_TTS_API_KEY')
+    google_ocr_api_key: str | None = Field(default=None, alias='GOOGLE_OCR_API_KEY')
     deepl_api_key: str | None = Field(default=None, alias='DEEPL_API_KEY')
     deepseek_api_key: str | None = Field(default=None, alias='DEEPSEEK_API_KEY')
 
@@ -50,6 +52,8 @@ class Settings(BaseSettings):
 
     auth_disabled: bool = Field(default=False, alias='AUTH_DISABLED')
     usage_limits_disabled: bool = Field(default=False, alias='USAGE_LIMITS_DISABLED')
+    reader_v2_enabled: bool = Field(default=True, alias='READER_V2_ENABLED')
+    reader_v2_rollout_percent: int = Field(default=100, ge=0, le=100, alias='READER_V2_ROLLOUT_PERCENT')
 
     dictate_chunk_seconds: int = Field(default=120, alias='DICTATE_CHUNK_SECONDS')
     live_chunk_seconds: int = Field(default=2, alias='LIVE_CHUNK_SECONDS')

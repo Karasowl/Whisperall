@@ -1,5 +1,6 @@
 import type { DictationStatus } from '../../stores/dictation';
 import type { AudioSourceType } from '../../lib/audio';
+import { useSettingsStore } from '../../stores/settings';
 import { useT } from '../../lib/i18n';
 
 type Props = {
@@ -15,6 +16,8 @@ type Props = {
 
 export function VoiceToolbar({ status, source, onToggleRecord, onToggleSource, translateEnabled, onToggleTranslate, subtitlesActive, onToggleSubtitles }: Props) {
   const t = useT();
+  const systemIncludeMic = useSettingsStore((s) => s.systemIncludeMic);
+  const setSystemIncludeMic = useSettingsStore((s) => s.setSystemIncludeMic);
   const isRecording = status === 'recording';
   const isProcessing = status === 'processing';
 
@@ -56,14 +59,25 @@ export function VoiceToolbar({ status, source, onToggleRecord, onToggleSource, t
       </button>
 
       {source === 'system' && (
-        <button
-          onClick={onToggleSubtitles}
-          title={subtitlesActive ? t('dictate.hideSubtitles') : t('dictate.showSubtitles')}
-          className={`p-1.5 rounded-lg transition-colors ${subtitlesActive ? 'text-primary bg-blue-900/30' : 'text-muted hover:bg-surface'}`}
-          data-testid="subtitles-toggle"
-        >
-          <span className="material-symbols-outlined text-[16px]">subtitles</span>
-        </button>
+        <>
+          <button
+            onClick={() => setSystemIncludeMic(!systemIncludeMic)}
+            disabled={isRecording}
+            title={systemIncludeMic ? t('live.includeMicOn') : t('live.includeMicOff')}
+            className={`p-1.5 rounded-lg transition-colors ${systemIncludeMic ? 'text-primary bg-blue-900/30' : 'text-muted hover:bg-surface'} disabled:opacity-30`}
+            data-testid="include-mic-toggle"
+          >
+            <span className="material-symbols-outlined text-[16px]">{systemIncludeMic ? 'mic' : 'mic_off'}</span>
+          </button>
+          <button
+            onClick={onToggleSubtitles}
+            title={subtitlesActive ? t('dictate.hideSubtitles') : t('dictate.showSubtitles')}
+            className={`p-1.5 rounded-lg transition-colors ${subtitlesActive ? 'text-primary bg-blue-900/30' : 'text-muted hover:bg-surface'}`}
+            data-testid="subtitles-toggle"
+          >
+            <span className="material-symbols-outlined text-[16px]">subtitles</span>
+          </button>
+        </>
       )}
     </div>
   );

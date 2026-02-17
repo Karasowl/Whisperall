@@ -1,7 +1,8 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.config import settings
 from fastapi import HTTPException
+import httpx
 
 
 def test_create_job_requires_auth(client):
@@ -311,3 +312,77 @@ def test_get_result_returns_404_with_result_not_ready_code(client, auth_headers)
     assert res.json()["detail"] == "Result not ready"
     assert res.headers.get("x-whisperall-error-code") == "TRANSCRIBE_RESULT_NOT_READY"
     assert res.json()["error"]["code"] == "TRANSCRIBE_RESULT_NOT_READY"
+
+
+def test_from_url_supports_page_links_via_media_resolution(client, auth_headers):
+    db = MagicMock()
+
+    with patch("app.routers.transcribe.get_supabase_or_none", return_value=db), \
+         patch("app.routers.transcribe.check_usage"), \
+         patch("app.routers.transcribe._resolve_media_from_url", new_callable=AsyncMock) as mock_resolve, \
+         patch("app.routers.transcribe.groq_stt.transcribe_chunk", new_callable=AsyncMock) as mock_groq:
+        mock_resolve.return_value = (b"RIFF-fake-audio", "audio/wav", "/audio.wav")
+        mock_groq.return_value = "transcribed text"
+        res = client.post(
+            "/v1/transcribe/from-url",
+            json={"url": "https://www.youtube.com/watch?v=HcKWn32vRIM"},
+            headers=auth_headers,
+        )
+
+    assert res.status_code == 200
+    assert res.json()["text"] == "transcribed text"
+    assert res.json()["segments"] is None
+    mock_resolve.assert_awaited_once()
+    mock_groq.assert_awaited_once()
+
+
+def test_from_url_rejects_non_media_page_before_provider_calls(client, auth_headers):
+    db = MagicMock()
+
+    with patch("app.routers.transcribe.get_supabase_or_none", return_value=db), \
+         patch("app.routers.transcribe.check_usage"), \
+         patch("app.routers.transcribe._resolve_media_from_url", new_callable=AsyncMock) as mock_resolve, \
+         patch("app.routers.transcribe.groq_stt.transcribe_chunk", new_callable=AsyncMock) as mock_groq, \
+         patch("app.routers.transcribe.deepgram.transcribe_chunk_diarized", new_callable=AsyncMock) as mock_deepgram:
+        mock_resolve.side_effect = HTTPException(
+            status_code=400,
+            detail="The provided URL does not point to downloadable audio/video media (content-type: text/html).",
+            headers={"X-Whisperall-Error-Code": "TRANSCRIBE_URL_NOT_MEDIA"},
+        )
+        res = client.post(
+            "/v1/transcribe/from-url",
+            json={"url": "https://www.youtube.com/watch?v=HcKWn32vRIM", "enable_diarization": True},
+            headers=auth_headers,
+        )
+
+    assert res.status_code == 400
+    assert res.headers.get("x-whisperall-error-code") == "TRANSCRIBE_URL_NOT_MEDIA"
+    assert res.json()["error"]["code"] == "TRANSCRIBE_URL_NOT_MEDIA"
+    assert mock_groq.await_count == 0
+    assert mock_deepgram.await_count == 0
+
+
+def test_from_url_maps_provider_http_error_to_stable_api_error(client, auth_headers):
+    groq_request = httpx.Request("POST", "https://api.groq.com/openai/v1/audio/transcriptions")
+    groq_response = httpx.Response(status_code=400, request=groq_request)
+    db = MagicMock()
+
+    with patch("app.routers.transcribe.get_supabase_or_none", return_value=db), \
+         patch("app.routers.transcribe.check_usage"), \
+         patch("app.routers.transcribe._resolve_media_from_url", new_callable=AsyncMock) as mock_resolve, \
+         patch("app.routers.transcribe.groq_stt.transcribe_chunk", new_callable=AsyncMock) as mock_groq:
+        mock_resolve.return_value = (b"RIFF-fake-audio", "audio/wav", "/audio.wav")
+        mock_groq.side_effect = httpx.HTTPStatusError(
+            "Bad request from Groq",
+            request=groq_request,
+            response=groq_response,
+        )
+        res = client.post(
+            "/v1/transcribe/from-url",
+            json={"url": "https://cdn.example.com/audio.wav"},
+            headers=auth_headers,
+        )
+
+    assert res.status_code == 400
+    assert res.headers.get("x-whisperall-error-code") == "TRANSCRIBE_URL_PROVIDER_REJECTED"
+    assert res.json()["error"]["code"] == "TRANSCRIBE_URL_PROVIDER_REJECTED"

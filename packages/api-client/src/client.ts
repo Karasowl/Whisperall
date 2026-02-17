@@ -18,6 +18,8 @@ export class ApiError extends Error {
   }
 }
 
+export type RequestOpts = { signal?: AbortSignal };
+
 export class ApiClient {
   private baseUrl: string;
   private token?: string;
@@ -61,11 +63,12 @@ export class ApiClient {
     throw new ApiError(res.status, detail, code, resource);
   }
 
-  async postJson<T>(path: string, body: unknown): Promise<T> {
+  async postJson<T>(path: string, body: unknown, opts?: RequestOpts): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
       headers: await this.authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
+      signal: opts?.signal,
     });
     if (!res.ok) {
       await this.throwWithBody(res);
@@ -99,6 +102,18 @@ export class ApiClient {
   async putJson<T>(path: string, body: unknown): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: "PUT",
+      headers: await this.authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      await this.throwWithBody(res);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  async patchJson<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: "PATCH",
       headers: await this.authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     });

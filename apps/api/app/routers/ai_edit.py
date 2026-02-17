@@ -12,17 +12,16 @@ from ..config import settings
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/ai-edit", tags=["ai-edit"])
 
-MAX_INPUT_CHARS = 8000
+
+def estimate_ai_edit_tokens(text: str) -> int:
+    input_tokens = max(1, (len(text) + 3) // 4)
+    return input_tokens * 2
 
 
 @router.post("", response_model=AiEditResponse)
 async def edit(payload: AiEditRequest, user: AuthUser = Depends(get_current_user)):
-    if len(payload.text) > MAX_INPUT_CHARS:
-        raise HTTPException(400, f"Text too long ({len(payload.text)} chars). Max {MAX_INPUT_CHARS}.")
-
-    # Count input + estimated output tokens (output ≈ input for transformations)
-    input_tokens = len(payload.text) // 4
-    token_est = input_tokens * 2  # input + output
+    # Count input + estimated output tokens (output ≈ input for transformations).
+    token_est = estimate_ai_edit_tokens(payload.text)
     check_usage(user, "ai_edit_tokens", token_est)
 
     try:

@@ -14,12 +14,14 @@ class CreateDocReq(BaseModel):
     content: str
     source: str | None = None
     tags: list[str] = []
+    folder_id: str | None = None
 
 
 class UpdateDocReq(BaseModel):
     title: str | None = None
     content: str | None = None
     tags: list[str] | None = None
+    folder_id: str | None = None
 
 
 def _get_db():
@@ -30,12 +32,15 @@ def _get_db():
 
 
 @router.get("")
-async def list_documents(user: AuthUser = Depends(get_current_user)):
+async def list_documents(user: AuthUser = Depends(get_current_user), folder_id: str | None = None):
     db = get_supabase_or_none()
     if not db:
         return []
     try:
-        res = db.table("documents").select("*").eq("user_id", user.user_id).order("updated_at", desc=True).execute()
+        q = db.table("documents").select("*").eq("user_id", user.user_id)
+        if folder_id is not None:
+            q = q.eq("folder_id", folder_id)
+        res = q.order("updated_at", desc=True).execute()
         return res.data or []
     except Exception as e:
         log.warning("documents list failed (table may not exist): %s", e)
@@ -56,10 +61,13 @@ async def create_document(req: CreateDocReq, user: AuthUser = Depends(get_curren
     db = _get_db()
     check_usage(user, "notes_count", 1)
     try:
-        res = db.table("documents").insert({
+        insert_data: dict = {
             "user_id": user.user_id, "title": req.title,
             "content": req.content, "source": req.source, "tags": req.tags,
-        }).execute()
+        }
+        if req.folder_id:
+            insert_data["folder_id"] = req.folder_id
+        res = db.table("documents").insert(insert_data).execute()
         try:
             db.rpc("increment_usage", {"p_user_id": user.user_id, "p_notes_count": 1}).execute()
         except Exception as exc:
@@ -81,7 +89,8 @@ async def create_document(req: CreateDocReq, user: AuthUser = Depends(get_curren
 @router.put("/{doc_id}")
 async def update_document(doc_id: str, req: UpdateDocReq, user: AuthUser = Depends(get_current_user)):
     db = _get_db()
-    data = {k: v for k, v in req.model_dump().items() if v is not None}
+    dumped = req.model_dump(exclude_unset=True)
+    data = {k: v for k, v in dumped.items() if v is not None or k == "folder_id"}
     if not data:
         raise HTTPException(400, "No fields to update")
     try:

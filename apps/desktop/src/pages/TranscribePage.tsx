@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useTranscriptionStore } from '../stores/transcription';
 import { useDocumentsStore } from '../stores/documents';
 import { UploadZone } from '../components/transcribe/UploadZone';
@@ -12,16 +13,24 @@ type Props = { onNavigate?: (page: Page) => void };
 export function TranscribePage({ onNavigate }: Props) {
   const t = useT();
   const openPricing = usePricing();
-  const { jobs, activeJobId, loading, error, fullText, stagedFile, stagedUrl, savedDocumentId, stageFile, stageUrl, setActiveJob } = useTranscriptionStore();
+  const { jobs, activeJobId, loading, error, fullText, stagedFile, stagedUrl, savedDocumentId, stageFile, stageUrl, setActiveJob, urlStartedAt, cancelUrlTranscription } = useTranscriptionStore();
   const isPlanLimitError = !!error && (
     error.toLowerCase().includes('plan limit') ||
     error.toLowerCase().includes('monthly transcription limit')
   );
 
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!urlStartedAt) { setElapsed(0); return; }
+    setElapsed(Math.floor((Date.now() - urlStartedAt) / 1000));
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - urlStartedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [urlStartedAt]);
+
   const handleOpenInNotes = () => {
     if (savedDocumentId && onNavigate) {
       useDocumentsStore.getState().setPendingOpen(savedDocumentId);
-      onNavigate('notes');
+      onNavigate('dictate');
     }
   };
 
@@ -41,13 +50,13 @@ export function TranscribePage({ onNavigate }: Props) {
           {error && (
             <div
               className={`rounded-xl border px-4 py-3 flex items-start justify-between gap-4 ${
-                isPlanLimitError ? 'bg-amber-500/10 border-amber-500/30' : 'bg-red-500/10 border-red-500/30'
+                isPlanLimitError ? 'bg-amber-50 border-amber-300 dark:bg-amber-500/10 dark:border-amber-500/30' : 'bg-red-50 border-red-300 dark:bg-red-500/10 dark:border-red-500/30'
               }`}
             >
               <div className="min-w-0">
-                <p className={`text-sm ${isPlanLimitError ? 'text-amber-200' : 'text-red-300'}`}>{error}</p>
+                <p className={`text-sm ${isPlanLimitError ? 'text-amber-800 dark:text-amber-200' : 'text-red-700 dark:text-red-300'}`}>{error}</p>
                 {isPlanLimitError && (
-                  <p className="text-xs text-amber-300/90 mt-1">{t('transcribe.limitHelp')}</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300/90 mt-1">{t('transcribe.limitHelp')}</p>
                 )}
               </div>
               {isPlanLimitError && (
@@ -61,7 +70,21 @@ export function TranscribePage({ onNavigate }: Props) {
               )}
             </div>
           )}
-          {loading && <p className="text-primary text-sm animate-pulse">{t('transcribe.processing')}</p>}
+          {loading && (
+            <div className="flex items-center gap-3">
+              <p className="text-primary text-sm animate-pulse">{t('transcribe.processing')}</p>
+              {urlStartedAt != null && (
+                <>
+                  <span className="text-xs text-muted font-mono">{Math.floor(elapsed / 60)}:{(elapsed % 60).toString().padStart(2, '0')}</span>
+                  <button type="button" onClick={cancelUrlTranscription} data-testid="transcribe-cancel-btn"
+                    className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors">
+                    <span className="material-symbols-outlined text-[14px]">close</span>
+                    {t('reader.stop') || 'Cancel'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           {jobs.map((job) => (
             <FileCard key={job.id} job={job} isActive={job.id === activeJobId} onClick={() => setActiveJob(job.id)} />
           ))}

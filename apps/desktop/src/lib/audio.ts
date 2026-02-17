@@ -1,6 +1,9 @@
 export type AudioSourceType = 'mic' | 'system';
 
 let micStream: MediaStream | null = null;
+let meetingStream: MediaStream | null = null;
+let meetingMicStream: MediaStream | null = null;
+let meetingCtx: AudioContext | null = null;
 
 export async function getMicStream(deviceId?: string | null): Promise<MediaStream> {
   if (micStream && micStream.active) return micStream;
@@ -108,6 +111,49 @@ export function stopSystemStream(): void {
     systemStream.getTracks().forEach((t) => t.stop());
     systemStream = null;
   }
+}
+
+/**
+ * Meeting mode: capture system audio (speaker loopback) AND mic, mixed into one track.
+ * Without this, "system" capture alone won't include your own voice in Meet/Zoom calls.
+ */
+export async function getMeetingAudioStream(deviceId?: string | null): Promise<MediaStream> {
+  if (meetingStream && meetingStream.active) return meetingStream;
+
+  const sys = await getSystemAudioStream();
+  meetingMicStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      echoCancellation: true, noiseSuppression: true,
+    },
+  });
+
+  const ctx = new AudioContext();
+  const dest = ctx.createMediaStreamDestination();
+  ctx.createMediaStreamSource(sys).connect(dest);
+  ctx.createMediaStreamSource(meetingMicStream).connect(dest);
+  // Ensure the graph runs even if the context starts suspended.
+  try { if (ctx.state === 'suspended') await ctx.resume(); } catch { /* ignore */ }
+
+  meetingCtx = ctx;
+  meetingStream = dest.stream;
+  return meetingStream;
+}
+
+export function stopMeetingStream(): void {
+  if (meetingStream) {
+    meetingStream.getTracks().forEach((t) => t.stop());
+    meetingStream = null;
+  }
+  if (meetingCtx) {
+    meetingCtx.close().catch(() => {});
+    meetingCtx = null;
+  }
+  if (meetingMicStream) {
+    meetingMicStream.getTracks().forEach((t) => t.stop());
+    meetingMicStream = null;
+  }
+  stopSystemStream();
 }
 
 /** Target 16 kHz mono — Whisper's native format, keeps chunks under 10 MB. */

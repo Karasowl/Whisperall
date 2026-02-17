@@ -1,6 +1,7 @@
 import { useTranscriptionStore } from '../stores/transcription';
 import { useDocumentsStore } from '../stores/documents';
 import { useDictationStore } from '../stores/dictation';
+import { ApiError } from '@whisperall/api-client';
 import { api } from '../lib/api';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Editor } from '@tiptap/react';
@@ -9,11 +10,13 @@ import { InsightsPanel } from '../components/editor/InsightsPanel';
 import { AudioPlayer } from '../components/editor/AudioPlayer';
 import { RichEditor } from '../components/editor/RichEditor';
 import { CustomPromptDialog, type CustomPrompt } from '../components/editor/CustomPromptDialog';
+import { AiBudgetDialog } from '../components/editor/AiBudgetDialog';
 import { useT } from '../lib/i18n';
 import { useSettingsStore } from '../stores/settings';
 import { formatDocDate, smartTitle } from '../lib/format-date';
 import { safeHtmlParagraphs } from '../lib/editor-utils';
-import { requestPlanRefresh } from '../stores/plan';
+import { requestPlanRefresh, usePlanStore } from '../stores/plan';
+import { projectAiEditBudget } from '../lib/ai-edit-budget';
 
 const BUILT_IN_MODES = [
   { id: 'casual', icon: 'chat' },
@@ -29,6 +32,7 @@ function loadCustomPrompts(): CustomPrompt[] {
 function saveCustomPrompts(p: CustomPrompt[]) { localStorage.setItem(PROMPTS_KEY, JSON.stringify(p)); }
 
 type Props = { documentId?: string | null; onBack?: () => void };
+type BudgetDialogKind = 'warn' | 'blocked';
 
 export function EditorPage({ documentId, onBack }: Props) {
   const t = useT();
@@ -41,11 +45,18 @@ export function EditorPage({ documentId, onBack }: Props) {
   const [htmlContent, setHtmlContent] = useState('');
   const [plainText, setPlainText] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [budgetDialog, setBudgetDialog] = useState<{ open: boolean; kind: BudgetDialogKind; message: string }>({
+    open: false,
+    kind: 'warn',
+    message: '',
+  });
   const [saved, setSaved] = useState(false);
   const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(loadCustomPrompts);
   const [showPromptDialog, setShowPromptDialog] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const editorRef = useRef<Editor | null>(null);
+  const budgetResolverRef = useRef<((ok: boolean) => void) | null>(null);
 
   // Load document or create new one
   useEffect(() => {
@@ -89,28 +100,99 @@ export function EditorPage({ documentId, onBack }: Props) {
   };
 
   const text = documentId ? plainText : (plainText || fullText);
+  const formatUnits = (value: number) => value.toLocaleString(uiLanguage === 'es' ? 'es-ES' : 'en-US');
+  const openBudgetDialog = useCallback((kind: BudgetDialogKind, message: string) => {
+    if (budgetResolverRef.current) budgetResolverRef.current(false);
+    setBudgetDialog({ open: true, kind, message });
+    return new Promise<boolean>((resolve) => { budgetResolverRef.current = resolve; });
+  }, []);
+  const resolveBudgetDialog = useCallback((ok: boolean) => {
+    setBudgetDialog((prev) => ({ ...prev, open: false }));
+    const resolve = budgetResolverRef.current;
+    budgetResolverRef.current = null;
+    if (resolve) resolve(ok);
+  }, []);
+  const validateAiBudget = useCallback(async (txt: string): Promise<boolean> => {
+    await usePlanStore.getState().fetch();
+    const plan = usePlanStore.getState();
+    const budget = projectAiEditBudget({
+      text: txt,
+      used: plan.getUsed('ai_edit_tokens'),
+      limit: plan.getLimit('ai_edit_tokens'),
+    });
+    if (budget.overLimit) {
+      const msg = t('ai.overLimitPrecheck')
+        .replace('{estimate}', formatUnits(budget.tokenEstimate))
+        .replace('{remaining}', formatUnits(budget.remaining));
+      await openBudgetDialog('blocked', msg);
+      setAiError(msg);
+      requestPlanRefresh(0);
+      return false;
+    }
+    if (budget.warnAtThreshold) {
+      const msg = t('ai.warn75Confirm')
+        .replace('{estimate}', formatUnits(budget.tokenEstimate))
+        .replace('{projectedPercent}', String(budget.projectedPercent))
+        .replace('{projected}', formatUnits(budget.projected))
+        .replace('{limit}', formatUnits(budget.limit));
+      if (!(await openBudgetDialog('warn', msg))) {
+        setAiError(t('ai.cancelled'));
+        return false;
+      }
+    }
+    return true;
+  }, [openBudgetDialog, t, uiLanguage]);
+
+  useEffect(() => () => {
+    if (budgetResolverRef.current) {
+      budgetResolverRef.current(false);
+      budgetResolverRef.current = null;
+    }
+  }, []);
 
   // AI edit — built-in mode
   const handleAiEdit = async (mode: string) => {
     if (!text) return;
+    setAiError('');
+    if (!(await validateAiBudget(text))) return;
     setProcessing(true);
     try {
       const res = await api.aiEdit.edit({ text, mode });
       setHtmlContent(safeHtmlParagraphs(res.text));
       requestPlanRefresh();
-    } catch { /* toast */ }
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 429 || err.code === 'PLAN_LIMIT_EXCEEDED')) {
+        setAiError(t('ai.limitReached'));
+        requestPlanRefresh(0);
+      } else if (err instanceof ApiError && err.status === 400) {
+        setAiError(t('ai.tooLong'));
+      } else {
+        setAiError(t('ai.failed'));
+      }
+    }
     finally { setProcessing(false); }
   };
 
   // AI edit — custom prompt
   const handleCustomAi = async (prompt: CustomPrompt) => {
     if (!text) return;
+    setAiError('');
+    if (!(await validateAiBudget(text))) return;
     setProcessing(true);
     try {
       const res = await api.aiEdit.edit({ text, mode: 'custom', prompt: prompt.prompt });
       setHtmlContent(safeHtmlParagraphs(res.text));
       requestPlanRefresh();
-    } catch { /* toast */ }
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 429 || err.code === 'PLAN_LIMIT_EXCEEDED')) {
+        setAiError(t('ai.limitReached'));
+        requestPlanRefresh(0);
+      } else if (err instanceof ApiError && err.status === 400) {
+        setAiError(t('ai.tooLong'));
+      } else {
+        setAiError(t('ai.failed'));
+      }
+    }
     finally { setProcessing(false); }
   };
 
@@ -195,6 +277,7 @@ export function EditorPage({ documentId, onBack }: Props) {
             </button>
           )}
           {processing && <span className="text-xs text-primary ml-2">{t('editor.processing')}</span>}
+          {aiError && <span className="text-xs text-red-400 ml-2">{aiError}</span>}
         </div>
       </div>
 
@@ -212,6 +295,13 @@ export function EditorPage({ documentId, onBack }: Props) {
 
       {hasTranscript && <AudioPlayer />}
       {showPromptDialog && <CustomPromptDialog prompts={customPrompts} onSave={handleSavePrompts} onClose={() => setShowPromptDialog(false)} />}
+      <AiBudgetDialog
+        open={budgetDialog.open}
+        kind={budgetDialog.kind}
+        message={budgetDialog.message}
+        onConfirm={() => resolveBudgetDialog(true)}
+        onCancel={() => resolveBudgetDialog(false)}
+      />
     </div>
   );
 }

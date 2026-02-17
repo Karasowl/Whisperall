@@ -5,11 +5,23 @@ import { normalizeLanguageCode, type TTSSupportedLanguage } from '../lib/lang-de
 export type Theme = 'light' | 'dark' | 'system';
 export type UiLocale = 'en' | 'es';
 export type TtsLanguage = 'auto' | TTSSupportedLanguage;
+export type ReaderTheme = 'paper' | 'dark' | 'high_contrast';
+export type ReaderHighlightMode = 'word' | 'sentence' | 'paragraph' | 'none';
+
+export type ReaderDisplaySettings = {
+  font_size: number;
+  line_height: number;
+  letter_spacing: number;
+  theme: ReaderTheme;
+  highlight_mode: ReaderHighlightMode;
+  captions_on: boolean;
+};
 
 export type SettingsState = {
   theme: Theme;
   uiLanguage: UiLocale;
   ttsLanguage: TtsLanguage;
+  ttsVoice: string;
   hotkeyMode: 'toggle' | 'hold';
   overlayEnabled: boolean;
   minimizeToTray: boolean;
@@ -18,10 +30,13 @@ export type SettingsState = {
   translateEnabled: boolean;
   translateTo: string;
   audioDevice: string | null;
+  systemIncludeMic: boolean;
+  readerDisplay: ReaderDisplaySettings;
 
   setTheme: (theme: Theme) => void;
   setUiLanguage: (lang: UiLocale) => void;
   setTtsLanguage: (lang: string) => void;
+  setTtsVoice: (voice: string) => void;
   setHotkeyMode: (mode: 'toggle' | 'hold') => void;
   setOverlayEnabled: (enabled: boolean) => void;
   resetOverlayPosition: () => void;
@@ -31,6 +46,8 @@ export type SettingsState = {
   setTranslateEnabled: (enabled: boolean) => void;
   setTranslateTo: (lang: string) => void;
   setAudioDevice: (deviceId: string | null) => void;
+  setSystemIncludeMic: (enabled: boolean) => void;
+  setReaderDisplay: (patch: Partial<ReaderDisplaySettings>) => void;
   load: () => void;
 };
 
@@ -55,6 +72,41 @@ function normalizeTtsLanguage(input: string | undefined): TtsLanguage {
   const raw = (input ?? '').trim().toLowerCase();
   if (!raw || raw === 'auto') return 'auto';
   return normalizeLanguageCode(raw) ?? 'auto';
+}
+
+function normalizeTtsVoice(input: string | undefined): string {
+  const raw = (input ?? '').trim();
+  if (!raw || raw.toLowerCase() === 'auto') return 'auto';
+  return raw;
+}
+
+function normalizeReaderDisplay(input: unknown): ReaderDisplaySettings {
+  const base: ReaderDisplaySettings = {
+    font_size: 22,
+    line_height: 1.65,
+    letter_spacing: 0,
+    theme: 'paper',
+    highlight_mode: 'sentence',
+    captions_on: true,
+  };
+  if (!input || typeof input !== 'object') return base;
+  const raw = input as Partial<ReaderDisplaySettings>;
+  const theme = raw.theme === 'dark' || raw.theme === 'high_contrast' || raw.theme === 'paper' ? raw.theme : base.theme;
+  const highlight =
+    raw.highlight_mode === 'word' ||
+    raw.highlight_mode === 'sentence' ||
+    raw.highlight_mode === 'paragraph' ||
+    raw.highlight_mode === 'none'
+      ? raw.highlight_mode
+      : base.highlight_mode;
+  return {
+    font_size: Number.isFinite(raw.font_size) ? Math.min(42, Math.max(12, Number(raw.font_size))) : base.font_size,
+    line_height: Number.isFinite(raw.line_height) ? Math.min(2.6, Math.max(1.2, Number(raw.line_height))) : base.line_height,
+    letter_spacing: Number.isFinite(raw.letter_spacing) ? Math.min(6, Math.max(-1, Number(raw.letter_spacing))) : base.letter_spacing,
+    theme,
+    highlight_mode: highlight,
+    captions_on: typeof raw.captions_on === 'boolean' ? raw.captions_on : base.captions_on,
+  };
 }
 
 export function applyTheme(theme: Theme): void {
@@ -95,6 +147,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   theme: 'dark',
   uiLanguage: 'en',
   ttsLanguage: 'auto',
+  ttsVoice: 'auto',
   hotkeyMode: 'toggle',
   overlayEnabled: true,
   minimizeToTray: true,
@@ -109,6 +162,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   translateEnabled: false,
   translateTo: 'es',
   audioDevice: null,
+  systemIncludeMic: false,
+  readerDisplay: {
+    font_size: 22,
+    line_height: 1.65,
+    letter_spacing: 0,
+    theme: 'paper',
+    highlight_mode: 'sentence',
+    captions_on: true,
+  },
 
   setTheme: (theme) => {
     set({ theme });
@@ -126,6 +188,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const next = normalizeTtsLanguage(ttsLanguage);
     set({ ttsLanguage: next });
     persist({ ttsLanguage: next });
+  },
+
+  setTtsVoice: (ttsVoice) => {
+    const next = normalizeTtsVoice(ttsVoice);
+    set({ ttsVoice: next });
+    persist({ ttsVoice: next });
   },
 
   setHotkeyMode: (hotkeyMode) => {
@@ -173,6 +241,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persist({ audioDevice });
   },
 
+  setSystemIncludeMic: (systemIncludeMic) => {
+    set({ systemIncludeMic });
+    persist({ systemIncludeMic });
+  },
+
+  setReaderDisplay: (patch) => {
+    const next = { ...get().readerDisplay, ...patch };
+    set({ readerDisplay: next });
+    persist({ readerDisplay: next });
+  },
+
   setHotkey: (action, accelerator) => {
     const hotkeys = { ...get().hotkeys, [action]: accelerator };
     set({ hotkeys });
@@ -183,7 +262,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   load: () => {
     const saved = loadFromStorage();
     const ttsLanguage = normalizeTtsLanguage((saved as { ttsLanguage?: string })?.ttsLanguage);
-    set({ ...saved, ttsLanguage });
+    const ttsVoice = normalizeTtsVoice((saved as { ttsVoice?: string })?.ttsVoice);
+    const readerDisplay = normalizeReaderDisplay((saved as { readerDisplay?: unknown })?.readerDisplay);
+    set({ ...saved, ttsLanguage, ttsVoice, readerDisplay });
     // Apply theme
     const theme = (saved.theme as Theme) || 'dark';
     applyTheme(theme);

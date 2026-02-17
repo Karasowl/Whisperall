@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pathlib import Path
 from urllib.parse import urlparse
@@ -15,12 +17,14 @@ EXT_TO_CONTENT_TYPE: dict[str, str] = {
     ".wav": "audio/wav",
     ".mp3": "audio/mpeg",
     ".m4a": "audio/mp4",
-    ".mp4": "audio/mp4",
+    ".mp4": "video/mp4",
     ".aac": "audio/aac",
     ".ogg": "audio/ogg",
     ".oga": "audio/ogg",
     ".webm": "audio/webm",
     ".flac": "audio/flac",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
 }
 
 CONTENT_TYPE_TO_EXT: dict[str, str] = {
@@ -33,6 +37,25 @@ CONTENT_TYPE_TO_EXT: dict[str, str] = {
     "audio/ogg": ".ogg",
     "audio/webm": ".webm",
     "audio/flac": ".flac",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/ogg": ".ogg",
+    "video/quicktime": ".mov",
+    "video/x-matroska": ".mkv",
+}
+
+NON_MEDIA_CONTENT_TYPES: set[str] = {
+    "application/json",
+    "application/xml",
+    "application/xhtml+xml",
+}
+
+DEFAULT_URL_FETCH_HEADERS: dict[str, str] = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    )
 }
 
 
@@ -57,6 +80,158 @@ def _filename_for_content_type(content_type: str | None, fallback: str) -> str:
     if not ext:
         return fallback
     return f"audio{ext}"
+
+
+def _is_likely_non_media_response(content_type: str | None, source_path: str | None) -> bool:
+    if not content_type:
+        return False
+    if content_type.startswith("audio/") or content_type.startswith("video/"):
+        return False
+    if content_type in {"application/octet-stream", "binary/octet-stream"}:
+        return False
+    suffix = Path(source_path or "").suffix.lower()
+    if suffix in EXT_TO_CONTENT_TYPE:
+        return False
+    return content_type.startswith("text/") or content_type in NON_MEDIA_CONTENT_TYPES
+
+
+def _url_not_media_detail(content_type: str | None) -> str:
+    observed = f" (content-type: {content_type})" if content_type else ""
+    return (
+        "The provided URL does not point to downloadable audio/video media"
+        f"{observed}. Paste a direct media file URL (mp3, wav, m4a, mp4, webm, ogg, flac), "
+        "or download the media and upload it as a file."
+    )
+
+
+def _iter_extraction_candidates(info: dict | None) -> list[dict]:
+    if not isinstance(info, dict):
+        return []
+
+    if isinstance(info.get("entries"), list):
+        first_entry = next((entry for entry in info["entries"] if isinstance(entry, dict)), None)
+        if first_entry:
+            info = first_entry
+
+    candidates: list[dict] = []
+
+    def collect(candidate: dict | None) -> None:
+        if not isinstance(candidate, dict):
+            return
+        media_url = candidate.get("url")
+        if isinstance(media_url, str) and media_url.startswith(("https://", "http://")):
+            candidates.append(candidate)
+
+    collect(info)
+    for requested in info.get("requested_formats") or []:
+        collect(requested)
+    for fmt in info.get("formats") or []:
+        collect(fmt)
+
+    return candidates
+
+
+def _candidate_score(candidate: dict) -> tuple[int, float]:
+    acodec = str(candidate.get("acodec") or "").lower()
+    vcodec = str(candidate.get("vcodec") or "").lower()
+    ext = str(candidate.get("ext") or "").lower()
+
+    score = 0
+    if acodec and acodec != "none":
+        score += 100
+    if vcodec == "none":
+        score += 60
+    if ext in {"m4a", "mp3", "wav", "webm", "ogg", "opus", "flac", "mp4"}:
+        score += 20
+
+    bitrate = candidate.get("abr") or candidate.get("tbr") or 0
+    try:
+        numeric_bitrate = float(bitrate)
+    except Exception:
+        numeric_bitrate = 0.0
+
+    return score, numeric_bitrate
+
+
+def _extract_media_download_target(source_url: str) -> tuple[str, str | None] | None:
+    try:
+        import yt_dlp
+    except Exception:
+        return None
+
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "extract_flat": False,
+        "skip_download": True,
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(source_url, download=False)
+    except Exception:
+        return None
+
+    candidates = _iter_extraction_candidates(info)
+    if not candidates:
+        return None
+
+    best = max(candidates, key=_candidate_score)
+    media_url = best.get("url")
+    if not isinstance(media_url, str) or not media_url:
+        return None
+
+    ext = str(best.get("ext") or "").lower()
+    source_path_hint = f"/audio.{ext}" if ext else None
+    return media_url, source_path_hint
+
+
+async def _download_url_bytes(
+    source_url: str,
+    hx,
+    *,
+    headers: dict[str, str] | None = None,
+) -> tuple[bytes, str | None, str]:
+    request_headers = dict(DEFAULT_URL_FETCH_HEADERS)
+    if headers:
+        request_headers.update(headers)
+
+    async with hx.AsyncClient(timeout=120, follow_redirects=True) as client:
+        resp = await client.get(source_url, headers=request_headers)
+        if resp.status_code != 200:
+            _raise_transcribe_http_error(
+                status_code=400,
+                detail="Could not download audio from URL",
+                code="TRANSCRIBE_URL_DOWNLOAD_FAILED",
+            )
+        content_type = _normalize_content_type(resp.headers.get("content-type"))
+        source_path = urlparse(str(resp.url)).path
+        return resp.content, content_type, source_path
+
+
+async def _resolve_media_from_url(source_url: str, hx) -> tuple[bytes, str | None, str]:
+    audio_bytes, content_type, source_path = await _download_url_bytes(source_url, hx)
+    if not _is_likely_non_media_response(content_type, source_path):
+        return audio_bytes, content_type, source_path
+
+    extracted_target = await asyncio.to_thread(_extract_media_download_target, source_url)
+    if not extracted_target:
+        _raise_transcribe_http_error(
+            status_code=400,
+            detail=_url_not_media_detail(content_type),
+            code="TRANSCRIBE_URL_NOT_MEDIA",
+        )
+
+    extracted_url, extracted_path_hint = extracted_target
+    extracted_bytes, extracted_content_type, extracted_source_path = await _download_url_bytes(
+        extracted_url,
+        hx,
+        headers={"Referer": source_url},
+    )
+    final_source_path = extracted_path_hint or extracted_source_path or source_path
+    return extracted_bytes, extracted_content_type, final_source_path
 
 
 def _require_db():
@@ -461,16 +636,11 @@ async def transcribe_from_url(payload: TranscribeUrlRequest, user: AuthUser = De
     db = _require_db()
     check_usage(user, "transcribe_seconds", 300)
 
-    async with hx.AsyncClient(timeout=120, follow_redirects=True) as client:
-        resp = await client.get(payload.url)
-        if resp.status_code != 200:
-            _raise_transcribe_http_error(
-                status_code=400,
-                detail="Could not download audio from URL",
-                code="TRANSCRIBE_URL_DOWNLOAD_FAILED",
-            )
-        audio_bytes = resp.content
-        response_content_type = _normalize_content_type(resp.headers.get("content-type"))
+    audio_bytes, response_content_type, source_path = await _resolve_media_from_url(payload.url, hx)
+
+    lang = payload.language if payload.language and payload.language != "auto" else None
+    filename, guessed_content_type = _guess_audio_meta_from_path(source_path)
+    content_type = response_content_type or guessed_content_type
 
     if len(audio_bytes) > 25 * 1024 * 1024:
         _raise_transcribe_http_error(
@@ -479,48 +649,54 @@ async def transcribe_from_url(payload: TranscribeUrlRequest, user: AuthUser = De
             code="TRANSCRIBE_FILE_TOO_LARGE",
         )
 
-    lang = payload.language if payload.language and payload.language != "auto" else None
-    source_path = urlparse(payload.url).path
-    filename, guessed_content_type = _guess_audio_meta_from_path(source_path)
-    content_type = response_content_type or guessed_content_type
     filename = _filename_for_content_type(content_type, filename)
-    if payload.enable_diarization:
-        if not settings.deepgram_api_key:
-            _raise_transcribe_http_error(
-                status_code=400,
-                detail=(
-                    "Diarization is enabled but DEEPGRAM_API_KEY is not configured. "
-                    "Set a Deepgram key to use speaker diarization (recommended model: nova-2)."
-                ),
-                code="DIARIZATION_NOT_CONFIGURED",
+    try:
+        if payload.enable_diarization:
+            if not settings.deepgram_api_key:
+                _raise_transcribe_http_error(
+                    status_code=400,
+                    detail=(
+                        "Diarization is enabled but DEEPGRAM_API_KEY is not configured. "
+                        "Set a Deepgram key to use speaker diarization (recommended model: nova-2)."
+                    ),
+                    code="DIARIZATION_NOT_CONFIGURED",
+                )
+            diarized = await deepgram.transcribe_chunk_diarized(
+                audio_bytes,
+                language=lang,
+                content_type=content_type,
             )
-        diarized = await deepgram.transcribe_chunk_diarized(
-            audio_bytes,
-            language=lang,
-            content_type=content_type,
-        )
-        try:
-            quality_text = await groq_stt.transcribe_chunk(
+            try:
+                quality_text = await groq_stt.transcribe_chunk(
+                    audio_bytes,
+                    language=lang,
+                    filename=filename,
+                    content_type=content_type,
+                )
+            except Exception:
+                quality_text = ""
+            text = (quality_text or "").strip() or diarized.get("text", "")
+            segments = diarized.get("segments") or None
+            labeled = _segments_to_labeled_text(segments or [])
+            if labeled:
+                text = labeled
+        else:
+            text = await groq_stt.transcribe_chunk(
                 audio_bytes,
                 language=lang,
                 filename=filename,
                 content_type=content_type,
             )
-        except Exception:
-            quality_text = ""
-        text = (quality_text or "").strip() or diarized.get("text", "")
-        segments = diarized.get("segments") or None
-        labeled = _segments_to_labeled_text(segments or [])
-        if labeled:
-            text = labeled
-    else:
-        text = await groq_stt.transcribe_chunk(
-            audio_bytes,
-            language=lang,
-            filename=filename,
-            content_type=content_type,
+            segments = None
+    except hx.HTTPStatusError:
+        _raise_transcribe_http_error(
+            status_code=400,
+            detail=(
+                "The downloaded URL content was rejected by transcription providers. "
+                "Use a direct media file URL (not a webpage) or upload the file directly."
+            ),
+            code="TRANSCRIBE_URL_PROVIDER_REJECTED",
         )
-        segments = None
 
     db.rpc("increment_usage", {"p_user_id": user.user_id, "p_transcribe_seconds": 300}).execute()
     record_usage_event(

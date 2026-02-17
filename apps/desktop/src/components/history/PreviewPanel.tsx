@@ -1,6 +1,21 @@
 import { useT } from '../../lib/i18n';
 import type { HistoryEntry } from '../../pages/HistoryPage';
 
+const MOD_LABELS: Record<string, string> = {
+  dictate: 'Dictation', transcribe: 'Transcription', live: 'Meeting',
+  tts: 'Read Aloud', translate: 'Translation', ai_edit: 'AI Edit',
+};
+
+function previewTitle(e: HistoryEntry): string {
+  const src = e.module === 'tts' ? e.input_text : e.output_text;
+  const first = (src ?? '').split('\n').find(l => l.trim());
+  if (first && first.trim().length > 0) {
+    const t = first.trim();
+    return t.length > 80 ? t.slice(0, 80) + '\u2026' : t;
+  }
+  return MOD_LABELS[e.module] ?? e.module;
+}
+
 type Props = { entry: HistoryEntry | null; onClose: () => void };
 
 export function PreviewPanel({ entry, onClose }: Props) {
@@ -12,12 +27,12 @@ export function PreviewPanel({ entry, onClose }: Props) {
       <div className="px-6 py-5 border-b border-edge flex justify-between items-start bg-surface-alt/50 backdrop-blur-sm">
         <div className="flex-1 pr-4">
           <div className="flex items-center gap-2 mb-2">
-            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary border border-primary/20 capitalize">
-              {entry.module.replace(/_/g, ' ')}
+            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary border border-primary/20">
+              {MOD_LABELS[entry.module] ?? entry.module}
             </span>
             <span className="text-xs text-muted">{new Date(entry.created_at).toLocaleString()}</span>
           </div>
-          <h2 className="text-xl font-bold text-text leading-tight capitalize">{entry.module.replace(/_/g, ' ')}</h2>
+          <h2 className="text-xl font-bold text-text leading-tight">{previewTitle(entry)}</h2>
         </div>
         <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/10 text-muted hover:text-primary transition-colors" title={t('history.closePreview')}>
           <span className="material-symbols-outlined text-[20px]">close</span>

@@ -6,7 +6,7 @@ import { useT } from '../../lib/i18n';
 import type { UsageRecord } from '@whisperall/api-client';
 
 const NAV_KEYS: { id: Page; key: string; icon: string }[] = [
-  { id: 'notes', key: 'nav.notes', icon: 'note_stack' },
+  { id: 'dictate', key: 'nav.notes', icon: 'note_stack' },
   { id: 'transcribe', key: 'nav.transcribe', icon: 'description' },
   { id: 'reader', key: 'nav.reader', icon: 'volume_up' },
   { id: 'history', key: 'nav.history', icon: 'history' },

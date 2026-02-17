@@ -272,8 +272,9 @@ async function playChunk(idx: number, rid: number): Promise<void> {
         });
       }
     });
-  } catch {
-    lastError_ = 'Text-to-speech failed';
+  } catch (err) {
+    const msg = (err as { message?: string })?.message ?? 'Text-to-speech failed';
+    lastError_ = msg;
     status = 'idle';
     stopAudioOnly();
     notify();
@@ -378,7 +379,7 @@ export function hasTTSAudio(): boolean {
 }
 
 export function setTTSPlaybackRate(rate: number): void {
-  const next = Number.isFinite(rate) ? Math.max(0.5, Math.min(3, rate)) : 1;
+  const next = Number.isFinite(rate) ? Math.max(0.5, Math.min(4, rate)) : 1;
   playbackRate_ = next;
   if (audioEl) audioEl.playbackRate = next;
   notify();

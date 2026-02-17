@@ -37,7 +37,7 @@ class TestSynthesize:
         body = json.loads(req.content)
         assert body["input"]["text"] == "Hello world"
         assert body["voice"]["languageCode"] == "en-US"
-        assert body["voice"]["name"] == "en-US-Standard-D"
+        assert body["voice"]["name"] == "en-US-Wavenet-D"
         assert body["audioConfig"]["audioEncoding"] == "MP3"
 
     @respx.mock
@@ -53,7 +53,7 @@ class TestSynthesize:
         import json
         body = json.loads(route.calls.last.request.content)
         assert body["voice"]["languageCode"] == "es-US"
-        assert body["voice"]["name"] == "es-US-Standard-A"
+        assert body["voice"]["name"] == "es-US-Wavenet-A"
 
     @respx.mock
     @pytest.mark.asyncio
@@ -96,7 +96,7 @@ class TestSynthesize:
 
         import json
         body = json.loads(route.calls.last.request.content)
-        assert body["voice"]["name"] == "es-ES-WaveNet-B"
+        assert body["voice"]["name"] == "es-ES-Wavenet-B"
 
     @respx.mock
     @pytest.mark.asyncio

@@ -220,3 +220,57 @@ html.dark {
   pointer-events: none;
   height: 0;
 }
+
+/* ── TipTap Bubble Menu ─────────────────────────── */
+.bubble-menu {
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+}
+
+/* ── Styled seek bar (Reader TTS) ────────────────── */
+.seek-range {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  height: 20px;
+}
+
+.seek-range::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--theme-edge);
+  border-radius: 2px;
+}
+
+.seek-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  margin-top: -5px;
+  border: none;
+  transition: transform 0.15s;
+}
+
+.seek-range:hover::-webkit-slider-thumb {
+  transform: scale(1.2);
+}
+
+.seek-range:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* ── Styled select (dark theme) ──────────────────── */
+.styled-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%239dabb9'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}

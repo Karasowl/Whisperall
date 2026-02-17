@@ -1,4 +1,4 @@
-import type { ApiClient } from "../client";
+import type { ApiClient, RequestOpts } from "../client";
 import type {
   TranscribeJobParams,
   TranscribeChunkParams,
@@ -30,8 +30,8 @@ export function createTranscribeEndpoint(client: ApiClient) {
       return client.get<TranscribeResultResponse>(`/v1/transcribe/jobs/${jobId}/result`);
     },
 
-    async fromUrl(params: TranscribeUrlParams): Promise<TranscribeResultResponse> {
-      return client.postJson<TranscribeResultResponse>("/v1/transcribe/from-url", params);
+    async fromUrl(params: TranscribeUrlParams, opts?: RequestOpts): Promise<TranscribeResultResponse> {
+      return client.postJson<TranscribeResultResponse>("/v1/transcribe/from-url", params, opts);
     },
   };
 }

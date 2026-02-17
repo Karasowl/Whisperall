@@ -55,12 +55,23 @@ describe('Settings store', () => {
       theme: 'dark',
       uiLanguage: 'en',
       ttsLanguage: 'auto',
+      ttsVoice: 'auto',
       hotkeyMode: 'toggle',
       overlayEnabled: true,
       minimizeToTray: true,
       showNotifications: true,
       translateEnabled: false,
       translateTo: 'es',
+      audioDevice: null,
+      systemIncludeMic: false,
+      readerDisplay: {
+        font_size: 22,
+        line_height: 1.65,
+        letter_spacing: 0,
+        theme: 'paper',
+        highlight_mode: 'sentence',
+        captions_on: true,
+      },
       hotkeys: {
         dictate: 'Alt+X',
         read_clipboard: 'Ctrl+Shift+R',
@@ -76,9 +87,12 @@ describe('Settings store', () => {
     expect(s.theme).toBe('dark');
     expect(s.uiLanguage).toBe('en');
     expect(s.ttsLanguage).toBe('auto');
+    expect(s.ttsVoice).toBe('auto');
     expect(s.hotkeyMode).toBe('toggle');
     expect(s.overlayEnabled).toBe(true);
     expect(s.hotkeys.dictate).toBe('Alt+X');
+    expect(s.systemIncludeMic).toBe(false);
+    expect(s.readerDisplay.theme).toBe('paper');
   });
 
   it('setTheme updates theme, persists, and applies', () => {
@@ -104,6 +118,12 @@ describe('Settings store', () => {
   it('setTtsLanguage updates and persists', () => {
     useSettingsStore.getState().setTtsLanguage('es');
     expect(useSettingsStore.getState().ttsLanguage).toBe('es');
+    expect(localStorage.setItem).toHaveBeenCalled();
+  });
+
+  it('setTtsVoice updates and persists', () => {
+    useSettingsStore.getState().setTtsVoice('en-US-AriaNeural');
+    expect(useSettingsStore.getState().ttsVoice).toBe('en-US-AriaNeural');
     expect(localStorage.setItem).toHaveBeenCalled();
   });
 
@@ -144,7 +164,9 @@ describe('Settings store', () => {
       theme: 'light',
       uiLanguage: 'es',
       ttsLanguage: 'fr',
+      ttsVoice: 'es-MX-DaliaNeural',
       hotkeyMode: 'hold',
+      systemIncludeMic: true,
       hotkeys: { dictate: 'Ctrl+F' },
     });
 
@@ -153,7 +175,9 @@ describe('Settings store', () => {
     expect(useSettingsStore.getState().theme).toBe('light');
     expect(useSettingsStore.getState().uiLanguage).toBe('es');
     expect(useSettingsStore.getState().ttsLanguage).toBe('fr');
+    expect(useSettingsStore.getState().ttsVoice).toBe('es-MX-DaliaNeural');
     expect(useSettingsStore.getState().hotkeyMode).toBe('hold');
+    expect(useSettingsStore.getState().systemIncludeMic).toBe(true);
     expect(electron?.updateHotkeys).toHaveBeenCalled();
   });
 
@@ -171,6 +195,19 @@ describe('Settings store', () => {
   it('setTranslateTo updates and persists', () => {
     useSettingsStore.getState().setTranslateTo('fr');
     expect(useSettingsStore.getState().translateTo).toBe('fr');
+    expect(localStorage.setItem).toHaveBeenCalled();
+  });
+
+  it('setSystemIncludeMic updates and persists', () => {
+    useSettingsStore.getState().setSystemIncludeMic(true);
+    expect(useSettingsStore.getState().systemIncludeMic).toBe(true);
+    expect(localStorage.setItem).toHaveBeenCalled();
+  });
+
+  it('setReaderDisplay updates and persists', () => {
+    useSettingsStore.getState().setReaderDisplay({ font_size: 28, highlight_mode: 'word' });
+    expect(useSettingsStore.getState().readerDisplay.font_size).toBe(28);
+    expect(useSettingsStore.getState().readerDisplay.highlight_mode).toBe('word');
     expect(localStorage.setItem).toHaveBeenCalled();
   });
 

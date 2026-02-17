@@ -7,6 +7,8 @@ import {
   createTranslateEndpoint,
   createAiEditEndpoint,
   createDocumentsEndpoint,
+  createFoldersEndpoint,
+  createReaderEndpoint,
   createHistoryEndpoint,
   createUsageEndpoint,
 } from '@whisperall/api-client';
@@ -51,6 +53,8 @@ export const api = {
   translate: createTranslateEndpoint(client),
   aiEdit: createAiEditEndpoint(client),
   documents: createDocumentsEndpoint(client),
+  folders: createFoldersEndpoint(client),
+  reader: createReaderEndpoint(client),
   history: createHistoryEndpoint(client),
   usage: createUsageEndpoint(client),
 };

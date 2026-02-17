@@ -9,6 +9,8 @@ import { useSettingsStore } from '../stores/settings';
 import { requestPlanRefresh } from '../stores/plan';
 import { t as i18nT } from '../lib/i18n';
 import { inferTTSLanguage } from '../lib/lang-detect';
+import type { TTSProgress } from '../lib/tts';
+import { downloadTTSAudio, hasTTSAudio, pauseTTS, resumeTTS, seekTTSOverall, setTTSPlaybackRate, startReading, stopTTS } from '../lib/tts';
 
 let recorder: MediaRecorder | null = null;
 let audioChunks: Blob[] = [];
@@ -16,7 +18,7 @@ const READER_SPEEDS = [1, 1.5, 2, 3, 4];
 const CUSTOM_PROMPTS_KEY = 'whisperall-custom-prompts';
 
 type CustomPrompt = { id: string; name: string; prompt: string };
-type ReaderStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
+const IDLE_READER_PROGRESS: TTSProgress = { status: 'idle', current: 0, total: 0, currentTime: 0, duration: 0, overallTime: 0, overallDuration: 0, rate: 1, error: null };
 
 function useWT(): (key: string) => string {
   const locale = useSettingsStore((s) => s.uiLanguage);
@@ -43,13 +45,13 @@ export function Widget() {
   const translateTo = useSettingsStore((s) => s.translateTo);
   const uiLanguage = useSettingsStore((s) => s.uiLanguage);
   const ttsLanguage = useSettingsStore((s) => s.ttsLanguage);
-  const readerAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsVoice = useSettingsStore((s) => s.ttsVoice);
   const subtitleTranslateReq = useRef(0);
   const [selectedPromptId, setSelectedPromptId] = useState('default');
   const [subtitleRaw, setSubtitleRaw] = useState('');
   const [subtitleTranslateEnabled, setSubtitleTranslateEnabled] = useState(true);
-  const [readerStatus, setReaderStatus] = useState<ReaderStatus>('idle');
-  const [readerTime, setReaderTime] = useState({ current: 0, duration: 0 });
+  const [readerProgress, setReaderProgress] = useState<TTSProgress>(IDLE_READER_PROGRESS);
+  const [pendingReaderSeek, setPendingReaderSeek] = useState<number | null>(null);
   const [readerSpeedIdx, setReaderSpeedIdx] = useState(0);
   const [translatorInput, setTranslatorInput] = useState('');
   const [translatorOutput, setTranslatorOutput] = useState('');
@@ -126,48 +128,9 @@ export function Widget() {
     electron?.overlayDragMove({ screenX: e.screenX, screenY: e.screenY });
   }, [dragging]);
 
-  const disposeReaderAudio = useCallback((keepTime = false) => {
-    const audio = readerAudioRef.current;
-    if (!audio) return;
-    audio.pause();
-    audio.ontimeupdate = null;
-    audio.onended = null;
-    audio.onerror = null;
-    audio.onloadedmetadata = null;
-    readerAudioRef.current = null;
-    if (!keepTime) setReaderTime({ current: 0, duration: 0 });
-  }, []);
-
-  const speakText = useCallback(async (textToSpeak: string) => {
-    if (!textToSpeak.trim()) return;
-    setReaderStatus('loading');
-    try {
-      const forced = ttsLanguage && ttsLanguage.toLowerCase() !== 'auto' ? ttsLanguage : undefined;
-      const language = forced ?? inferTTSLanguage(textToSpeak, { fallback: uiLanguage });
-      const res = await api.tts.synthesize({ text: textToSpeak, language });
-      requestPlanRefresh();
-      disposeReaderAudio();
-      const audio = new Audio(res.audio_url);
-      readerAudioRef.current = audio;
-      audio.playbackRate = readerSpeed;
-      audio.onloadedmetadata = () => {
-        setReaderTime({ current: 0, duration: Number.isFinite(audio.duration) ? audio.duration : 0 });
-      };
-      audio.ontimeupdate = () => {
-        setReaderTime({ current: audio.currentTime, duration: Number.isFinite(audio.duration) ? audio.duration : 0 });
-      };
-      audio.onended = () => {
-        setReaderStatus('idle');
-      };
-      audio.onerror = () => {
-        setReaderStatus('error');
-      };
-      await audio.play();
-      setReaderStatus('playing');
-    } catch {
-      setReaderStatus('error');
-    }
-  }, [disposeReaderAudio, readerSpeed, ttsLanguage, uiLanguage]);
+  useEffect(() => {
+    if (readerProgress.status === 'idle') setPendingReaderSeek(null);
+  }, [readerProgress.status]);
 
   const loadClipboardText = useCallback(async () => {
     try {
@@ -177,25 +140,40 @@ export function Widget() {
     }
   }, []);
 
+  const startReader = useCallback((textToSpeak: string) => {
+    if (!textToSpeak.trim()) return;
+    const voice = ttsVoice && ttsVoice.toLowerCase() !== 'auto' ? ttsVoice : undefined;
+    const forced = ttsLanguage && ttsLanguage.toLowerCase() !== 'auto' ? ttsLanguage : undefined;
+    const language = forced ?? inferTTSLanguage(textToSpeak, { fallback: uiLanguage, voice });
+    setTTSPlaybackRate(readerSpeed);
+    setReaderProgress((p) => ({ ...p, rate: readerSpeed, error: null }));
+    void startReading(textToSpeak, voice, language, setReaderProgress);
+  }, [readerSpeed, ttsLanguage, ttsVoice, uiLanguage]);
+
   const handleReaderPrimary = useCallback(async () => {
-    if (readerStatus === 'playing') {
-      readerAudioRef.current?.pause();
-      setReaderStatus('paused');
-      return;
-    }
-    if (readerStatus === 'paused' && readerAudioRef.current) {
-      try {
-        await readerAudioRef.current.play();
-        setReaderStatus('playing');
-      } catch {
-        setReaderStatus('error');
-      }
-      return;
-    }
+    if (readerProgress.status === 'playing') return pauseTTS();
+    if (readerProgress.status === 'paused') return resumeTTS();
     const clip = await loadClipboardText();
     if (!clip) return;
-    await speakText(clip);
-  }, [loadClipboardText, readerStatus, speakText]);
+    startReader(clip);
+  }, [loadClipboardText, readerProgress.status, startReader]);
+
+  const handleReaderStop = useCallback(() => {
+    stopTTS();
+    setReaderProgress(IDLE_READER_PROGRESS);
+    setPendingReaderSeek(null);
+  }, []);
+
+  const handleReaderDownload = useCallback(() => {
+    const blob = downloadTTSAudio();
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'reading.mp3';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   const handleTranslateClipboard = useCallback(async () => {
     const clip = await loadClipboardText();
@@ -267,17 +245,10 @@ export function Widget() {
   }, [mode, setTranslatedText, subtitleRaw, subtitleTranslateEnabled, translateTo]);
 
   useEffect(() => {
-    const audio = readerAudioRef.current;
-    if (!audio) return;
-    audio.playbackRate = readerSpeed;
-  }, [readerSpeed]);
-
-  useEffect(() => {
     return () => {
       cancelQuickClose();
-      disposeReaderAudio();
     };
-  }, [cancelQuickClose, disposeReaderAudio]);
+  }, [cancelQuickClose]);
 
   const handleStart = useCallback(async () => {
     startDictation();
@@ -326,7 +297,8 @@ export function Widget() {
     setQuickOpen(false);
   };
 
-  const readerDuration = Math.max(readerTime.duration, 0);
+  const readerDuration = Math.max(readerProgress.overallDuration, 0);
+  const readerHasAudio = hasTTSAudio();
 
   if (mode === 'subtitles') {
     return (
@@ -441,15 +413,37 @@ export function Widget() {
               <div className="widget-reader-actions">
                 <button className="widget-btn-record" onClick={() => { void handleReaderPrimary(); }}>
                   <span className="material-symbols-outlined">
-                    {readerStatus === 'playing' ? 'pause' : 'play_arrow'}
+                    {readerProgress.status === 'playing' ? 'pause' : 'play_arrow'}
                   </span>
                   {t('widget.readClipboard')}
                 </button>
                 <button
                   className="widget-btn-ghost"
-                  onClick={() => setReaderSpeedIdx((idx) => (idx + 1) % READER_SPEEDS.length)}
+                  onClick={() => setReaderSpeedIdx((idx) => {
+                    const nextIdx = (idx + 1) % READER_SPEEDS.length;
+                    const nextSpeed = READER_SPEEDS[nextIdx];
+                    setTTSPlaybackRate(nextSpeed);
+                    setReaderProgress((p) => ({ ...p, rate: nextSpeed }));
+                    return nextIdx;
+                  })}
                 >
                   {t('widget.readerSpeed')}: {readerSpeed.toFixed(readerSpeed % 1 === 0 ? 0 : 1)}x
+                </button>
+                <button
+                  className="widget-btn-ghost"
+                  onClick={handleReaderStop}
+                  disabled={readerProgress.status === 'idle'}
+                  title={t('widget.stop')}
+                >
+                  <span className="material-symbols-outlined">stop</span>
+                </button>
+                <button
+                  className="widget-btn-ghost"
+                  onClick={handleReaderDownload}
+                  disabled={!readerHasAudio}
+                  title={t('reader.download')}
+                >
+                  <span className="material-symbols-outlined">download</span>
                 </button>
               </div>
               <label className="widget-label" htmlFor="widget-reader-slider">
@@ -461,15 +455,14 @@ export function Widget() {
                 min={0}
                 max={readerDuration || 0}
                 step={0.01}
-                disabled={!readerDuration || !readerAudioRef.current}
-                value={Math.min(readerTime.current, readerDuration)}
+                disabled={readerProgress.status === 'idle' || !readerDuration}
+                value={Math.min(pendingReaderSeek ?? readerProgress.overallTime, readerDuration)}
                 onChange={(e) => {
-                  const audio = readerAudioRef.current;
-                  if (!audio) return;
-                  const next = Number(e.target.value);
-                  audio.currentTime = next;
-                  setReaderTime((prev) => ({ ...prev, current: next }));
+                  setPendingReaderSeek(Number(e.target.value));
                 }}
+                onMouseUp={(e) => { seekTTSOverall(Number((e.target as HTMLInputElement).value)); setPendingReaderSeek(null); }}
+                onTouchEnd={(e) => { seekTTSOverall(Number((e.target as HTMLInputElement).value)); setPendingReaderSeek(null); }}
+                onKeyUp={(e) => { seekTTSOverall(Number((e.target as HTMLInputElement).value)); setPendingReaderSeek(null); }}
                 className="widget-slider"
               />
             </div>

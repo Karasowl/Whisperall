@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import type { Editor } from '@tiptap/react';
+import { ApiError } from '@whisperall/api-client';
 import { useDictationStore } from '../stores/dictation';
 import { useLiveStore } from '../stores/live';
 import { useSettingsStore } from '../stores/settings';
 import { useDocumentsStore } from '../stores/documents';
+import { useFoldersStore } from '../stores/folders';
 import { useAuthStore } from '../stores/auth';
 import { electron } from '../lib/electron';
 import { api } from '../lib/api';
@@ -13,9 +15,13 @@ import { PlanGate } from '../components/PlanGate';
 import { RichEditor } from '../components/editor/RichEditor';
 import { VoiceToolbar } from '../components/editor/VoiceToolbar';
 import { CustomPromptDialog, type CustomPrompt } from '../components/editor/CustomPromptDialog';
+import { AiBudgetDialog } from '../components/editor/AiBudgetDialog';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { FolderChips } from '../components/notes/FolderChips';
 import { useT } from '../lib/i18n';
 import { relativeDate, smartTitle } from '../lib/format-date';
-import { requestPlanRefresh } from '../stores/plan';
+import { projectAiEditBudget } from '../lib/ai-edit-budget';
+import { requestPlanRefresh, usePlanStore } from '../stores/plan';
 
 const SOURCE_ICONS: Record<string, string> = { dictation: 'mic', live: 'groups', transcription: 'description', manual: 'edit_note' };
 const BUILT_IN_MODES = [
@@ -39,6 +45,7 @@ function getColor(tags: string[]): NoteColor { return (tags.find((t) => t.starts
 function setColorTag(tags: string[], color: NoteColor): string[] { return [...tags.filter((t) => !t.startsWith('color:')), `color:${color}`]; }
 
 type ViewMode = 'grid' | 'list';
+type BudgetDialogKind = 'warn' | 'blocked';
 const VIEW_KEY = 'whisperall-notes-view';
 function loadViewMode(): ViewMode { return (localStorage.getItem(VIEW_KEY) as ViewMode) || 'grid'; }
 
@@ -46,12 +53,21 @@ const PROMPTS_KEY = 'whisperall-custom-prompts';
 function loadCustomPrompts(): CustomPrompt[] { try { return JSON.parse(localStorage.getItem(PROMPTS_KEY) ?? '[]'); } catch { return []; } }
 function saveCustomPrompts(p: CustomPrompt[]) { localStorage.setItem(PROMPTS_KEY, JSON.stringify(p)); }
 
+function formatLiveError(err: string, t: (k: string) => string): string {
+  const low = err.toLowerCase();
+  if (err.includes('Failed to fetch') || err.includes('NetworkError') || err.includes('WebSocket')) return t('live.errorConnection');
+  if (err.includes('401') || low.includes('missing token') || low.includes('auth')) return t('live.errorAuth');
+  if (err.includes('502')) return t('live.errorService');
+  return err;
+}
+
 export function DictatePage() {
   const t = useT();
   const dictation = useDictationStore();
   const live = useLiveStore();
   const { translateEnabled, setTranslateEnabled, uiLanguage } = useSettingsStore();
   const { documents, loading, fetchDocuments, createDocument, updateDocument, deleteDocument } = useDocumentsStore();
+  const { folders, selectedFolderId, fetchFolders, selectFolder, deleteFolder } = useFoldersStore();
   const user = useAuthStore((s) => s.user);
 
   const [mode, setMode] = useState<'list' | 'edit'>('list');
@@ -63,6 +79,11 @@ export function DictatePage() {
   const [noteTags, setNoteTags] = useState<string[]>([]);
   const [processing, setProcessing] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [budgetDialog, setBudgetDialog] = useState<{ open: boolean; kind: BudgetDialogKind; message: string }>({
+    open: false,
+    kind: 'warn',
+    message: '',
+  });
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [subtitlesActive, setSubtitlesActive] = useState(false);
@@ -74,18 +95,21 @@ export function DictatePage() {
   const [showExport, setShowExport] = useState(false);
   const [showBulkExport, setShowBulkExport] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [pendingDeleteNoteId, setPendingDeleteNoteId] = useState<string | null>(null);
+  const [pendingDeleteFolderId, setPendingDeleteFolderId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ tone: 'success' | 'error' | 'info'; message: string } | null>(null);
   const toggleView = () => { const v: ViewMode = viewMode === 'grid' ? 'list' : 'grid'; setViewMode(v); localStorage.setItem(VIEW_KEY, v); };
   const prevDictText = useRef('');
   const prevSegCount = useRef(0);
   const editorRef = useRef<Editor | null>(null);
   const actionFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const budgetResolverRef = useRef<((ok: boolean) => void) | null>(null);
 
   const isLive = live.source === 'system';
   const status = isLive ? live.status : dictation.status;
   const hasContent = htmlContent.replace(/<[^>]*>/g, '').trim().length > 0;
 
-  useEffect(() => { if (user) fetchDocuments(); }, [user, fetchDocuments]);
+  useEffect(() => { if (user) { fetchFolders(); fetchDocuments(selectedFolderId ?? undefined); } }, [user, fetchFolders, fetchDocuments, selectedFolderId]);
 
   // Handle pending document open (from Transcribe → Open in Notes)
   const pendingOpenId = useDocumentsStore((s) => s.pendingOpenId);
@@ -139,7 +163,12 @@ export function DictatePage() {
     }
   };
 
-  const goBack = () => { setMode('list'); setDocId(null); setSaved(false); if (user) fetchDocuments(); };
+  const goBack = () => { setMode('list'); setDocId(null); setSaved(false); if (user) fetchDocuments(selectedFolderId ?? undefined); };
+
+  const handleMoveToFolder = async (docId: string, folderId: string | null) => {
+    await updateDocument(docId, { folder_id: folderId });
+    fetchDocuments(selectedFolderId ?? undefined);
+  };
 
   const handleSave = async () => {
     const finalTitle = title.trim() || htmlContent.replace(/<[^>]*>/g, '').split(/[.\n]/)[0]?.slice(0, 60) || smartTitle(uiLanguage);
@@ -185,10 +214,12 @@ export function DictatePage() {
     if (docId) { updateDocument(docId, { tags }).catch(() => {}); }
     else { setSaved(false); }
   };
-  const handleDeleteNote = (id: string) => {
-    if (!window.confirm(t('notes.confirmDelete'))) return;
-    setSelectedNoteIds((prev) => prev.filter((selectedId) => selectedId !== id));
-    deleteDocument(id).catch(() => {});
+  const handleDeleteNote = (id: string) => { setPendingDeleteNoteId(id); };
+  const confirmDeleteNote = () => {
+    if (!pendingDeleteNoteId) return;
+    setSelectedNoteIds((prev) => prev.filter((selectedId) => selectedId !== pendingDeleteNoteId));
+    deleteDocument(pendingDeleteNoteId).catch(() => {});
+    setPendingDeleteNoteId(null);
   };
   const toggleSelection = (id: string) => {
     setSelectedNoteIds((prev) => (
@@ -253,25 +284,77 @@ export function DictatePage() {
       showActionFeedback(t('export.blocked'), 'error');
     }
   };
+  const formatUnits = (value: number) => value.toLocaleString(uiLanguage === 'es' ? 'es-ES' : 'en-US');
+  const openBudgetDialog = (kind: BudgetDialogKind, message: string) => {
+    if (budgetResolverRef.current) budgetResolverRef.current(false);
+    setBudgetDialog({ open: true, kind, message });
+    return new Promise<boolean>((resolve) => { budgetResolverRef.current = resolve; });
+  };
+  const resolveBudgetDialog = (ok: boolean) => {
+    setBudgetDialog((prev) => ({ ...prev, open: false }));
+    const resolve = budgetResolverRef.current;
+    budgetResolverRef.current = null;
+    if (resolve) resolve(ok);
+  };
+  const validateAiBudget = async (txt: string): Promise<boolean> => {
+    await usePlanStore.getState().fetch();
+    const plan = usePlanStore.getState();
+    const budget = projectAiEditBudget({
+      text: txt,
+      used: plan.getUsed('ai_edit_tokens'),
+      limit: plan.getLimit('ai_edit_tokens'),
+    });
+    if (budget.overLimit) {
+      const msg = t('ai.overLimitPrecheck')
+        .replace('{estimate}', formatUnits(budget.tokenEstimate))
+        .replace('{remaining}', formatUnits(budget.remaining));
+      await openBudgetDialog('blocked', msg);
+      setAiError(msg);
+      requestPlanRefresh(0);
+      return false;
+    }
+    if (budget.warnAtThreshold) {
+      const msg = t('ai.warn75Confirm')
+        .replace('{estimate}', formatUnits(budget.tokenEstimate))
+        .replace('{projectedPercent}', String(budget.projectedPercent))
+        .replace('{projected}', formatUnits(budget.projected))
+        .replace('{limit}', formatUnits(budget.limit));
+      if (!(await openBudgetDialog('warn', msg))) {
+        setAiError(t('ai.cancelled'));
+        return false;
+      }
+    }
+    return true;
+  };
   const handleAiEdit = async (aiMode: string, prompt?: string) => {
     const txt = plainText || htmlContent.replace(/<[^>]*>/g, '');
     if (!txt) return;
-    setProcessing(true); setAiError('');
+    setAiError('');
+    if (!(await validateAiBudget(txt))) return;
+    setProcessing(true);
     try {
       const res = await api.aiEdit.edit({ text: txt, mode: aiMode, prompt });
       setHtmlContent(safeHtmlParagraphs(res.text)); setSaved(false);
       requestPlanRefresh();
     } catch (err) {
-      const msg = (err as { message?: string })?.message ?? '';
-      if (msg.includes('429')) setAiError(t('ai.limitReached'));
-      else if (msg.includes('400')) setAiError(t('ai.tooLong'));
-      else setAiError(t('ai.failed'));
+      if (err instanceof ApiError && (err.status === 429 || err.code === 'PLAN_LIMIT_EXCEEDED')) {
+        setAiError(t('ai.limitReached'));
+        requestPlanRefresh(0);
+      } else if (err instanceof ApiError && err.status === 400) {
+        setAiError(t('ai.tooLong'));
+      } else {
+        setAiError(t('ai.failed'));
+      }
     } finally { setProcessing(false); }
   };
 
   useEffect(() => {
     return () => {
       if (actionFeedbackTimer.current) clearTimeout(actionFeedbackTimer.current);
+      if (budgetResolverRef.current) {
+        budgetResolverRef.current(false);
+        budgetResolverRef.current = null;
+      }
     };
   }, []);
 
@@ -368,6 +451,7 @@ export function DictatePage() {
             </div>
           </div>
         </div>
+        <FolderChips documents={documents} selectedFolderId={selectedFolderId} onSelectFolder={selectFolder} onDeleteFolder={(id) => setPendingDeleteFolderId(id)} />
       </div>
       <div className="flex-1 overflow-auto px-8 pb-8">
         {loading && <p className="text-primary text-sm mb-4">{t('notes.loading')}</p>}
@@ -400,6 +484,15 @@ export function DictatePage() {
                     </button>
                     <span className="material-symbols-outlined text-[16px] text-muted">{SOURCE_ICONS[src]}</span>
                     <p className="text-sm font-semibold text-text truncate flex-1">{doc.title}</p>
+                    {folders.length > 0 && (
+                      <select value={doc.folder_id ?? ''} onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => { e.stopPropagation(); handleMoveToFolder(doc.id, e.target.value || null); }}
+                        className="text-[10px] bg-transparent border border-edge rounded px-1 py-0.5 text-muted cursor-pointer outline-none opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                        title={t('folders.moveToFolder')} data-testid={`move-doc-${doc.id}`}>
+                        <option value="">{t('folders.allNotes')}</option>
+                        {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                      </select>
+                    )}
                     <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(doc.id); }}
                       className="p-1 rounded text-muted opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all shrink-0" title={t('notes.delete')}>
                       <span className="material-symbols-outlined text-[16px]">delete</span>
@@ -436,6 +529,15 @@ export function DictatePage() {
                     <p className="text-sm font-semibold text-text truncate">{doc.title}</p>
                     <p className="text-xs text-muted truncate mt-0.5">{preview}</p>
                   </div>
+                  {folders.length > 0 && (
+                    <select value={doc.folder_id ?? ''} onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => { e.stopPropagation(); handleMoveToFolder(doc.id, e.target.value || null); }}
+                      className="text-xs bg-transparent border border-edge rounded px-1.5 py-1 text-muted cursor-pointer outline-none shrink-0"
+                      title={t('folders.moveToFolder')} data-testid={`move-doc-${doc.id}`}>
+                      <option value="">{t('folders.allNotes')}</option>
+                      {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select>
+                  )}
                   <span className="text-xs text-muted shrink-0">{relativeDate(doc.updated_at, uiLanguage)}</span>
                   <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(doc.id); }}
                     className="p-1.5 rounded-lg text-muted opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all shrink-0" title={t('notes.delete')}>
@@ -447,6 +549,26 @@ export function DictatePage() {
           </div>
         )}
       </div>
+      <ConfirmDialog
+        open={!!pendingDeleteNoteId}
+        title={t('notes.delete')}
+        message={t('notes.confirmDelete')}
+        confirmLabel={t('notes.delete')}
+        cancelLabel={t('editor.cancel')}
+        tone="danger"
+        onConfirm={confirmDeleteNote}
+        onCancel={() => setPendingDeleteNoteId(null)}
+      />
+      <ConfirmDialog
+        open={!!pendingDeleteFolderId}
+        title={t('folders.delete')}
+        message={t('folders.confirmDelete')}
+        confirmLabel={t('folders.delete')}
+        cancelLabel={t('editor.cancel')}
+        tone="danger"
+        onConfirm={() => { if (pendingDeleteFolderId) { deleteFolder(pendingDeleteFolderId); setPendingDeleteFolderId(null); } }}
+        onCancel={() => setPendingDeleteFolderId(null)}
+      />
     </div>
   );
 
@@ -460,7 +582,8 @@ export function DictatePage() {
           </button>
           <div className="flex items-center gap-3">
             {status === 'recording' && <span className="flex h-2.5 w-2.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" />}
-            {dictation.error && status !== 'recording' && <span className="text-xs text-red-400 max-w-[200px] truncate" title={dictation.error}>{t('dictate.flushError')}</span>}
+            {!isLive && dictation.error && status !== 'recording' && <span className="text-xs text-red-400 max-w-[200px] truncate" title={dictation.error}>{t('dictate.flushError')}</span>}
+            {isLive && live.error && <span className="text-xs text-red-400 max-w-[260px] truncate" title={live.error}>{formatLiveError(live.error, t)}</span>}
             {live.autoSaveError && <span className="text-xs text-yellow-400 max-w-[200px] truncate" title={live.autoSaveError}>{t('live.autoSaveError')}</span>}
             {saveError && <span className="text-xs text-red-400 max-w-[300px] truncate" title={saveError}>{saveError}</span>}
             {saved && !saveError && <span className="text-xs text-emerald-400 flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">check_circle</span>{t('editor.saved')}</span>}
@@ -539,6 +662,16 @@ export function DictatePage() {
 
       <div className="flex-1 overflow-y-auto px-8 pb-8 flex justify-center">
         <div className="w-full max-w-3xl">
+          {isLive && live.status === 'recording' && live.segments.length === 0 && !live.interimText && !live.error && (
+            <div className="flex flex-col items-center justify-center py-16 gap-4" data-testid="live-listening-inline">
+              <div className="relative flex items-center justify-center h-16 w-16">
+                <span className="material-symbols-outlined text-[52px] text-primary">hearing</span>
+                <span className="absolute inset-0 rounded-full border-2 border-primary/30 animate-ping" />
+              </div>
+              <p className="text-base font-semibold text-text">{t('live.listening')}</p>
+              <p className="text-sm text-muted text-center max-w-md">{t('live.listeningDesc')}</p>
+            </div>
+          )}
           {isLive && live.status === 'recording' && live.interimText && (
             <div className="px-4 py-3 mb-4 rounded-lg border border-primary/30 bg-primary/10" data-testid="live-interim">
               <span className="text-base text-text-secondary/70">{live.interimText}</span>
@@ -552,6 +685,13 @@ export function DictatePage() {
         </div>
       </div>
       {showPromptDialog && <CustomPromptDialog prompts={customPrompts} onSave={(p) => { setCustomPrompts(p); saveCustomPrompts(p); }} onClose={() => setShowPromptDialog(false)} />}
+      <AiBudgetDialog
+        open={budgetDialog.open}
+        kind={budgetDialog.kind}
+        message={budgetDialog.message}
+        onConfirm={() => resolveBudgetDialog(true)}
+        onCancel={() => resolveBudgetDialog(false)}
+      />
     </div>
   );
 }

@@ -68,8 +68,15 @@ async def live_stream(ws: WebSocket):
 
     headers = {"Authorization": f"Token {settings.deepgram_api_key}"}
     try:
-        async with websockets.connect(DG_URL, extra_headers=headers) as dg:
+        # websockets<15 uses extra_headers; websockets>=15 uses additional_headers.
+        try:
+            dg_connect = websockets.connect(DG_URL, additional_headers=headers)
+        except TypeError:
+            dg_connect = websockets.connect(DG_URL, extra_headers=headers)
+
+        async with dg_connect as dg:
             log.info("[live/stream] connected to Deepgram")
+            client_disconnected = asyncio.Event()
 
             async def flush_seconds(force: bool = False) -> bool:
                 """Flush unflushed STT seconds to DB. Returns False if stream should stop."""
@@ -183,6 +190,7 @@ async def live_stream(ws: WebSocket):
                 except Exception:
                     pass
                 finally:
+                    client_disconnected.set()
                     # Final flush (ceil to avoid undercounting partial seconds).
                     try:
                         final_seconds = (int(total_audio_ms) + 999) // 1000
@@ -226,8 +234,28 @@ async def live_stream(ws: WebSocket):
                                 })
                         elif data.get("type") == "UtteranceEnd":
                             await ws.send_json({"type": "utterance_end"})
+                        elif data.get("type") == "Error":
+                            # Surface Deepgram errors to the client; otherwise the UI looks stuck.
+                            message = (
+                                data.get("description")
+                                or data.get("message")
+                                or data.get("error")
+                                or "Deepgram error"
+                            )
+                            await ws.send_json({"type": "error", "message": str(message), "code": "DEEPGRAM_ERROR"})
+                            try:
+                                await ws.close(code=1011)
+                            except Exception:
+                                pass
+                            return
                 except websockets.exceptions.ConnectionClosed:
-                    pass
+                    # If Deepgram drops unexpectedly, inform the client.
+                    if not client_disconnected.is_set():
+                        try:
+                            await ws.send_json({"type": "error", "message": "Deepgram disconnected", "code": "DEEPGRAM_DISCONNECTED"})
+                            await ws.close(code=1011)
+                        except Exception:
+                            pass
                 except Exception as exc:
                     log.error("[live/stream] transcript relay error: %s", exc)
 

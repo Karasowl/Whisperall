@@ -8,7 +8,7 @@ export type DocumentsState = {
   loading: boolean;
   error: string | null;
   pendingOpenId: string | null;
-  fetchDocuments: () => Promise<void>;
+  fetchDocuments: (folderId?: string) => Promise<void>;
   loadDocument: (id: string) => Promise<void>;
   createDocument: (params: CreateDocumentParams) => Promise<Document>;
   updateDocument: (id: string, params: UpdateDocumentParams) => Promise<void>;
@@ -24,10 +24,10 @@ export const useDocumentsStore = create<DocumentsState>((set, get) => ({
   error: null,
   pendingOpenId: null,
 
-  fetchDocuments: async () => {
+  fetchDocuments: async (folderId?: string) => {
     set({ loading: true, error: null });
     try {
-      const docs = await api.documents.list();
+      const docs = await api.documents.list(folderId);
       set({ documents: docs, loading: false });
     } catch (err) {
       set({ error: (err as Error).message, loading: false });

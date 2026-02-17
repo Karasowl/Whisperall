@@ -88,7 +88,9 @@ function normalizeTranscriptionError(err: unknown): NormalizedTranscriptionError
   ) {
     return {
       kind: 'plan_limit',
-      message: 'You reached your monthly transcription limit. Upgrade your plan to continue or wait for monthly reset.',
+      message: msg.includes('plan:')
+        ? msg.replace(/^api error \d+:\s*/i, '')
+        : 'You reached your monthly transcription limit. Upgrade your plan to continue or wait for monthly reset.',
     };
   }
 
@@ -126,6 +128,7 @@ export type TranscriptionState = {
   stagedFile: File | null;
   stagedUrl: string;
   savedDocumentId: string | null;
+  urlStartedAt: number | null;
 
   setDiarization: (v: boolean) => void;
   setAiSummary: (v: boolean) => void;
@@ -135,6 +138,7 @@ export type TranscriptionState = {
   stageUrl: (url: string) => void;
   clearStaged: () => void;
   startTranscription: () => Promise<void>;
+  cancelUrlTranscription: () => void;
   createJob: (file: File, language?: string) => Promise<void>;
   pollJob: (jobId: string) => Promise<void>;
   loadResult: (jobId: string) => Promise<void>;
@@ -142,6 +146,9 @@ export type TranscriptionState = {
   subscribeToRealtime: () => () => void;
   reset: () => void;
 };
+
+const URL_TIMEOUT_MS = 180_000; // 3 minutes
+let urlAbortController: AbortController | null = null;
 
 async function saveAsNote(title: string, text: string): Promise<string | null> {
   try {
@@ -170,6 +177,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
   stagedFile: null,
   stagedUrl: '',
   savedDocumentId: null,
+  urlStartedAt: null,
 
   setDiarization: (v) => set({ diarization: v }),
   setAiSummary: (v) => set({ aiSummary: v }),
@@ -180,30 +188,48 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
   stageUrl: (url) => set({ stagedUrl: url, stagedFile: null, error: null, savedDocumentId: null, fullText: '' }),
   clearStaged: () => set({ stagedFile: null, stagedUrl: '' }),
 
+  cancelUrlTranscription: () => {
+    urlAbortController?.abort();
+    urlAbortController = null;
+    set({ loading: false, urlStartedAt: null, error: null });
+  },
+
   startTranscription: async () => {
     const { stagedFile, stagedUrl, language, diarization } = get();
     if (stagedFile) {
       await get().createJob(stagedFile, language === 'auto' ? undefined : language);
-      set({ stagedFile: null });
+      if (!get().error) set({ stagedFile: null });
     } else if (stagedUrl.trim()) {
-      set({ loading: true, error: null, savedDocumentId: null });
+      urlAbortController?.abort();
+      const controller = new AbortController();
+      urlAbortController = controller;
+      const timeoutId = setTimeout(() => controller.abort(), URL_TIMEOUT_MS);
+      set({ loading: true, error: null, savedDocumentId: null, urlStartedAt: Date.now() });
       try {
         const lang = language === 'auto' ? undefined : language;
         const result = await api.transcribe.fromUrl({
           url: stagedUrl,
           language: lang,
           enable_diarization: diarization,
-        });
-        set({ fullText: result.text, segments: result.segments ?? [], loading: false, stagedUrl: '' });
+        }, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        urlAbortController = null;
+        set({ fullText: result.text, segments: result.segments ?? [], loading: false, stagedUrl: '', urlStartedAt: null });
         requestPlanRefresh();
         if (result.text.trim()) {
           const docId = await saveAsNote(new URL(stagedUrl).hostname, result.text);
           set({ savedDocumentId: docId });
         }
       } catch (err) {
+        clearTimeout(timeoutId);
+        urlAbortController = null;
+        if ((err as Error)?.name === 'AbortError') {
+          set({ loading: false, urlStartedAt: null, error: 'Transcription cancelled or timed out.' });
+          return;
+        }
         const normalized = normalizeTranscriptionError(err);
         if (normalized.kind === 'plan_limit') requestPlanRefresh(0);
-        set({ loading: false, error: normalized.message });
+        set({ loading: false, urlStartedAt: null, error: normalized.message });
       }
     } else {
       const activeJobId = get().activeJobId;
@@ -357,19 +383,24 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
     return () => { sb.removeChannel(channel); };
   },
 
-  reset: () => set({
-    jobs: [],
-    activeJobId: null,
-    segments: [],
-    fullText: '',
-    loading: false,
-    error: null,
-    diarization: true,
-    aiSummary: false,
-    punctuation: true,
-    language: 'auto',
-    stagedFile: null,
-    stagedUrl: '',
-    savedDocumentId: null,
-  }),
+  reset: () => {
+    urlAbortController?.abort();
+    urlAbortController = null;
+    set({
+      jobs: [],
+      activeJobId: null,
+      segments: [],
+      fullText: '',
+      loading: false,
+      error: null,
+      diarization: true,
+      aiSummary: false,
+      punctuation: true,
+      language: 'auto',
+      stagedFile: null,
+      stagedUrl: '',
+      savedDocumentId: null,
+      urlStartedAt: null,
+    });
+  },
 }));

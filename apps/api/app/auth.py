@@ -164,14 +164,34 @@ def _load_user_profile(user_id: str, email: str | None = None) -> AuthUser:
     is_admin = False
     db = get_supabase_or_none()
     if db:
+        # Try full query first; fall back to plan-only if admin columns are missing.
         try:
             row = db.table("profiles").select("plan,is_owner,is_admin").eq("id", user_id).maybe_single().execute()
             if row.data:
                 plan = normalize_plan(row.data.get("plan"))
                 is_owner = bool(row.data.get("is_owner"))
                 is_admin = bool(row.data.get("is_admin"))
-        except Exception:
-            plan = "free"
+        except Exception as exc:
+            if "42703" in str(exc):
+                log.warning("Profile admin columns missing (run migration 011), falling back to plan-only")
+                try:
+                    row = db.table("profiles").select("plan").eq("id", user_id).maybe_single().execute()
+                    if row.data:
+                        plan = normalize_plan(row.data.get("plan"))
+                except Exception as inner:
+                    log.error("Profile plan-only query also failed for %s: %s", user_id, inner)
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=f"Could not verify your plan: {type(inner).__name__}: {inner}",
+                        headers={"Retry-After": "5"},
+                    )
+            else:
+                log.error("Profile query failed for %s: %s", user_id, exc, exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Could not verify your plan: {type(exc).__name__}: {exc}",
+                    headers={"Retry-After": "5"},
+                )
         try:
             now = datetime.now(timezone.utc)
             month_start = date(now.year, now.month, 1).isoformat()
@@ -222,12 +242,18 @@ def check_usage(user: AuthUser, resource: str, amount: int = 1) -> None:
         return
     current = user.usage.get(resource, 0)
     if current + amount > limit:
+        plan = normalize_plan(user.plan)
         retry_after = str(_seconds_until_next_month_utc())
+        log.info(
+            "Plan limit hit: user=%s plan=%s resource=%s current=%s amount=%s limit=%s",
+            user.user_id, plan, resource, current, amount, limit,
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=(
-                f"Plan limit exceeded for {resource}. "
-                f"Usage: {current}/{limit}. Upgrade plan or wait for monthly reset."
+                f"Plan limit exceeded for {resource} (plan: {plan}). "
+                f"Usage: {current}/{limit}, requested: {amount}. "
+                f"Upgrade plan or wait for monthly reset."
             ),
             headers={
                 "Retry-After": retry_after,

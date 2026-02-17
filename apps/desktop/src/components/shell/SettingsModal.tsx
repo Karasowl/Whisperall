@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/auth';
 import { electron } from '../../lib/electron';
 import { useT } from '../../lib/i18n';
 import { UsageMeter } from '../UsageMeter';
+import { getTtsVoiceLabel, useTtsVoices } from '../../lib/tts-voices';
 
 type Props = { onClose: () => void; onOpenPricing: () => void };
 
@@ -50,6 +51,7 @@ export function SettingsModal({ onClose, onOpenPricing }: Props) {
   const t = useT();
   const settings = useSettingsStore();
   const { user, signOut } = useAuthStore();
+  const { voices: ttsVoices, loading: ttsVoicesLoading } = useTtsVoices();
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [editingHotkey, setEditingHotkey] = useState<string | null>(null);
 
@@ -179,6 +181,10 @@ export function SettingsModal({ onClose, onOpenPricing }: Props) {
                 <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${d.deviceId.slice(0, 8)}`}</option>
               ))}
             </select>
+            <div className="mt-4 flex flex-col gap-1">
+              <ToggleSwitch label={t('settings.systemIncludeMic')} checked={settings.systemIncludeMic} onChange={settings.setSystemIncludeMic} />
+              <p className="text-xs text-muted">{t('settings.systemIncludeMicDesc')}</p>
+            </div>
           </section>
 
           {/* Translation */}
@@ -201,6 +207,20 @@ export function SettingsModal({ onClose, onOpenPricing }: Props) {
           <section>
             <h3 className="text-sm font-semibold text-text-secondary mb-3">{t('settings.tts')}</h3>
             <div className="flex flex-col gap-4">
+              <Toggle label={t('settings.ttsVoice')} description={t('settings.ttsVoiceDesc')}>
+                <select
+                  value={settings.ttsVoice}
+                  onChange={(e) => settings.setTtsVoice(e.target.value)}
+                  className="bg-base border border-edge text-text text-sm rounded-lg px-3 py-1.5 outline-none appearance-none"
+                  data-testid="settings-tts-voice"
+                  disabled={ttsVoicesLoading}
+                >
+                  <option value="auto">{t('settings.auto')}</option>
+                  {ttsVoices.map((v) => (
+                    <option key={`${v.provider}:${v.name}`} value={v.name}>{getTtsVoiceLabel(v)}</option>
+                  ))}
+                </select>
+              </Toggle>
               <Toggle label={t('settings.ttsLanguage')} description={t('settings.ttsLanguageDesc')}>
                 <select
                   value={settings.ttsLanguage}

@@ -10,6 +10,28 @@ const MOD_COLORS: Record<string, string> = {
   live: 'bg-pink-500/20 text-pink-400', tts: 'bg-amber-500/20 text-amber-500',
   translate: 'bg-emerald-500/20 text-emerald-400', ai_edit: 'bg-blue-500/20 text-blue-400',
 };
+const MOD_LABELS: Record<string, string> = {
+  dictate: 'Dictation', transcribe: 'Transcription', live: 'Meeting',
+  tts: 'Read Aloud', translate: 'Translation', ai_edit: 'AI Edit',
+};
+
+function entryTitle(e: HistoryEntry): string {
+  const src = e.module === 'tts' ? e.input_text : e.output_text;
+  const first = (src ?? '').split('\n').find(l => l.trim());
+  if (first && first.trim().length > 0) {
+    const t = first.trim();
+    return t.length > 60 ? t.slice(0, 60) + '\u2026' : t;
+  }
+  return MOD_LABELS[e.module] ?? e.module;
+}
+
+function entrySubtitle(e: HistoryEntry): string {
+  const src = e.module === 'tts' ? e.input_text : e.output_text;
+  const lines = (src ?? '').split('\n').filter(l => l.trim());
+  if (lines.length > 1) return lines[1].trim().slice(0, 80);
+  if (e.module === 'tts' && e.input_text) return MOD_LABELS.tts;
+  return '';
+}
 
 type Props = { entries: HistoryEntry[]; selectedId: string | null; onSelect: (id: string) => void };
 
@@ -43,16 +65,16 @@ export function HistoryTable({ entries, selectedId, onSelect }: Props) {
                   <div className={`${MOD_COLORS[entry.module] ?? 'bg-primary/20 text-primary'} p-2 rounded-lg shrink-0`}>
                     <span className="material-symbols-outlined text-[20px]">{MOD_ICONS[entry.module] ?? 'history'}</span>
                   </div>
-                  <div>
-                    <p className="text-sm font-semibold text-text capitalize">{entry.module.replace(/_/g, ' ')}</p>
-                    <p className="text-xs text-muted truncate max-w-[200px]">{entry.output_text ?? ''}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-text truncate max-w-[280px]">{entryTitle(entry)}</p>
+                    <p className="text-xs text-muted truncate max-w-[280px]">{entrySubtitle(entry)}</p>
                   </div>
                 </div>
               </td>
               <td className="py-4 px-4">
-                <div className="flex items-center gap-1.5 text-xs font-medium text-text-secondary bg-surface-alt rounded px-2 py-1 w-fit capitalize">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-text-secondary bg-surface-alt rounded px-2 py-1 w-fit">
                   <span className="material-symbols-outlined text-[14px]">{MOD_ICONS[entry.module] ?? 'history'}</span>
-                  {entry.module.replace(/_/g, ' ')}
+                  {MOD_LABELS[entry.module] ?? entry.module}
                 </div>
               </td>
               <td className="py-4 px-4 text-sm text-muted text-right whitespace-nowrap">{new Date(entry.created_at).toLocaleDateString()}</td>

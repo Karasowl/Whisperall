@@ -61,6 +61,39 @@ class AiEditRequest(BaseModel):
     prompt: str | None = None
 
 
+class ReaderImportUrlRequest(BaseModel):
+    url: str
+    force_ocr: bool = False
+    language_hint: str | None = None
+    save: bool = True
+
+
+class ReaderProgressUpsertRequest(BaseModel):
+    char_offset: int = Field(default=0, ge=0)
+    playback_seconds: float = Field(default=0, ge=0)
+    section_index: int = Field(default=0, ge=0)
+    updated_at_client: datetime | None = None
+
+
+class ReaderBookmarkCreateRequest(BaseModel):
+    document_id: str
+    char_offset: int = Field(default=0, ge=0)
+    label: str | None = None
+
+
+class ReaderAnnotationCreateRequest(BaseModel):
+    document_id: str
+    start_offset: int = Field(..., ge=0)
+    end_offset: int = Field(..., ge=0)
+    note: str = ""
+    color: str = "#137fec"
+
+
+class ReaderAnnotationUpdateRequest(BaseModel):
+    note: str | None = None
+    color: str | None = None
+
+
 # ── Responses ─────────────────────────────────────────────
 
 class DictateResponse(BaseModel):
@@ -85,6 +118,18 @@ class TranscribeJobResponse(BaseModel):
 
 class TTSResponse(BaseModel):
     audio_url: str
+
+
+class TTSVoice(BaseModel):
+    provider: Literal["google", "edge"]
+    name: str
+    locale: str
+    gender: str | None = None
+    label: str | None = None
+
+
+class TTSVoicesResponse(BaseModel):
+    voices: list[TTSVoice]
 
 
 class TranslateResponse(BaseModel):
@@ -112,6 +157,43 @@ class UsageResponse(BaseModel):
     period_end: datetime
     next_reset_at: datetime
     generated_at: datetime
+
+
+class ReaderImportResponse(BaseModel):
+    text: str
+    blocks: list[dict] = []
+    pages: int = 0
+    title: str
+    source: str
+    document_id: str | None = None
+    warning: str | None = None
+
+
+class ReaderProgressResponse(BaseModel):
+    document_id: str
+    char_offset: int = Field(default=0, ge=0)
+    playback_seconds: float = Field(default=0, ge=0)
+    section_index: int = Field(default=0, ge=0)
+    updated_at: datetime
+
+
+class ReaderBookmarkResponse(BaseModel):
+    id: str
+    document_id: str
+    char_offset: int = Field(default=0, ge=0)
+    label: str
+    created_at: datetime
+
+
+class ReaderAnnotationResponse(BaseModel):
+    id: str
+    document_id: str
+    start_offset: int = Field(..., ge=0)
+    end_offset: int = Field(..., ge=0)
+    note: str
+    color: str
+    created_at: datetime
+    updated_at: datetime
 
 
 # ── Admin / Business ────────────────────────────────────────
