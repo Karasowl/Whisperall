@@ -354,6 +354,23 @@ def _segments_to_labeled_text(segments: list[dict]) -> str:
     return "\n\n".join(f'{turn["speaker"]}: {turn["text"]}' for turn in turns).strip()
 
 
+def _word_count(text: str) -> int:
+    return len([part for part in (text or "").split() if part])
+
+
+def _should_fallback_to_chunk_text(diarized_text: str, chunk_text: str) -> bool:
+    chunk_words = _word_count(chunk_text)
+    if chunk_words == 0:
+        return False
+    diarized_words = _word_count(diarized_text)
+    if diarized_words == 0:
+        return True
+    # Diarization can return partial utterances; avoid dropping most of the transcript.
+    if chunk_words < 30:
+        return False
+    return diarized_words < max(8, int(chunk_words * 0.35))
+
+
 @router.post("/jobs", response_model=TranscribeJobResponse)
 async def create_job(payload: TranscribeJobRequest, user: AuthUser = Depends(get_current_user)):
     if payload.enable_diarization and not settings.deepgram_api_key:
@@ -596,11 +613,19 @@ async def run_job(job_id: str, payload: TranscribeRunRequest, user: AuthUser = D
                 (c.get("result_json") or {}).get("text", "").strip()
                 for c in (all_chunks.data or [])
                 if (c.get("result_json") or {}).get("text")
-            )
+            ).strip()
             merged_segments = _merge_chunk_segments(all_chunks.data or []) if enable_diarization else None
-            full_text = _segments_to_labeled_text(merged_segments or []) if enable_diarization else chunk_text.strip()
+            if enable_diarization:
+                labeled_text = _segments_to_labeled_text(merged_segments or [])
+                if _should_fallback_to_chunk_text(labeled_text, chunk_text):
+                    full_text = chunk_text
+                    merged_segments = None
+                else:
+                    full_text = labeled_text
+            else:
+                full_text = chunk_text
             if not full_text:
-                full_text = chunk_text.strip()
+                full_text = chunk_text
             db.table("transcripts").insert({
                 "job_id": job_id,
                 "plain_text": full_text.strip(),
@@ -675,10 +700,10 @@ async def transcribe_from_url(payload: TranscribeUrlRequest, user: AuthUser = De
                 )
             except Exception:
                 quality_text = ""
-            text = (quality_text or "").strip() or diarized.get("text", "")
+            text = ((quality_text or "").strip() or diarized.get("text", "")).strip()
             segments = diarized.get("segments") or None
             labeled = _segments_to_labeled_text(segments or [])
-            if labeled:
+            if labeled and not _should_fallback_to_chunk_text(labeled, text):
                 text = labeled
         else:
             text = await groq_stt.transcribe_chunk(

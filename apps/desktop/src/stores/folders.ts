@@ -31,24 +31,42 @@ export const useFoldersStore = create<FoldersState>((set) => ({
   },
 
   createFolder: async (name) => {
-    const folder = await api.folders.create({ name });
-    set((s) => ({ folders: [...s.folders, folder] }));
-    return folder;
+    set({ error: null });
+    try {
+      const folder = await api.folders.create({ name });
+      set((s) => ({ folders: [...s.folders, folder] }));
+      return folder;
+    } catch (err) {
+      set({ error: (err as Error).message });
+      throw err;
+    }
   },
 
   renameFolder: async (id, name) => {
-    const updated = await api.folders.update(id, { name });
-    set((s) => ({
-      folders: s.folders.map((f) => (f.id === id ? updated : f)),
-    }));
+    set({ error: null });
+    try {
+      const updated = await api.folders.update(id, { name });
+      set((s) => ({
+        folders: s.folders.map((f) => (f.id === id ? updated : f)),
+      }));
+    } catch (err) {
+      set({ error: (err as Error).message });
+      throw err;
+    }
   },
 
   deleteFolder: async (id) => {
-    await api.folders.delete(id);
-    set((s) => ({
-      folders: s.folders.filter((f) => f.id !== id),
-      selectedFolderId: s.selectedFolderId === id ? null : s.selectedFolderId,
-    }));
+    set({ error: null });
+    try {
+      await api.folders.delete(id);
+      set((s) => ({
+        folders: s.folders.filter((f) => f.id !== id),
+        selectedFolderId: s.selectedFolderId === id ? null : s.selectedFolderId,
+      }));
+    } catch (err) {
+      set({ error: (err as Error).message });
+      throw err;
+    }
   },
 
   selectFolder: (id) => set({ selectedFolderId: id }),

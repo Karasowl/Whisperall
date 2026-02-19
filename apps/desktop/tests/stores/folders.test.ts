@@ -50,6 +50,12 @@ describe('useFoldersStore', () => {
     expect(mockFolders.create).toHaveBeenCalledWith({ name: 'Work' });
   });
 
+  it('createFolder stores error and rethrows', async () => {
+    mockFolders.create.mockRejectedValue(new Error('boom'));
+    await expect(useFoldersStore.getState().createFolder('Work')).rejects.toThrow('boom');
+    expect(useFoldersStore.getState().error).toBe('boom');
+  });
+
   it('renameFolder updates in list', async () => {
     const updated = { ...FOLDER, name: 'Personal' };
     mockFolders.update.mockResolvedValue(updated);
@@ -58,12 +64,24 @@ describe('useFoldersStore', () => {
     expect(useFoldersStore.getState().folders[0].name).toBe('Personal');
   });
 
+  it('renameFolder stores error and rethrows', async () => {
+    mockFolders.update.mockRejectedValue(new Error('rename-fail'));
+    await expect(useFoldersStore.getState().renameFolder('f1', 'Personal')).rejects.toThrow('rename-fail');
+    expect(useFoldersStore.getState().error).toBe('rename-fail');
+  });
+
   it('deleteFolder removes from list', async () => {
     mockFolders.delete.mockResolvedValue(undefined);
     useFoldersStore.setState({ folders: [FOLDER], selectedFolderId: 'f1' });
     await useFoldersStore.getState().deleteFolder('f1');
     expect(useFoldersStore.getState().folders).toHaveLength(0);
     expect(useFoldersStore.getState().selectedFolderId).toBeNull();
+  });
+
+  it('deleteFolder stores error and rethrows', async () => {
+    mockFolders.delete.mockRejectedValue(new Error('delete-fail'));
+    await expect(useFoldersStore.getState().deleteFolder('f1')).rejects.toThrow('delete-fail');
+    expect(useFoldersStore.getState().error).toBe('delete-fail');
   });
 
   it('deleteFolder preserves selectedFolderId if different', async () => {

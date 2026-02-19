@@ -1,6 +1,7 @@
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.config import settings
+from app.routers.transcribe import _should_fallback_to_chunk_text
 from fastapi import HTTPException
 import httpx
 
@@ -35,6 +36,18 @@ def test_create_job_with_diarization_requires_deepgram_key(client, auth_headers)
     assert "DEEPGRAM_API_KEY" in res.json()["detail"]
     assert res.headers.get("x-whisperall-error-code") == "DIARIZATION_NOT_CONFIGURED"
     assert res.json()["error"]["code"] == "DIARIZATION_NOT_CONFIGURED"
+
+
+def test_diarized_text_fallback_triggers_when_coverage_is_too_low():
+    chunk_text = " ".join(["palabra"] * 120)
+    diarized_text = "Speaker 1: Hola, buenas. Se escucha bien."
+    assert _should_fallback_to_chunk_text(diarized_text, chunk_text) is True
+
+
+def test_diarized_text_fallback_keeps_diarized_text_when_coverage_is_reasonable():
+    chunk_text = " ".join(["palabra"] * 80)
+    diarized_text = "Speaker 1: " + " ".join(["palabra"] * 40)
+    assert _should_fallback_to_chunk_text(diarized_text, chunk_text) is False
 
 
 def test_run_job_sets_paused_status_on_plan_limit(client, auth_headers):

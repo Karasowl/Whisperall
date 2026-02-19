@@ -23,7 +23,7 @@ import { relativeDate, smartTitle } from '../lib/format-date';
 import { projectAiEditBudget } from '../lib/ai-edit-budget';
 import { requestPlanRefresh, usePlanStore } from '../stores/plan';
 
-const SOURCE_ICONS: Record<string, string> = { dictation: 'mic', live: 'groups', transcription: 'description', manual: 'edit_note' };
+const SOURCE_ICONS: Record<string, string> = { dictation: 'mic', live: 'groups', transcription: 'description', manual: 'edit_note', reader: 'menu_book' };
 const BUILT_IN_MODES = [
   { id: 'casual', icon: 'chat' }, { id: 'clean_fillers', icon: 'cleaning_services' },
   { id: 'formal', icon: 'school' }, { id: 'summarize', icon: 'summarize' },
@@ -96,6 +96,7 @@ export function DictatePage() {
   const [showBulkExport, setShowBulkExport] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [pendingDeleteNoteId, setPendingDeleteNoteId] = useState<string | null>(null);
+  const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   const [pendingDeleteFolderId, setPendingDeleteFolderId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ tone: 'success' | 'error' | 'info'; message: string } | null>(null);
   const toggleView = () => { const v: ViewMode = viewMode === 'grid' ? 'list' : 'grid'; setViewMode(v); localStorage.setItem(VIEW_KEY, v); };
@@ -108,6 +109,13 @@ export function DictatePage() {
   const isLive = live.source === 'system';
   const status = isLive ? live.status : dictation.status;
   const hasContent = htmlContent.replace(/<[^>]*>/g, '').trim().length > 0;
+  const sourceLabel = (source: string) => {
+    if (source === 'dictation') return t('dictate.dictation');
+    if (source === 'live') return t('dictate.live');
+    if (source === 'transcription') return t('transcribe.title');
+    if (source === 'reader') return t('nav.reader');
+    return t('nav.notes');
+  };
 
   useEffect(() => { if (user) { fetchFolders(); fetchDocuments(selectedFolderId ?? undefined); } }, [user, fetchFolders, fetchDocuments, selectedFolderId]);
 
@@ -141,6 +149,10 @@ export function DictatePage() {
   useEffect(() => {
     setSelectedNoteIds((prev) => prev.filter((id) => documents.some((d) => d.id === id)));
   }, [documents]);
+
+  useEffect(() => {
+    if (selectedNoteIds.length === 0) setShowBulkExport(false);
+  }, [selectedNoteIds.length]);
 
   const openNote = (id: string) => {
     const doc = documents.find((d) => d.id === id);
@@ -220,6 +232,12 @@ export function DictatePage() {
     setSelectedNoteIds((prev) => prev.filter((selectedId) => selectedId !== pendingDeleteNoteId));
     deleteDocument(pendingDeleteNoteId).catch(() => {});
     setPendingDeleteNoteId(null);
+  };
+  const confirmBulkDelete = async () => {
+    const ids = [...selectedNoteIds];
+    setPendingBulkDelete(false);
+    await Promise.all(ids.map((id) => deleteDocument(id).catch(() => {})));
+    setSelectedNoteIds([]);
   };
   const toggleSelection = (id: string) => {
     setSelectedNoteIds((prev) => (
@@ -373,88 +391,98 @@ export function DictatePage() {
             </button>
           </div>
         </div>
-        {/* Search + color filter */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1">
-            <span className="material-symbols-outlined text-[20px] text-muted absolute left-3 top-1/2 -translate-y-1/2">search</span>
-            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t('notes.search')}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-surface border border-edge text-sm text-text placeholder:text-muted/50 outline-none focus:border-primary transition-colors" data-testid="notes-search" />
-          </div>
-          <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-xl bg-surface border border-edge">
-            {NOTE_COLORS.map((c) => (
-              <button key={c} onClick={() => setColorFilter(colorFilter === c ? null : c)}
-                className={`w-5 h-5 rounded-full ${COLOR_STYLES[c].dot} transition-all ${colorFilter === c ? 'ring-2 ring-[var(--theme-text)] ring-offset-1 ring-offset-[var(--theme-base)] scale-110' : 'opacity-60 hover:opacity-100'}`}
-                title={c} data-testid={`filter-${c}`} />
-            ))}
-            {(colorFilter || searchQuery) && (
-              <button onClick={() => { setColorFilter(null); setSearchQuery(''); }} className="ml-1 p-0.5 rounded text-muted hover:text-text" title={t('notes.clearFilter')}>
-                <span className="material-symbols-outlined text-[16px]">close</span>
-              </button>
-            )}
-          </div>
-          <button onClick={toggleView} className="p-2 rounded-lg bg-surface border border-edge text-muted hover:text-text transition-colors shrink-0" title={viewMode === 'grid' ? 'List view' : 'Grid view'} data-testid="view-toggle">
-            <span className="material-symbols-outlined text-[20px]">{viewMode === 'grid' ? 'view_list' : 'grid_view'}</span>
-          </button>
-          <div className="flex items-center gap-2 ml-auto">
-            <span className="text-xs text-muted" data-testid="selected-count">
-              {t('notes.selectedCount').replace('{count}', String(selectedNoteIds.length))}
-            </span>
+        <div className="mt-1 rounded-2xl border border-edge bg-surface/40 p-3 space-y-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="relative flex-1 min-w-[240px] max-w-[420px]">
+              <span className="material-symbols-outlined text-[20px] text-muted absolute left-3 top-1/2 -translate-y-1/2">search</span>
+              <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t('notes.search')}
+                className="w-full pl-10 pr-4 h-11 rounded-xl bg-surface border border-edge text-sm text-text placeholder:text-muted/50 outline-none focus:border-primary transition-colors" data-testid="notes-search" />
+            </div>
+            <div className="flex items-center gap-1.5 px-2.5 h-11 rounded-xl bg-surface border border-edge shrink-0">
+              {NOTE_COLORS.map((c) => (
+                <button key={c} onClick={() => setColorFilter(colorFilter === c ? null : c)}
+                  className={`w-5 h-5 rounded-full ${COLOR_STYLES[c].dot} transition-all ${colorFilter === c ? 'ring-2 ring-[var(--theme-text)] ring-offset-1 ring-offset-[var(--theme-base)] scale-110' : 'opacity-60 hover:opacity-100'}`}
+                  title={c} data-testid={`filter-${c}`} />
+              ))}
+              {(colorFilter || searchQuery) && (
+                <button onClick={() => { setColorFilter(null); setSearchQuery(''); }} className="ml-1 p-0.5 rounded text-muted hover:text-text" title={t('notes.clearFilter')}>
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              )}
+            </div>
+            <button onClick={toggleView} className="h-11 w-11 rounded-xl bg-surface border border-edge text-muted hover:text-text transition-colors shrink-0 grid place-items-center" title={viewMode === 'grid' ? 'List view' : 'Grid view'} data-testid="view-toggle">
+              <span className="material-symbols-outlined text-[20px]">{viewMode === 'grid' ? 'view_list' : 'grid_view'}</span>
+            </button>
             <button
               type="button"
               onClick={selectAllVisible}
               disabled={filteredDocs.length === 0}
-              className="px-2.5 py-1.5 rounded-lg bg-surface border border-edge text-xs text-muted hover:text-text transition-colors disabled:opacity-30"
+              className="h-11 px-3 rounded-xl bg-surface border border-edge text-xs text-muted hover:text-text transition-colors disabled:opacity-30"
               data-testid="select-all-notes-btn"
             >
               {t('notes.selectAllVisible')}
             </button>
-            <button
-              type="button"
-              onClick={clearSelection}
-              disabled={selectedNoteIds.length === 0}
-              className="px-2.5 py-1.5 rounded-lg bg-surface border border-edge text-xs text-muted hover:text-text transition-colors disabled:opacity-30"
-              data-testid="clear-selection-btn"
-            >
-              {t('notes.clearSelection')}
-            </button>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !showBulkExport;
-                  setShowBulkExport(next);
-                  if (next && selectedNoteIds.length === 0) showActionFeedback(t('notes.selectToExport'), 'info');
-                }}
-                disabled={selectedNoteIds.length === 0}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface border border-edge text-xs text-muted hover:text-text transition-colors disabled:opacity-30"
-                data-testid="bulk-export-btn"
-                title={t('notes.exportSelected')}
-              >
-                <span className="material-symbols-outlined text-[16px]">download</span>
-                {t('notes.exportSelected')}
-              </button>
-              {showBulkExport && (
-                <div className="absolute right-0 top-full mt-1 bg-surface border border-edge rounded-xl shadow-xl py-1 z-50 min-w-[160px]" data-testid="bulk-export-menu">
-                  {(['txt', 'md', 'docx', 'pdf'] as ExportFormat[]).map((fmt) => (
-                    <button
-                      key={fmt}
-                      type="button"
-                      onClick={() => { handleExportSelected(fmt); setShowBulkExport(false); }}
-                      className="w-full px-4 py-2 text-sm text-left text-text hover:bg-surface-alt transition-colors"
-                      data-testid={`bulk-export-${fmt}`}
-                    >
-                      {t(`export.${fmt}`)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
+          {selectedNoteIds.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 pl-0.5">
+              <span className="text-xs text-primary bg-primary/10 border border-primary/20 rounded-lg px-2.5 py-1.5 font-medium" data-testid="selected-count">
+                {t('notes.selectedCount').replace('{count}', String(selectedNoteIds.length))}
+              </span>
+              <button type="button" onClick={clearSelection}
+                className="px-2.5 py-1.5 rounded-lg bg-surface border border-edge text-xs text-muted hover:text-text transition-colors"
+                data-testid="clear-selection-btn">
+                {t('notes.clearSelection')}
+              </button>
+              <button type="button" onClick={() => setPendingBulkDelete(true)}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface border border-edge text-xs text-muted hover:text-red-400 hover:border-red-400/30 transition-colors"
+                data-testid="bulk-delete-btn" title={t('notes.deleteSelected')}>
+                <span className="material-symbols-outlined text-[16px]">delete</span>{t('notes.deleteSelected')}
+              </button>
+              <div className="relative">
+                <button type="button" onClick={() => setShowBulkExport((prev) => !prev)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface border border-edge text-xs text-muted hover:text-text transition-colors"
+                  data-testid="bulk-export-btn" title={t('notes.exportSelected')}>
+                  <span className="material-symbols-outlined text-[16px]">download</span>{t('notes.exportSelected')}
+                </button>
+                {showBulkExport && (
+                  <div className="absolute right-0 top-full mt-1 bg-surface border border-edge rounded-xl shadow-xl py-1 z-50 min-w-[160px]" data-testid="bulk-export-menu">
+                    {(['txt', 'md', 'docx', 'pdf'] as ExportFormat[]).map((fmt) => (
+                      <button key={fmt} type="button"
+                        onClick={() => { handleExportSelected(fmt); setShowBulkExport(false); }}
+                        className="w-full px-4 py-2 text-sm text-left text-text hover:bg-surface-alt transition-colors"
+                        data-testid={`bulk-export-${fmt}`}>
+                        {t(`export.${fmt}`)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <FolderChips documents={documents} selectedFolderId={selectedFolderId} onSelectFolder={selectFolder} onDeleteFolder={(id) => setPendingDeleteFolderId(id)} />
         </div>
-        <FolderChips documents={documents} selectedFolderId={selectedFolderId} onSelectFolder={selectFolder} onDeleteFolder={(id) => setPendingDeleteFolderId(id)} />
       </div>
       <div className="flex-1 overflow-auto px-8 pb-8">
-        {loading && <p className="text-primary text-sm mb-4">{t('notes.loading')}</p>}
+        {loading && filteredDocs.length > 0 && (
+          <div className="mb-3 flex items-center">
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse" data-testid="notes-loading-indicator" />
+          </div>
+        )}
+        {loading && filteredDocs.length === 0 && (
+          viewMode === 'grid' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-2" data-testid="notes-loading-skeleton-grid">
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <div key={`grid-skeleton-${idx}`} className="h-[140px] rounded-xl border border-edge bg-surface animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2 mb-2" data-testid="notes-loading-skeleton-list">
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <div key={`list-skeleton-${idx}`} className="h-[76px] rounded-xl border border-edge bg-surface animate-pulse" />
+              ))}
+            </div>
+          )
+        )}
         {!loading && filteredDocs.length === 0 && (
           <div className="text-center py-16 text-muted">
             <span className="material-symbols-outlined text-[48px] mb-4 block">note_stack</span>
@@ -471,35 +499,42 @@ export function DictatePage() {
               const isSelected = selectedNoteIds.includes(doc.id);
               return (
                 <div key={doc.id} onClick={() => openNote(doc.id)}
-                  className={`flex flex-col p-4 rounded-xl border border-edge border-l-4 ${cs.border} ${cs.bg} hover:brightness-125 transition-all text-left group h-[140px] cursor-pointer`} data-testid={`note-${doc.id}`}>
-                  <div className="flex items-center gap-2 mb-2">
+                  className={`flex flex-col p-4 rounded-2xl border border-edge/80 border-l-4 ${cs.border} bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 transition-all text-left group min-h-[170px] cursor-pointer`} data-testid={`note-${doc.id}`}>
+                  <div className="flex items-start gap-2 mb-2.5">
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); toggleSelection(doc.id); }}
-                      className="p-0.5 rounded text-muted hover:text-text"
+                      className="p-0.5 rounded text-muted hover:text-text mt-0.5"
                       data-testid={`select-note-${doc.id}`}
                       title={t('notes.exportSelected')}
                     >
                       <span className="material-symbols-outlined text-[18px]">{isSelected ? 'check_box' : 'check_box_outline_blank'}</span>
                     </button>
-                    <span className="material-symbols-outlined text-[16px] text-muted">{SOURCE_ICONS[src]}</span>
-                    <p className="text-sm font-semibold text-text truncate flex-1">{doc.title}</p>
-                    {folders.length > 0 && (
-                      <select value={doc.folder_id ?? ''} onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => { e.stopPropagation(); handleMoveToFolder(doc.id, e.target.value || null); }}
-                        className="text-[10px] bg-transparent border border-edge rounded px-1 py-0.5 text-muted cursor-pointer outline-none opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                        title={t('folders.moveToFolder')} data-testid={`move-doc-${doc.id}`}>
-                        <option value="">{t('folders.allNotes')}</option>
-                        {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                      </select>
-                    )}
-                    <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(doc.id); }}
-                      className="p-1 rounded text-muted opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all shrink-0" title={t('notes.delete')}>
-                      <span className="material-symbols-outlined text-[16px]">delete</span>
-                    </button>
+                    <span className={`material-symbols-outlined text-[16px] grid place-items-center h-6 w-6 rounded-md ${cs.bg} text-muted shrink-0`}>{SOURCE_ICONS[src]}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[15px] font-semibold text-text truncate">{doc.title}</p>
+                      <p className="text-[11px] text-muted uppercase tracking-wide mt-0.5">{sourceLabel(src)}</p>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {folders.length > 0 && (
+                        <select value={doc.folder_id ?? ''} onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => { e.stopPropagation(); handleMoveToFolder(doc.id, e.target.value || null); }}
+                          className="styled-select text-[10px] bg-surface border border-edge rounded px-1 py-0.5 text-text cursor-pointer outline-none shrink-0"
+                          title={t('folders.moveToFolder')} data-testid={`move-doc-${doc.id}`}>
+                          <option value="">{t('folders.allNotes')}</option>
+                          {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                      )}
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(doc.id); }}
+                        className="p-1 rounded text-muted hover:text-red-400 hover:bg-red-400/10 transition-all shrink-0" title={t('notes.delete')}>
+                        <span className="material-symbols-outlined text-[16px]">delete</span>
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-xs text-muted/70 leading-relaxed line-clamp-3 flex-1">{preview || '...'}</p>
-                  <span className="text-[11px] text-muted/50 mt-2">{relativeDate(doc.updated_at, uiLanguage)}</span>
+                  <p className="text-[13px] text-text-secondary/90 leading-5 line-clamp-3 flex-1">{preview || '...'}</p>
+                  <div className="mt-3 pt-2 border-t border-edge/60 flex items-center justify-between">
+                    <span className="text-[11px] text-muted">{relativeDate(doc.updated_at, uiLanguage)}</span>
+                  </div>
                 </div>
               );
             })}
@@ -514,35 +549,40 @@ export function DictatePage() {
               const isSelected = selectedNoteIds.includes(doc.id);
               return (
                 <div key={doc.id} onClick={() => openNote(doc.id)}
-                  className={`flex items-center gap-4 p-4 rounded-xl border border-edge border-l-4 ${cs.border} bg-surface hover:bg-surface-alt transition-colors text-left group cursor-pointer`} data-testid={`note-${doc.id}`}>
+                  className={`flex items-start gap-3 p-4 rounded-2xl border border-edge border-l-4 ${cs.border} bg-surface hover:bg-surface-alt/70 transition-colors text-left group cursor-pointer`} data-testid={`note-${doc.id}`}>
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); toggleSelection(doc.id); }}
-                    className="p-0.5 rounded text-muted hover:text-text shrink-0"
+                    className="p-0.5 rounded text-muted hover:text-text shrink-0 mt-1"
                     data-testid={`select-note-${doc.id}`}
                     title={t('notes.exportSelected')}
                   >
                     <span className="material-symbols-outlined text-[18px]">{isSelected ? 'check_box' : 'check_box_outline_blank'}</span>
                   </button>
-                  <span className="material-symbols-outlined text-[20px] text-muted">{SOURCE_ICONS[src]}</span>
+                  <span className={`material-symbols-outlined text-[18px] grid place-items-center h-8 w-8 rounded-lg ${cs.bg} text-muted shrink-0`}>{SOURCE_ICONS[src]}</span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-text truncate">{doc.title}</p>
-                    <p className="text-xs text-muted truncate mt-0.5">{preview}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-text truncate">{doc.title}</p>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-edge text-muted uppercase tracking-wide shrink-0">{sourceLabel(src)}</span>
+                    </div>
+                    <p className="text-xs text-text-secondary/90 line-clamp-2 mt-1.5">{preview}</p>
+                    <span className="text-[11px] text-muted mt-2 block">{relativeDate(doc.updated_at, uiLanguage)}</span>
                   </div>
-                  {folders.length > 0 && (
-                    <select value={doc.folder_id ?? ''} onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => { e.stopPropagation(); handleMoveToFolder(doc.id, e.target.value || null); }}
-                      className="text-xs bg-transparent border border-edge rounded px-1.5 py-1 text-muted cursor-pointer outline-none shrink-0"
-                      title={t('folders.moveToFolder')} data-testid={`move-doc-${doc.id}`}>
-                      <option value="">{t('folders.allNotes')}</option>
-                      {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                    </select>
-                  )}
-                  <span className="text-xs text-muted shrink-0">{relativeDate(doc.updated_at, uiLanguage)}</span>
-                  <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(doc.id); }}
-                    className="p-1.5 rounded-lg text-muted opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all shrink-0" title={t('notes.delete')}>
-                    <span className="material-symbols-outlined text-[18px]">delete</span>
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {folders.length > 0 && (
+                      <select value={doc.folder_id ?? ''} onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => { e.stopPropagation(); handleMoveToFolder(doc.id, e.target.value || null); }}
+                        className="styled-select text-xs bg-surface border border-edge rounded px-1.5 py-1 text-text cursor-pointer outline-none shrink-0"
+                        title={t('folders.moveToFolder')} data-testid={`move-doc-${doc.id}`}>
+                        <option value="">{t('folders.allNotes')}</option>
+                        {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                      </select>
+                    )}
+                    <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(doc.id); }}
+                      className="p-1.5 rounded-lg text-muted hover:text-red-400 hover:bg-red-400/10 transition-all shrink-0" title={t('notes.delete')}>
+                      <span className="material-symbols-outlined text-[18px]">delete</span>
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -558,6 +598,16 @@ export function DictatePage() {
         tone="danger"
         onConfirm={confirmDeleteNote}
         onCancel={() => setPendingDeleteNoteId(null)}
+      />
+      <ConfirmDialog
+        open={pendingBulkDelete}
+        title={t('notes.deleteSelected')}
+        message={t('notes.confirmBulkDelete').replace('{count}', String(selectedNoteIds.length))}
+        confirmLabel={t('notes.delete')}
+        cancelLabel={t('editor.cancel')}
+        tone="danger"
+        onConfirm={confirmBulkDelete}
+        onCancel={() => setPendingBulkDelete(false)}
       />
       <ConfirmDialog
         open={!!pendingDeleteFolderId}

@@ -24,6 +24,19 @@ def _get_db():
     return db
 
 
+def _is_missing_folders_table(error: Exception) -> bool:
+    msg = str(error)
+    return (
+        "PGRST205" in msg
+        or "public.folders" in msg
+        or "relation \"folders\" does not exist" in msg
+    )
+
+
+def _raise_table_unavailable() -> None:
+    raise HTTPException(503, "Folders are unavailable until DB migrations are applied")
+
+
 @router.get("")
 async def list_folders(user: AuthUser = Depends(get_current_user)):
     db = get_supabase_or_none()
@@ -46,6 +59,9 @@ async def create_folder(req: CreateFolderReq, user: AuthUser = Depends(get_curre
         }).execute()
         return res.data[0]
     except Exception as e:
+        if _is_missing_folders_table(e):
+            log.warning("create_folder skipped: folders table missing (%s)", e)
+            _raise_table_unavailable()
         log.error("create_folder failed: %s", e)
         raise HTTPException(500, f"Failed to create folder: {e}")
 
@@ -61,6 +77,9 @@ async def update_folder(folder_id: str, req: UpdateFolderReq, user: AuthUser = D
     except HTTPException:
         raise
     except Exception as e:
+        if _is_missing_folders_table(e):
+            log.warning("update_folder skipped: folders table missing (%s)", e)
+            _raise_table_unavailable()
         log.error("update_folder failed: %s", e)
         raise HTTPException(500, f"Failed to update folder: {e}")
 
@@ -72,5 +91,8 @@ async def delete_folder(folder_id: str, user: AuthUser = Depends(get_current_use
         db.table("folders").delete().eq("id", folder_id).eq("user_id", user.user_id).execute()
         return {"status": "deleted"}
     except Exception as e:
+        if _is_missing_folders_table(e):
+            log.warning("delete_folder skipped: folders table missing (%s)", e)
+            _raise_table_unavailable()
         log.error("delete_folder failed: %s", e)
         raise HTTPException(500, f"Failed to delete folder: {e}")

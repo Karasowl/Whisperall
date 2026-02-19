@@ -269,8 +269,26 @@ html.dark {
 .styled-select {
   appearance: none;
   -webkit-appearance: none;
+  color: var(--theme-text);
+  background-color: var(--theme-surface);
+  border: 1px solid var(--theme-edge);
+  border-radius: 0.5rem;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%239dabb9'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
   padding-right: 28px;
+  color-scheme: light;
+}
+
+html.dark .styled-select {
+  color-scheme: dark;
+}
+
+.styled-select:focus {
+  border-color: #137fec;
+}
+
+.styled-select option {
+  background: var(--theme-surface);
+  color: var(--theme-text);
 }

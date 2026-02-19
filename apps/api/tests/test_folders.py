@@ -6,6 +6,11 @@ FOLDER_ROW = {
     "id": "folder-1", "user_id": "user-123", "name": "Work",
     "created_at": "2025-01-01", "updated_at": "2025-01-01",
 }
+MISSING_TABLE_ERR = (
+    "{'code': 'PGRST205', 'details': None, 'hint': \"Perhaps you meant the table "
+    "'public.documents'\", 'message': \"Could not find the table 'public.folders' in "
+    "the schema cache\"}"
+)
 
 
 def _mock_db(table_data=None):
@@ -54,6 +59,14 @@ class TestFoldersCRUD:
             res = client.post("/v1/folders", headers=auth_headers, json={})
         assert res.status_code == 200
 
+    def test_create_folder_missing_table_returns_503(self, client, auth_headers):
+        db = MagicMock()
+        db.table.side_effect = Exception(MISSING_TABLE_ERR)
+        with patch("app.routers.folders.get_supabase_or_none", return_value=db):
+            res = client.post("/v1/folders", headers=auth_headers, json={"name": "Work"})
+        assert res.status_code == 503
+        assert "Folders are unavailable" in res.json()["detail"]
+
     def test_update_folder(self, client, auth_headers):
         updated = {**FOLDER_ROW, "name": "Personal"}
         db = _mock_db(table_data=[updated])
@@ -68,12 +81,26 @@ class TestFoldersCRUD:
             res = client.put("/v1/folders/nope", headers=auth_headers, json={"name": "X"})
         assert res.status_code == 404
 
+    def test_update_folder_missing_table_returns_503(self, client, auth_headers):
+        db = MagicMock()
+        db.table.side_effect = Exception(MISSING_TABLE_ERR)
+        with patch("app.routers.folders.get_supabase_or_none", return_value=db):
+            res = client.put("/v1/folders/folder-1", headers=auth_headers, json={"name": "Personal"})
+        assert res.status_code == 503
+
     def test_delete_folder(self, client, auth_headers):
         db = _mock_db()
         with patch("app.routers.folders.get_supabase_or_none", return_value=db):
             res = client.delete("/v1/folders/folder-1", headers=auth_headers)
         assert res.status_code == 200
         assert res.json()["status"] == "deleted"
+
+    def test_delete_folder_missing_table_returns_503(self, client, auth_headers):
+        db = MagicMock()
+        db.table.side_effect = Exception(MISSING_TABLE_ERR)
+        with patch("app.routers.folders.get_supabase_or_none", return_value=db):
+            res = client.delete("/v1/folders/folder-1", headers=auth_headers)
+        assert res.status_code == 503
 
     def test_requires_auth(self, client):
         res = client.get("/v1/folders")
