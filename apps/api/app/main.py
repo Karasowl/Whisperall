@@ -71,8 +71,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title='Whisperall API', version='2.0.0', lifespan=lifespan)
 
 cors_origins = settings.get_cors_origins()
-if settings.cors_origin_regex:
-    log.info("CORS configured with origins=%s and regex=%s", cors_origins, settings.cors_origin_regex)
+cors_origin_regex = settings.get_cors_origin_regex()
+if cors_origin_regex:
+    log.info("CORS configured with origins=%s and regex=%s", cors_origins, cors_origin_regex)
 else:
     log.info("CORS configured with origins=%s", cors_origins)
 
@@ -130,7 +131,7 @@ app.include_router(reader.router)
 asgi_app = CORSMiddleware(
     app,
     allow_origins=cors_origins,
-    allow_origin_regex=settings.cors_origin_regex,
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=False,
     allow_methods=['*'],
     allow_headers=['*'],

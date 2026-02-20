@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useWidgetStore, OVERLAY_BASE_SIZE, SUBTITLE_SIZE } from '../../src/overlay/widget-store';
+import { useWidgetStore, OVERLAY_BAR_SIZE, OVERLAY_DICTATING_SIZE, SUBTITLE_SIZE } from '../../src/overlay/widget-store';
 
 function reset() {
   useWidgetStore.setState({
@@ -17,17 +17,13 @@ describe('widget-store', () => {
   beforeEach(reset);
 
   it('exports updated size constants', () => {
-    expect(OVERLAY_BASE_SIZE).toEqual({ width: 360, height: 120 });
+    expect(OVERLAY_BAR_SIZE).toEqual({ width: 360, height: 64 });
+    expect(OVERLAY_DICTATING_SIZE).toEqual({ width: 360, height: 120 });
     expect(SUBTITLE_SIZE).toEqual({ width: 760, height: 84 });
   });
 
   it('starts in bar mode', () => {
     expect(useWidgetStore.getState().mode).toBe('bar');
-  });
-
-  it('expand switches to panel', () => {
-    useWidgetStore.getState().expand();
-    expect(useWidgetStore.getState().mode).toBe('panel');
   });
 
   it('collapse resets to bar and idle dictate status', () => {
@@ -38,13 +34,6 @@ describe('widget-store', () => {
     expect(s.dictateStatus).toBe('idle');
   });
 
-  it('toggle flips bar/panel', () => {
-    useWidgetStore.getState().toggle();
-    expect(useWidgetStore.getState().mode).toBe('panel');
-    useWidgetStore.getState().toggle();
-    expect(useWidgetStore.getState().mode).toBe('bar');
-  });
-
   it('dictation flow transitions to dictating and processing', () => {
     useWidgetStore.getState().startDictation();
     expect(useWidgetStore.getState().mode).toBe('dictating');
@@ -53,17 +42,17 @@ describe('widget-store', () => {
     expect(useWidgetStore.getState().dictateStatus).toBe('processing');
   });
 
-  it('setDone and setError return to panel mode', () => {
+  it('setDone and setError return to bar mode', () => {
     useWidgetStore.getState().setDone('ok');
-    expect(useWidgetStore.getState().mode).toBe('panel');
+    expect(useWidgetStore.getState().mode).toBe('bar');
     useWidgetStore.getState().setError('failed');
-    expect(useWidgetStore.getState().mode).toBe('panel');
+    expect(useWidgetStore.getState().mode).toBe('bar');
     expect(useWidgetStore.getState().dictateStatus).toBe('error');
   });
 
-  it('switchModule sets panel mode for reader/translator', () => {
+  it('switchModule keeps compact mode for reader/translator', () => {
     useWidgetStore.getState().switchModule('reader');
-    expect(useWidgetStore.getState().mode).toBe('panel');
+    expect(useWidgetStore.getState().mode).toBe('bar');
     expect(useWidgetStore.getState().activeModule).toBe('reader');
   });
 

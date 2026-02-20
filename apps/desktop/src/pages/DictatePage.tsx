@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { Editor } from '@tiptap/react';
-import { ApiError } from '@whisperall/api-client';
+import { ApiError, type TranscriptSegment } from '@whisperall/api-client';
 import { useDictationStore } from '../stores/dictation';
 import { useLiveStore } from '../stores/live';
 import { useSettingsStore } from '../stores/settings';
@@ -10,9 +10,25 @@ import { useAuthStore } from '../stores/auth';
 import { electron } from '../lib/electron';
 import { api } from '../lib/api';
 import { exportNote, exportNotesBundle, type ExportFormat } from '../lib/export';
-import { escapeHtml, safeHtmlParagraphs } from '../lib/editor-utils';
+import {
+  buildImportedNoteHtml,
+  escapeHtml,
+  safeHtmlParagraphs,
+} from '../lib/editor-utils';
+import {
+  downloadTTSAudio,
+  hasTTSAudio,
+  pauseTTS,
+  resumeTTS,
+  setTTSPlaybackRate,
+  startReading,
+  stopTTS,
+  type TTSProgress,
+} from '../lib/tts';
 import { PlanGate } from '../components/PlanGate';
 import { RichEditor } from '../components/editor/RichEditor';
+import { TranscriptView } from '../components/editor/TranscriptView';
+import { AudioPlayer, type AudioSeekRequest } from '../components/editor/AudioPlayer';
 import { VoiceToolbar } from '../components/editor/VoiceToolbar';
 import { CustomPromptDialog, type CustomPrompt } from '../components/editor/CustomPromptDialog';
 import { AiBudgetDialog } from '../components/editor/AiBudgetDialog';
@@ -53,6 +69,49 @@ const PROMPTS_KEY = 'whisperall-custom-prompts';
 function loadCustomPrompts(): CustomPrompt[] { try { return JSON.parse(localStorage.getItem(PROMPTS_KEY) ?? '[]'); } catch { return []; } }
 function saveCustomPrompts(p: CustomPrompt[]) { localStorage.setItem(PROMPTS_KEY, JSON.stringify(p)); }
 
+type NoteTranscriptHistoryEntry = {
+  id: string;
+  created_at: string;
+  updated_at?: string;
+  document_id?: string;
+  user_id?: string;
+  language: string;
+  diarization: boolean;
+  text: string;
+  segments: TranscriptSegment[];
+  audio_url: string | null;
+};
+
+function normalizeHistoryEntry(entry: Partial<NoteTranscriptHistoryEntry> & { id: string; text: string }): NoteTranscriptHistoryEntry {
+  return {
+    id: entry.id,
+    created_at: entry.created_at || new Date().toISOString(),
+    updated_at: entry.updated_at,
+    document_id: entry.document_id,
+    user_id: entry.user_id,
+    language: entry.language || 'auto',
+    diarization: !!entry.diarization,
+    text: entry.text || '',
+    segments: Array.isArray(entry.segments) ? entry.segments : [],
+    audio_url: entry.audio_url ?? null,
+  };
+}
+
+const SPEAKER_ALIASES_PREFIX = 'whisperall-speaker-aliases-v1:';
+function speakerAliasesKey(noteId: string): string {
+  return `${SPEAKER_ALIASES_PREFIX}${noteId}`;
+}
+function loadSpeakerAliases(noteId: string): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(speakerAliasesKey(noteId)) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+function saveSpeakerAliases(noteId: string, aliases: Record<string, string>): void {
+  localStorage.setItem(speakerAliasesKey(noteId), JSON.stringify(aliases));
+}
+
 function formatLiveError(err: string, t: (k: string) => string): string {
   const low = err.toLowerCase();
   if (err.includes('Failed to fetch') || err.includes('NetworkError') || err.includes('WebSocket')) return t('live.errorConnection');
@@ -61,11 +120,28 @@ function formatLiveError(err: string, t: (k: string) => string): string {
   return err;
 }
 
+const NOTE_READER_SPEEDS = [0.75, 1, 1.25, 1.5, 2] as const;
+const NOTE_READER_IDLE: TTSProgress = {
+  status: 'idle',
+  current: 0,
+  total: 0,
+  currentTime: 0,
+  duration: 0,
+  overallTime: 0,
+  overallDuration: 0,
+  rate: 1,
+  error: null,
+};
+
+function htmlToPlainText(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export function DictatePage() {
   const t = useT();
   const dictation = useDictationStore();
   const live = useLiveStore();
-  const { translateEnabled, setTranslateEnabled, uiLanguage } = useSettingsStore();
+  const { translateEnabled, setTranslateEnabled, uiLanguage, ttsLanguage, ttsVoice } = useSettingsStore();
   const { documents, loading, fetchDocuments, createDocument, updateDocument, deleteDocument } = useDocumentsStore();
   const { folders, selectedFolderId, fetchFolders, selectFolder, deleteFolder } = useFoldersStore();
   const user = useAuthStore((s) => s.user);
@@ -94,21 +170,47 @@ export function DictatePage() {
   const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
   const [showExport, setShowExport] = useState(false);
   const [showBulkExport, setShowBulkExport] = useState(false);
+  const [retranscribeLanguage, setRetranscribeLanguage] = useState('auto');
+  const [retranscribeDiarization, setRetranscribeDiarization] = useState(true);
+  const [retranscribeLoading, setRetranscribeLoading] = useState(false);
+  const [retranscribeError, setRetranscribeError] = useState('');
+  const [importDocLoading, setImportDocLoading] = useState(false);
+  const [importDocForceOcr, setImportDocForceOcr] = useState(false);
+  const [transcriptHistory, setTranscriptHistory] = useState<NoteTranscriptHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadedDocId, setHistoryLoadedDocId] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState('');
+  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+  const [speakerAliases, setSpeakerAliases] = useState<Record<string, string>>({});
+  const [activeSegmentIndex, setActiveSegmentIndex] = useState<number | null>(null);
+  const [activeSegmentText, setActiveSegmentText] = useState('');
+  const [seekRequest, setSeekRequest] = useState<AudioSeekRequest | null>(null);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [pendingDeleteNoteId, setPendingDeleteNoteId] = useState<string | null>(null);
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   const [pendingDeleteFolderId, setPendingDeleteFolderId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<{ tone: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [noteReadProgress, setNoteReadProgress] = useState<TTSProgress>(NOTE_READER_IDLE);
   const toggleView = () => { const v: ViewMode = viewMode === 'grid' ? 'list' : 'grid'; setViewMode(v); localStorage.setItem(VIEW_KEY, v); };
   const prevDictText = useRef('');
   const prevSegCount = useRef(0);
   const editorRef = useRef<Editor | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const actionFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const budgetResolverRef = useRef<((ok: boolean) => void) | null>(null);
+  const seekNonceRef = useRef(0);
+  const historyRequestSeq = useRef(0);
+  const seededHistoryNotes = useRef<Record<string, boolean>>({});
 
   const isLive = live.source === 'system';
   const status = isLive ? live.status : dictation.status;
   const hasContent = htmlContent.replace(/<[^>]*>/g, '').trim().length > 0;
+  const currentDoc = useMemo(() => documents.find((d) => d.id === docId) ?? null, [documents, docId]);
+  const currentAudioUrl = currentDoc?.audio_url ?? null;
+  const activeHistoryEntry = transcriptHistory.find((h) => h.id === activeHistoryId) ?? null;
+  const activeSegments = activeHistoryEntry?.segments ?? [];
+  const showAudioPanel = !!currentAudioUrl;
+  const showTranscriptPanel = showAudioPanel && activeSegments.length > 0;
   const sourceLabel = (source: string) => {
     if (source === 'dictation') return t('dictate.dictation');
     if (source === 'live') return t('dictate.live');
@@ -116,6 +218,14 @@ export function DictatePage() {
     if (source === 'reader') return t('nav.reader');
     return t('nav.notes');
   };
+  const noteReaderText = (plainText || htmlToPlainText(htmlContent)).trim();
+  const noteReaderHasText = noteReaderText.length > 0;
+  const noteCanDownloadRead = hasTTSAudio();
+  const noteReaderPlayLabel = noteReadProgress.status === 'playing'
+    ? t('reader.pause')
+    : noteReadProgress.status === 'paused'
+      ? t('reader.resume')
+      : t('reader.readAloud');
 
   useEffect(() => { if (user) { fetchFolders(); fetchDocuments(selectedFolderId ?? undefined); } }, [user, fetchFolders, fetchDocuments, selectedFolderId]);
 
@@ -127,6 +237,53 @@ export function DictatePage() {
       useDocumentsStore.getState().setPendingOpen(null);
     }
   }, [pendingOpenId, documents]);
+
+  const loadTranscriptionHistory = useCallback(async (noteId: string) => {
+    const reqId = ++historyRequestSeq.current;
+    setHistoryLoading(true);
+    setHistoryError('');
+    setHistoryLoadedDocId(null);
+    try {
+      const items = await api.documents.listTranscriptions(noteId);
+      if (reqId !== historyRequestSeq.current) return;
+      const normalized = (items ?? []).map((entry) => normalizeHistoryEntry(entry as NoteTranscriptHistoryEntry));
+      setTranscriptHistory(normalized);
+      setActiveHistoryId(normalized[0]?.id ?? null);
+      setHistoryLoadedDocId(noteId);
+    } catch (err) {
+      if (reqId !== historyRequestSeq.current) return;
+      const msg = err instanceof ApiError ? err.message.replace(/^API error \d+:\s*/i, '') : (err as Error)?.message;
+      setTranscriptHistory([]);
+      setActiveHistoryId(null);
+      setHistoryError(msg || t('notes.historyLoadFailed'));
+      setHistoryLoadedDocId(noteId);
+    } finally {
+      if (reqId === historyRequestSeq.current) setHistoryLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    if (!docId || !currentDoc?.source_id || !currentAudioUrl) return;
+    if (historyLoadedDocId !== docId || historyLoading) return;
+    if (transcriptHistory.length > 0 || seededHistoryNotes.current[docId]) return;
+    seededHistoryNotes.current[docId] = true;
+    api.transcribe.getResult(currentDoc.source_id)
+      .then(async (res) => {
+        const text = (res.text || '').trim();
+        if (!text) return;
+        const created = await api.documents.createTranscription(docId, {
+          language: 'auto',
+          diarization: !!(res.segments && res.segments.length > 0),
+          text,
+          segments: res.segments ?? [],
+          audio_url: currentAudioUrl,
+        });
+        const entry = normalizeHistoryEntry(created as NoteTranscriptHistoryEntry);
+        setTranscriptHistory([entry]);
+        setActiveHistoryId(entry.id);
+      })
+      .catch(() => {});
+  }, [docId, currentAudioUrl, currentDoc?.source_id, historyLoadedDocId, historyLoading, transcriptHistory.length]);
 
   // Filter documents
   const filteredDocs = useMemo(() => {
@@ -157,15 +314,42 @@ export function DictatePage() {
   const openNote = (id: string) => {
     const doc = documents.find((d) => d.id === id);
     if (!doc) return;
+    stopTTS();
+    setNoteReadProgress(NOTE_READER_IDLE);
+    historyRequestSeq.current += 1;
     setDocId(doc.id); setTitle(doc.title); setHtmlContent(doc.content);
     setNoteColor(getColor(doc.tags ?? [])); setNoteTags(doc.tags ?? []);
+    setTranscriptHistory([]);
+    setHistoryLoading(false);
+    setActiveHistoryId(null);
+    setHistoryLoadedDocId(null);
+    setHistoryError('');
+    void loadTranscriptionHistory(doc.id);
+    setSpeakerAliases(loadSpeakerAliases(doc.id));
+    setActiveSegmentIndex(null);
+    setActiveSegmentText('');
+    setSeekRequest(null);
+    setRetranscribeError('');
     setMode('edit'); setSaved(true);
     prevDictText.current = ''; prevSegCount.current = 0;
   };
 
   const newNote = (autoRecord = false) => {
+    stopTTS();
+    setNoteReadProgress(NOTE_READER_IDLE);
+    historyRequestSeq.current += 1;
     setDocId(null); setTitle(''); setHtmlContent(''); setPlainText('');
     setNoteColor('blue'); setNoteTags([]);
+    setTranscriptHistory([]);
+    setHistoryLoading(false);
+    setHistoryLoadedDocId(null);
+    setHistoryError('');
+    setActiveHistoryId(null);
+    setSpeakerAliases({});
+    setActiveSegmentIndex(null);
+    setActiveSegmentText('');
+    setSeekRequest(null);
+    setRetranscribeError('');
     setMode('edit'); setSaved(false);
     prevDictText.current = ''; prevSegCount.current = 0;
     if (autoRecord) {
@@ -175,7 +359,25 @@ export function DictatePage() {
     }
   };
 
-  const goBack = () => { setMode('list'); setDocId(null); setSaved(false); if (user) fetchDocuments(selectedFolderId ?? undefined); };
+  const goBack = () => {
+    stopTTS();
+    setNoteReadProgress(NOTE_READER_IDLE);
+    historyRequestSeq.current += 1;
+    setMode('list');
+    setDocId(null);
+    setSaved(false);
+    setTranscriptHistory([]);
+    setHistoryLoading(false);
+    setHistoryLoadedDocId(null);
+    setHistoryError('');
+    setActiveHistoryId(null);
+    setSpeakerAliases({});
+    setActiveSegmentIndex(null);
+    setActiveSegmentText('');
+    setSeekRequest(null);
+    setRetranscribeError('');
+    if (user) fetchDocuments(selectedFolderId ?? undefined);
+  };
 
   const handleMoveToFolder = async (docId: string, folderId: string | null) => {
     await updateDocument(docId, { folder_id: folderId });
@@ -250,6 +452,96 @@ export function DictatePage() {
   };
   const clearSelection = () => setSelectedNoteIds([]);
   const handleEditorChange = (html: string, text: string) => { setHtmlContent(html); setPlainText(text); setSaved(false); };
+  const handleApplyHistoryEntry = (entryId: string) => {
+    const entry = transcriptHistory.find((h) => h.id === entryId);
+    if (!entry) return;
+    setActiveHistoryId(entry.id);
+    setHtmlContent(safeHtmlParagraphs(entry.text));
+    setPlainText(entry.text);
+    setSaved(false);
+    setActiveSegmentIndex(null);
+    setActiveSegmentText('');
+    setSeekRequest(null);
+  };
+  const handleDeleteHistoryEntry = async (entryId: string) => {
+    if (!docId) return;
+    try {
+      await api.documents.deleteTranscription(docId, entryId);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message.replace(/^API error \d+:\s*/i, '') : (err as Error)?.message;
+      showActionFeedback(msg || t('notes.deleteTranscriptionFailed'), 'error');
+      return;
+    }
+    const next = transcriptHistory.filter((h) => h.id !== entryId);
+    setTranscriptHistory(next);
+    if (activeHistoryId === entryId) {
+      setActiveHistoryId(next[0]?.id ?? null);
+      setActiveSegmentIndex(null);
+      setActiveSegmentText('');
+      setSeekRequest(null);
+    }
+  };
+  const handleRenameSpeaker = (speaker: string) => {
+    if (!docId) return;
+    const currentLabel = speakerAliases[speaker] || speaker;
+    const nextLabel = (window.prompt(t('editor.renameSpeakerPrompt'), currentLabel) ?? '').trim();
+    if (!nextLabel || nextLabel === currentLabel) return;
+    const nextAliases = { ...speakerAliases, [speaker]: nextLabel };
+    setSpeakerAliases(nextAliases);
+    saveSpeakerAliases(docId, nextAliases);
+  };
+  const handleSelectSegment = (index: number) => {
+    const seg = activeSegments[index];
+    if (!seg) return;
+    setActiveSegmentIndex(index);
+    setActiveSegmentText(seg.text);
+    seekNonceRef.current += 1;
+    setSeekRequest({ seconds: Math.max(0, seg.start || 0), nonce: seekNonceRef.current });
+  };
+  const handlePlayerTimeUpdate = useCallback((seconds: number) => {
+    if (activeSegments.length === 0) return;
+    const idx = activeSegments.findIndex((seg) => seconds >= (seg.start ?? 0) && seconds <= (seg.end ?? seg.start ?? 0));
+    if (idx < 0) return;
+    setActiveSegmentIndex((prev) => {
+      if (prev === idx) return prev;
+      setActiveSegmentText(activeSegments[idx]?.text ?? '');
+      return idx;
+    });
+  }, [activeSegments]);
+  const handleRetranscribeFromNote = async () => {
+    if (!docId || !currentAudioUrl || retranscribeLoading) return;
+    setRetranscribeLoading(true);
+    setRetranscribeError('');
+    try {
+      const result = await api.transcribe.fromUrl({
+        url: currentAudioUrl,
+        language: retranscribeLanguage === 'auto' ? undefined : retranscribeLanguage,
+        enable_diarization: retranscribeDiarization,
+      });
+      const created = await api.documents.createTranscription(docId, {
+        language: retranscribeLanguage,
+        diarization: retranscribeDiarization,
+        text: result.text,
+        segments: result.segments ?? [],
+        audio_url: currentAudioUrl,
+      });
+      const entry = normalizeHistoryEntry(created as NoteTranscriptHistoryEntry);
+      const nextHistory = [entry, ...transcriptHistory];
+      setTranscriptHistory(nextHistory);
+      setActiveHistoryId(entry.id);
+      setHtmlContent(safeHtmlParagraphs(result.text));
+      setPlainText(result.text);
+      setSaved(false);
+      setActiveSegmentIndex(null);
+      setActiveSegmentText('');
+      setSeekRequest(null);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message.replace(/^API error \d+:\s*/i, '') : (err as Error)?.message;
+      setRetranscribeError(msg || 'Retranscription failed');
+    } finally {
+      setRetranscribeLoading(false);
+    }
+  };
   const handleToggle = () => {
     if (isLive) { live.status === 'recording' ? live.stop() : live.start(); }
     else { dictation.status === 'recording' ? dictation.stop() : dictation.start(); }
@@ -263,6 +555,109 @@ export function DictatePage() {
     if (actionFeedbackTimer.current) clearTimeout(actionFeedbackTimer.current);
     setActionFeedback({ tone, message });
     actionFeedbackTimer.current = setTimeout(() => { setActionFeedback(null); }, 2200);
+  };
+  const startNoteReader = () => {
+    if (!noteReaderHasText) {
+      showActionFeedback(t('notes.readerNoText'), 'info');
+      return;
+    }
+    const voice = ttsVoice && ttsVoice.toLowerCase() !== 'auto' ? ttsVoice : undefined;
+    const language = ttsLanguage && ttsLanguage.toLowerCase() !== 'auto' ? ttsLanguage : undefined;
+    void startReading(noteReaderText, voice, language, setNoteReadProgress);
+  };
+  const handleToggleNoteReader = () => {
+    if (noteReadProgress.status === 'playing') {
+      pauseTTS();
+      setNoteReadProgress((prev) => ({ ...prev, status: 'paused' }));
+      return;
+    }
+    if (noteReadProgress.status === 'paused') {
+      resumeTTS();
+      setNoteReadProgress((prev) => ({ ...prev, status: 'playing' }));
+      return;
+    }
+    startNoteReader();
+  };
+  const handleStopNoteReader = () => {
+    stopTTS();
+    setNoteReadProgress(NOTE_READER_IDLE);
+  };
+  const handleCycleNoteReaderSpeed = () => {
+    const current = noteReadProgress.rate || 1;
+    const idx = NOTE_READER_SPEEDS.findIndex((s) => Math.abs(s - current) < 0.01);
+    const next = NOTE_READER_SPEEDS[(idx === -1 ? 1 : idx + 1) % NOTE_READER_SPEEDS.length];
+    setTTSPlaybackRate(next);
+    setNoteReadProgress((prev) => ({ ...prev, rate: next }));
+  };
+  const handleDownloadNoteRead = () => {
+    const blob = downloadTTSAudio();
+    if (!blob) {
+      showActionFeedback(t('notes.readerNoAudioToDownload'), 'info');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(title || t('notes.voiceNote')).trim() || 'note'}.mp3`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const handleImportDocument = async (file?: File | null) => {
+    if (!file || importDocLoading) return;
+    setImportDocLoading(true);
+    try {
+      const runImport = (forceOcr: boolean) => api.reader.importFile({
+        file,
+        filename: file.name,
+        force_ocr: forceOcr,
+        save: false,
+      });
+      let result = await runImport(importDocForceOcr);
+      let importedText = (result.text || '').trim();
+      let importedRich = (result.rich_html || '').trim();
+
+      if (!importedText && !importedRich && !importDocForceOcr) {
+        const allowOcr = window.confirm(t('notes.importAskOcr'));
+        if (allowOcr) {
+          setImportDocForceOcr(true);
+          result = await runImport(true);
+          importedText = (result.text || '').trim();
+          importedRich = (result.rich_html || '').trim();
+        }
+      }
+
+      if (!importedText && !importedRich) {
+        showActionFeedback(t('notes.importNoText'), 'error');
+        return;
+      }
+
+      const importedPlain = importedText || htmlToPlainText(importedRich);
+      const importedHtml = buildImportedNoteHtml({
+        text: importedPlain,
+        richHtml: result.rich_html,
+        toc: result.toc || [],
+        indexTitle: t('notes.importIndex'),
+      });
+      if (hasContent) {
+        setHtmlContent((prev) => `${prev}<p></p>${importedHtml}`);
+        setPlainText((prev) => `${prev}\n\n${importedPlain}`.trim());
+      } else {
+        setHtmlContent(importedHtml);
+        setPlainText(importedPlain);
+        if (!title.trim() && result.title) setTitle(result.title);
+      }
+      setSaved(false);
+      if (result.warning) {
+        showActionFeedback(t('notes.importWithWarning').replace('{warning}', result.warning), 'info');
+      } else {
+        showActionFeedback(t('notes.importSuccess'), 'success');
+      }
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message.replace(/^API error \d+:\s*/i, '') : (err as Error)?.message;
+      showActionFeedback(msg || t('notes.importNoText'), 'error');
+    } finally {
+      setImportDocLoading(false);
+    }
   };
   const handleCopy = async () => {
     const text = (plainText || htmlContent.replace(/<[^>]*>/g, '') || dictation.text).trim();
@@ -368,6 +763,7 @@ export function DictatePage() {
 
   useEffect(() => {
     return () => {
+      stopTTS();
       if (actionFeedbackTimer.current) clearTimeout(actionFeedbackTimer.current);
       if (budgetResolverRef.current) {
         budgetResolverRef.current(false);
@@ -683,11 +1079,83 @@ export function DictatePage() {
         </div>
         {/* Voice controls + AI modes */}
         <div className="flex items-center gap-2 flex-wrap">
+          <input
+            ref={importFileInputRef}
+            type="file"
+            accept=".txt,.md,.markdown,.html,.htm,.pdf,.docx,.epub,.rtf,.odt,.png,.jpg,.jpeg,.webp,.tif,.tiff"
+            className="hidden"
+            onChange={(e) => { void handleImportDocument(e.target.files?.[0]); e.currentTarget.value = ''; }}
+            data-testid="note-import-file-input"
+          />
           <PlanGate resource="stt_seconds">
             <VoiceToolbar status={status} source={live.source}
               onToggleRecord={handleToggle} onToggleSource={handleToggleSource}
               translateEnabled={translateEnabled} onToggleTranslate={() => setTranslateEnabled(!translateEnabled)}
               subtitlesActive={subtitlesActive} onToggleSubtitles={handleToggleSubtitles} />
+          </PlanGate>
+          <button
+            type="button"
+            onClick={() => importFileInputRef.current?.click()}
+            disabled={importDocLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
+            data-testid="note-import-file-btn"
+          >
+            <span className="material-symbols-outlined text-[16px]">upload_file</span>
+            {importDocLoading ? t('history.loading') : t('notes.importDocument')}
+          </button>
+          <label className="inline-flex items-center gap-1.5 text-xs text-muted select-none px-2 py-1.5 rounded-lg border border-edge bg-surface">
+            <input
+              type="checkbox"
+              checked={importDocForceOcr}
+              onChange={(e) => setImportDocForceOcr(e.target.checked)}
+              className="accent-primary"
+              data-testid="note-import-force-ocr"
+            />
+            {t('notes.importForceOcr')}
+          </label>
+          <PlanGate resource="tts_chars">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleToggleNoteReader}
+                disabled={!noteReaderHasText}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
+                data-testid="note-reader-toggle-btn"
+              >
+                <span className="material-symbols-outlined text-[16px]">{noteReadProgress.status === 'playing' ? 'pause' : 'play_arrow'}</span>
+                {noteReaderPlayLabel}
+              </button>
+              <button
+                type="button"
+                onClick={handleStopNoteReader}
+                disabled={noteReadProgress.status === 'idle'}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
+                data-testid="note-reader-stop-btn"
+                title={t('reader.stop')}
+              >
+                <span className="material-symbols-outlined text-[16px]">stop</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCycleNoteReaderSpeed}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors"
+                data-testid="note-reader-speed-btn"
+                title={t('reader.speed')}
+              >
+                <span className="material-symbols-outlined text-[16px]">speed</span>
+                {(noteReadProgress.rate || 1).toFixed(2)}x
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadNoteRead}
+                disabled={!noteCanDownloadRead}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
+                data-testid="note-reader-download-btn"
+                title={t('reader.download')}
+              >
+                <span className="material-symbols-outlined text-[16px]">download</span>
+              </button>
+            </div>
           </PlanGate>
           <div className="w-px h-5 bg-edge mx-1" />
           {BUILT_IN_MODES.map((m) => (
@@ -707,7 +1175,48 @@ export function DictatePage() {
           </button>
           {processing && <span className="text-xs text-primary ml-2">{t('editor.processing')}</span>}
           {aiError && <span className="text-xs text-red-400 ml-2">{aiError}</span>}
+          {noteReadProgress.error && <span className="text-xs text-red-400 ml-2">{noteReadProgress.error}</span>}
         </div>
+        {docId && currentAudioUrl && (
+          <div className="mt-2 rounded-xl border border-edge bg-surface/50 px-3 py-2 flex flex-wrap items-center gap-2" data-testid="note-retranscribe-controls">
+            <span className="text-xs text-muted">{t('notes.retranscribe')}</span>
+            <select
+              value={retranscribeLanguage}
+              onChange={(e) => setRetranscribeLanguage(e.target.value)}
+              className="styled-select text-xs bg-surface border border-edge rounded px-2 py-1 text-text cursor-pointer outline-none"
+              data-testid="note-retranscribe-language"
+            >
+              <option value="auto">{t('transcribe.autoDetect')}</option>
+              <option value="es">Español</option>
+              <option value="en">English</option>
+              <option value="pt">Português</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="it">Italiano</option>
+            </select>
+            <label className="inline-flex items-center gap-1.5 text-xs text-muted select-none">
+              <input
+                type="checkbox"
+                checked={retranscribeDiarization}
+                onChange={(e) => setRetranscribeDiarization(e.target.checked)}
+                className="accent-primary"
+                data-testid="note-retranscribe-diarization"
+              />
+              {t('transcribe.diarization')}
+            </label>
+            <button
+              type="button"
+              onClick={() => { void handleRetranscribeFromNote(); }}
+              disabled={retranscribeLoading}
+              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+              data-testid="note-retranscribe-btn"
+            >
+              <span className="material-symbols-outlined text-[14px]">refresh</span>
+              {retranscribeLoading ? t('transcribe.processing') : t('notes.retranscribeNow')}
+            </button>
+            {retranscribeError && <span className="w-full text-xs text-red-400 mt-1">{retranscribeError}</span>}
+          </div>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto px-8 pb-8 flex justify-center">
@@ -728,7 +1237,79 @@ export function DictatePage() {
               <span className="inline-block w-0.5 h-5 bg-primary ml-1 animate-pulse align-middle" />
             </div>
           )}
+          {docId && (historyLoading || !!historyError || transcriptHistory.length > 0) && (
+            <div className="mb-4 rounded-xl border border-edge bg-surface/50 p-3" data-testid="note-transcript-history">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-text">{t('notes.transcriptionHistory')}</p>
+                <span className="text-[11px] text-muted">{transcriptHistory.length}</span>
+              </div>
+              {historyLoading && <p className="text-xs text-muted">{t('history.loading')}</p>}
+              {historyError && !historyLoading && <p className="text-xs text-red-400">{historyError}</p>}
+              <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
+                {transcriptHistory.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={`rounded-lg border px-2 py-2 ${activeHistoryId === entry.id ? 'border-primary/50 bg-primary/10' : 'border-edge bg-surface'}`}
+                    data-testid={`history-entry-${entry.id}`}
+                  >
+                    <div className="flex items-center gap-2 text-[11px] text-muted">
+                      <span>{new Date(entry.created_at).toLocaleString(uiLanguage === 'es' ? 'es-ES' : 'en-US')}</span>
+                      <span>•</span>
+                      <span>{entry.language}</span>
+                      <span>•</span>
+                      <span>{entry.diarization ? t('transcribe.diarization') : t('notes.noDiarization')}</span>
+                    </div>
+                    <p className="text-xs text-text mt-1 line-clamp-2">{entry.text || '...'}</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleApplyHistoryEntry(entry.id)}
+                        className="text-[11px] px-2 py-1 rounded bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
+                        data-testid={`history-apply-${entry.id}`}
+                      >
+                        {t('notes.applyTranscription')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { void handleDeleteHistoryEntry(entry.id); }}
+                        className="text-[11px] px-2 py-1 rounded bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
+                        data-testid={`history-delete-${entry.id}`}
+                      >
+                        {t('notes.deleteTranscription')}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <RichEditor content={htmlContent} onChange={handleEditorChange} placeholder={t('dictate.placeholder')} onEditorReady={(e) => { editorRef.current = e; }} />
+          {showAudioPanel && (
+            <div className="mt-6 rounded-xl border border-edge bg-surface/40 p-4">
+              {showTranscriptPanel ? (
+                <TranscriptView
+                  segments={activeSegments}
+                  activeIndex={activeSegmentIndex}
+                  speakerAliases={speakerAliases}
+                  onSelectSegment={handleSelectSegment}
+                  onRenameSpeaker={handleRenameSpeaker}
+                />
+              ) : (
+                <p className="text-xs text-muted mb-2">{t('notes.audioNoTranscript')}</p>
+              )}
+              {currentAudioUrl && (
+                <div className="mt-4">
+                  <AudioPlayer
+                    audioUrl={currentAudioUrl}
+                    title={title || t('notes.voiceNote')}
+                    activeSegmentText={activeSegmentText}
+                    seekRequest={seekRequest}
+                    onTimeUpdate={handlePlayerTimeUpdate}
+                  />
+                </div>
+              )}
+            </div>
+          )}
           {dictation.translatedText && (
             <div className="pt-2 mt-4 border-t border-edge text-base text-muted italic whitespace-pre-wrap" data-testid="translated-text">{dictation.translatedText}</div>
           )}

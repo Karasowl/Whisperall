@@ -32,6 +32,8 @@ class TranscribeChunkRegister(BaseModel):
     index: int = Field(..., ge=0)
     storage_path: str
     duration_seconds: float | None = None
+    rms_level: float | None = Field(default=None, ge=0, le=1)
+    chunk_bytes: int | None = Field(default=None, ge=0)
 
 
 class TranscribeUrlRequest(BaseModel):
@@ -147,6 +149,7 @@ class UsageRecordResponse(BaseModel):
     transcribe_seconds: int = Field(default=0, ge=0)
     ai_edit_tokens: int = Field(default=0, ge=0)
     notes_count: int = Field(default=0, ge=0)
+    storage_bytes: int = Field(default=0, ge=0)
 
 
 class UsageResponse(BaseModel):
@@ -166,6 +169,8 @@ class ReaderImportResponse(BaseModel):
     title: str
     source: str
     document_id: str | None = None
+    rich_html: str | None = None
+    toc: list[dict] = []
     warning: str | None = None
 
 

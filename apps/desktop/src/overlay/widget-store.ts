@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type WidgetMode = 'bar' | 'dictating' | 'panel' | 'subtitles';
+export type WidgetMode = 'bar' | 'dictating' | 'subtitles';
 export type DictateStatus = 'idle' | 'recording' | 'processing' | 'done' | 'error';
 export type WidgetModule = 'dictate' | 'reader' | 'translator' | 'subtitles';
 
@@ -13,9 +13,7 @@ export type WidgetState = {
   error: string | null;
   dragging: boolean;
 
-  expand: () => void;
   collapse: () => void;
-  toggle: () => void;
   switchModule: (module: WidgetModule) => void;
   setTranslatedText: (text: string) => void;
   startDictation: () => void;
@@ -27,8 +25,8 @@ export type WidgetState = {
   setDragging: (dragging: boolean) => void;
 };
 
-/** bar/panel/dictating share one size to avoid jumpy resize transitions. */
-export const OVERLAY_BASE_SIZE = { width: 360, height: 120 };
+export const OVERLAY_BAR_SIZE = { width: 360, height: 64 };
+export const OVERLAY_DICTATING_SIZE = { width: 360, height: 120 };
 export const SUBTITLE_SIZE = { width: 760, height: 84 };
 
 export const useWidgetStore = create<WidgetState>((set, get) => ({
@@ -40,17 +38,12 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   error: null,
   dragging: false,
 
-  expand: () => set({ mode: 'panel' }),
   collapse: () => set({ mode: 'bar', dictateStatus: 'idle' }),
   switchModule: (module) => {
-    const mode = module === 'subtitles' ? 'subtitles' : 'panel';
+    const mode = module === 'subtitles' ? 'subtitles' : 'bar';
     set({ activeModule: module, mode });
   },
   setTranslatedText: (translatedText) => set({ translatedText }),
-  toggle: () => {
-    const { mode } = get();
-    set({ mode: mode === 'bar' ? 'panel' : 'bar' });
-  },
 
   startDictation: () => {
     set({ mode: 'dictating', activeModule: 'dictate', dictateStatus: 'recording', error: null });
@@ -64,9 +57,9 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
 
   setProcessing: () => set({ dictateStatus: 'processing' }),
 
-  setDone: (text) => set({ mode: 'panel', dictateStatus: 'done', text }),
+  setDone: (text) => set({ mode: 'bar', dictateStatus: 'done', text }),
 
-  setError: (error) => set({ mode: 'panel', dictateStatus: 'error', error }),
+  setError: (error) => set({ mode: 'bar', dictateStatus: 'error', error }),
 
   resetDictation: () => set({ dictateStatus: 'idle', text: '', error: null }),
 

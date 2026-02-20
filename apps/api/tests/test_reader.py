@@ -2,6 +2,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
+MISSING_READER_TABLE_ERR = (
+    "{'code': 'PGRST205', 'details': None, 'hint': \"Perhaps you meant the table "
+    "'public.document_transcriptions'\", 'message': \"Could not find the table 'public.reader_annotations' in "
+    "the schema cache\"}"
+)
+
 
 def _chain_table_with_data(rows):
     table = MagicMock()
@@ -50,6 +56,51 @@ def test_reader_import_file_saves_document(client, auth_headers):
     assert resp.json()["text"] == "Hola Reader"
     assert resp.json()["document_id"] == "doc-reader-1"
     assert resp.json()["source"] == "file"
+
+
+def test_reader_import_file_returns_rich_html_and_toc(client, auth_headers):
+    markdown = b"# Agenda\n\n- Punto uno\n- Punto dos\n"
+    with patch("app.routers.reader._require_db", return_value=MagicMock()):
+        resp = client.post(
+            "/v1/reader/import-file",
+            files={"file": ("agenda.md", markdown, "text/markdown")},
+            data={"save": "false"},
+            headers=auth_headers,
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "<h1" in body["rich_html"]
+    assert "<ul>" in body["rich_html"]
+    assert isinstance(body["toc"], list)
+    assert body["toc"][0]["title"] == "Agenda"
+
+
+def test_reader_import_markdown_preserves_structure_and_footnotes(client, auth_headers):
+    markdown = (
+        b"# Titulo principal\n\n"
+        b"Primer parrafo.\n\n"
+        b"## Subtitulo\n\n"
+        b"- Item uno\n"
+        b"- Item dos\n\n"
+        b"Texto con nota[^1].\n\n"
+        b"[^1]: Esta es una nota al pie.\n"
+    )
+    with patch("app.routers.reader._require_db", return_value=MagicMock()):
+        resp = client.post(
+            "/v1/reader/import-file",
+            files={"file": ("estructura.md", markdown, "text/markdown")},
+            data={"save": "false"},
+            headers=auth_headers,
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    rich_html = body["rich_html"] or ""
+    assert "<h1" in rich_html
+    assert "<h2" in rich_html
+    assert "<ul>" in rich_html
+    assert "footnote" in rich_html or "fnref" in rich_html
+    assert "# Titulo principal" not in rich_html
 
 
 def test_reader_import_url_maps_download_failures(client, auth_headers):
@@ -195,3 +246,63 @@ def test_reader_annotation_rejects_invalid_range(client, auth_headers):
         )
     assert resp.status_code == 400
     assert resp.headers.get("x-whisperall-error-code") == "READER_ANNOTATION_INVALID_RANGE"
+
+
+def test_reader_get_progress_missing_table_returns_defaults(client, auth_headers):
+    db = MagicMock()
+    db.table.side_effect = Exception(MISSING_READER_TABLE_ERR)
+
+    with patch("app.routers.reader._require_db", return_value=db), \
+         patch("app.routers.reader._assert_document_owner", return_value={"id": "doc-1"}):
+        resp = client.get("/v1/reader/progress/doc-1", headers=auth_headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["document_id"] == "doc-1"
+    assert body["char_offset"] == 0
+    assert body["playback_seconds"] == 0
+    assert body["section_index"] == 0
+
+
+def test_reader_upsert_progress_missing_table_returns_payload(client, auth_headers):
+    db = MagicMock()
+    db.table.side_effect = Exception(MISSING_READER_TABLE_ERR)
+
+    with patch("app.routers.reader._require_db", return_value=db), \
+         patch("app.routers.reader._assert_document_owner", return_value={"id": "doc-1"}):
+        resp = client.put(
+            "/v1/reader/progress/doc-1",
+            json={"char_offset": 321, "playback_seconds": 12.5, "section_index": 4},
+            headers=auth_headers,
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["document_id"] == "doc-1"
+    assert body["char_offset"] == 321
+    assert body["playback_seconds"] == 12.5
+    assert body["section_index"] == 4
+
+
+def test_reader_list_bookmarks_missing_table_returns_empty(client, auth_headers):
+    db = MagicMock()
+    db.table.side_effect = Exception(MISSING_READER_TABLE_ERR)
+
+    with patch("app.routers.reader._require_db", return_value=db), \
+         patch("app.routers.reader._assert_document_owner", return_value={"id": "doc-1"}):
+        resp = client.get("/v1/reader/bookmarks/doc-1", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_reader_list_annotations_missing_table_returns_empty(client, auth_headers):
+    db = MagicMock()
+    db.table.side_effect = Exception(MISSING_READER_TABLE_ERR)
+
+    with patch("app.routers.reader._require_db", return_value=db), \
+         patch("app.routers.reader._assert_document_owner", return_value={"id": "doc-1"}):
+        resp = client.get("/v1/reader/annotations/doc-1", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == []

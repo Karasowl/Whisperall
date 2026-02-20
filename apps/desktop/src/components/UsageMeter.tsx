@@ -5,12 +5,17 @@ import type { UsageRecord } from '@whisperall/api-client';
 
 const LABEL_KEYS: Record<keyof UsageRecord, string> = {
   stt_seconds: 'usage.dictation', tts_chars: 'usage.tts', translate_chars: 'usage.translation',
-  transcribe_seconds: 'usage.transcription', ai_edit_tokens: 'usage.aiEditing', notes_count: 'usage.notes',
+  transcribe_seconds: 'usage.transcription', ai_edit_tokens: 'usage.aiEditing', notes_count: 'usage.notes', storage_bytes: 'usage.storage',
 };
 
 function fmt(resource: keyof UsageRecord, value: number, limit: number): string {
   if (resource === 'stt_seconds' || resource === 'transcribe_seconds')
     return `${Math.round(value / 60)}/${Math.round(limit / 60)} min`;
+  if (resource === 'storage_bytes') {
+    const usedGb = value / (1024 * 1024 * 1024);
+    const limitGb = limit / (1024 * 1024 * 1024);
+    return `${usedGb.toFixed(limitGb >= 10 ? 0 : 1)}/${limitGb.toFixed(limitGb >= 10 ? 0 : 1)} GB`;
+  }
   if (resource === 'notes_count')
     return `${value}/${limit}`;
   return `${Math.round(value / 1000)}k/${Math.round(limit / 1000)}k`;
@@ -23,7 +28,7 @@ export function UsageMeter() {
   useEffect(() => { fetch(); }, [fetch]);
   if (loading) return null;
 
-  const resources: (keyof UsageRecord)[] = ['stt_seconds', 'transcribe_seconds', 'tts_chars', 'translate_chars', 'ai_edit_tokens', 'notes_count'];
+  const resources: (keyof UsageRecord)[] = ['stt_seconds', 'transcribe_seconds', 'tts_chars', 'translate_chars', 'ai_edit_tokens', 'notes_count', 'storage_bytes'];
 
   return (
     <div className="flex flex-col gap-3">
@@ -41,7 +46,7 @@ export function UsageMeter() {
             <div className="flex-1 h-1.5 bg-edge rounded-full overflow-hidden">
               <div className={`h-full rounded-full transition-all ${pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-primary'}`} style={{ width: `${pct}%` }} />
             </div>
-            <span className="text-[11px] text-muted w-16 text-right shrink-0">{fmt(r, usage[r], getLimit(r))}</span>
+            <span className="text-[11px] text-muted w-24 text-right shrink-0">{fmt(r, usage[r], getLimit(r))}</span>
           </div>
         );
       })}

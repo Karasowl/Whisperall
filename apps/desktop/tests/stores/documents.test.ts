@@ -15,8 +15,8 @@ vi.mock('../../src/lib/api', () => ({
 import { useDocumentsStore } from '../../src/stores/documents';
 import { api } from '../../src/lib/api';
 
-const DOC_1 = { id: 'd1', user_id: 'u1', title: 'Note 1', content: 'Hello', source: 'dictation', source_id: null, tags: [], created_at: '2025-01-01', updated_at: '2025-01-01' };
-const DOC_2 = { id: 'd2', user_id: 'u1', title: 'Note 2', content: 'World', source: 'manual', source_id: null, tags: [], created_at: '2025-01-02', updated_at: '2025-01-02' };
+const DOC_1 = { id: 'd1', user_id: 'u1', title: 'Note 1', content: 'Hello', source: 'dictation', source_id: null, audio_url: null, tags: [], created_at: '2025-01-01', updated_at: '2025-01-01' };
+const DOC_2 = { id: 'd2', user_id: 'u1', title: 'Note 2', content: 'World', source: 'manual', source_id: null, audio_url: null, tags: [], created_at: '2025-01-02', updated_at: '2025-01-02' };
 
 describe('documents store', () => {
   beforeEach(() => {

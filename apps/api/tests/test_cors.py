@@ -13,6 +13,13 @@ def test_cors_allows_localhost_origin_preflight(client):
     assert "authorization" in res.headers.get("access-control-allow-headers", "").lower()
 
 
+def test_cors_allows_dynamic_localhost_port_preflight(client):
+    origin = "http://127.0.0.1:55174"
+    res = client.options("/v1/usage", headers=_preflight_headers(origin))
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == origin
+
+
 def test_cors_blocks_unlisted_origin_preflight(client):
     res = client.options("/v1/usage", headers=_preflight_headers("https://evil.example.com"))
     assert res.status_code == 400

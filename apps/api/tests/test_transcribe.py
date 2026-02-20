@@ -1,7 +1,13 @@
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, ANY
 
 from app.config import settings
-from app.routers.transcribe import _should_fallback_to_chunk_text
+from app.routers.transcribe import (
+    _is_near_silent_chunk,
+    _is_repetitive_text,
+    _merge_chunk_segments,
+    _pick_best_text_candidate,
+    _should_fallback_to_chunk_text,
+)
 from fastapi import HTTPException
 import httpx
 
@@ -39,7 +45,7 @@ def test_create_job_with_diarization_requires_deepgram_key(client, auth_headers)
 
 
 def test_diarized_text_fallback_triggers_when_coverage_is_too_low():
-    chunk_text = " ".join(["palabra"] * 120)
+    chunk_text = " ".join([f"palabra{i}" for i in range(120)])
     diarized_text = "Speaker 1: Hola, buenas. Se escucha bien."
     assert _should_fallback_to_chunk_text(diarized_text, chunk_text) is True
 
@@ -48,6 +54,77 @@ def test_diarized_text_fallback_keeps_diarized_text_when_coverage_is_reasonable(
     chunk_text = " ".join(["palabra"] * 80)
     diarized_text = "Speaker 1: " + " ".join(["palabra"] * 40)
     assert _should_fallback_to_chunk_text(diarized_text, chunk_text) is False
+
+
+def test_is_repetitive_text_detects_thank_you_loops():
+    repetitive = " ".join(["thank you"] * 60)
+    assert _is_repetitive_text(repetitive) is True
+
+
+def test_is_repetitive_text_ignores_normal_varied_speech():
+    varied = (
+        "Hoy revisamos métricas de ventas, soporte, onboarding y producto. "
+        "Luego definimos acciones para Q2 con responsables y fechas concretas."
+    )
+    assert _is_repetitive_text(varied) is False
+
+
+def test_pick_best_text_candidate_prefers_non_repetitive_option():
+    repetitive = " ".join(["gracias"] * 80)
+    meaningful = "Necesitamos confirmar presupuesto, cronograma y próximos pasos del proyecto."
+    text, source, low_quality = _pick_best_text_candidate(
+        {"groq": repetitive, "deepgram": meaningful},
+        rms_level=0.002,
+    )
+    assert text == meaningful
+    assert source == "deepgram"
+    assert low_quality is False
+
+
+def test_fallback_to_chunk_text_avoids_repetitive_chunk():
+    chunk_text = " ".join(["thank you"] * 70)
+    diarized_text = "Speaker 1: Tenemos reunión mañana para revisar resultados y cerrar pendientes."
+    assert _should_fallback_to_chunk_text(diarized_text, chunk_text, chunk_rms=0.002) is False
+
+
+def test_merge_chunk_segments_uses_duration_seconds_offsets():
+    chunks = [
+        {
+            "index": 0,
+            "result_json": {
+                "duration_seconds": 120,
+                "segments": [{"start": 0.0, "end": 3.0, "text": "Hola", "speaker": "Speaker 1"}],
+            },
+        },
+        {
+            "index": 1,
+            "result_json": {
+                "duration_seconds": 118,
+                "segments": [{"start": 0.5, "end": 2.5, "text": "Buenas", "speaker": "Speaker 2"}],
+            },
+        },
+    ]
+    merged = _merge_chunk_segments(chunks)
+    assert merged[0]["start"] == 0.0
+    assert merged[1]["start"] == 120.5
+
+
+def test_merge_chunk_segments_falls_back_to_default_chunk_size_when_duration_missing():
+    chunks = [
+        {"index": 0, "result_json": {"segments": [{"start": 0.0, "end": 1.0, "text": "A", "speaker": "Speaker 1"}]}},
+        {"index": 1, "result_json": {"segments": [{"start": 0.0, "end": 1.0, "text": "B", "speaker": "Speaker 1"}]}},
+    ]
+    merged = _merge_chunk_segments(chunks)
+    assert merged[1]["start"] == 300.0
+
+
+def test_is_near_silent_chunk_uses_rms_metadata():
+    silent = {"result_json": {"rms_level": 0.0004}}
+    voiced = {"result_json": {"rms_level": 0.01}}
+    unknown = {"result_json": {}}
+    assert _is_near_silent_chunk(silent) is True
+    assert _is_near_silent_chunk(voiced) is False
+    assert _is_near_silent_chunk(unknown) is False
 
 
 def test_run_job_sets_paused_status_on_plan_limit(client, auth_headers):
@@ -151,7 +228,7 @@ def test_register_chunk_rejects_index_out_of_range(client, auth_headers):
     with patch("app.routers.transcribe.get_supabase_or_none", return_value=db):
         res = client.post(
             f"/v1/transcribe/jobs/{job_id}/chunks",
-            json={"index": 3, "storage_path": "audio/chunk3.wav"},
+            json={"index": 3, "storage_path": "user-123/chunks/job-range-1/3.wav"},
             headers=auth_headers,
         )
 
@@ -180,13 +257,76 @@ def test_register_chunk_is_idempotent_for_same_index(client, auth_headers):
     with patch("app.routers.transcribe.get_supabase_or_none", return_value=db):
         res = client.post(
             f"/v1/transcribe/jobs/{job_id}/chunks",
-            json={"index": 1, "storage_path": "audio/chunk1.wav"},
+            json={"index": 1, "storage_path": "user-123/chunks/job-idempotent-1/1.wav"},
             headers=auth_headers,
         )
 
     assert res.status_code == 200
     assert res.json()["ok"] is True
     assert res.json()["already_registered"] is True
+
+
+def test_register_chunk_rejects_storage_path_owned_by_other_user(client, auth_headers):
+    job_id = "job-storage-1"
+    user_id = "user-123"
+    job_row = {"id": job_id, "user_id": user_id, "total_chunks": 3, "status": "pending"}
+
+    jobs_table = MagicMock()
+    jobs_table.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data=job_row)
+
+    chunks_table = MagicMock()
+    chunks_table.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+
+    db = MagicMock()
+    db.table.side_effect = lambda name: jobs_table if name == "transcribe_jobs" else chunks_table
+
+    with patch("app.routers.transcribe.get_supabase_or_none", return_value=db):
+        res = client.post(
+            f"/v1/transcribe/jobs/{job_id}/chunks",
+            json={"index": 1, "storage_path": "other-user/chunks/job-storage-1/1.wav"},
+            headers=auth_headers,
+        )
+
+    assert res.status_code == 403
+    assert res.headers.get("x-whisperall-error-code") == "TRANSCRIBE_STORAGE_FORBIDDEN"
+    assert res.json()["error"]["code"] == "TRANSCRIBE_STORAGE_FORBIDDEN"
+
+
+def test_register_chunk_tracks_storage_usage_bytes(client, auth_headers):
+    job_id = "job-storage-usage-1"
+    user_id = "user-123"
+    job_row = {"id": job_id, "user_id": user_id, "total_chunks": 3, "status": "pending"}
+
+    jobs_table = MagicMock()
+    jobs_table.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(data=job_row)
+
+    chunks_table = MagicMock()
+    chunks_table.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+    chunks_table.insert.return_value.execute.return_value = MagicMock(data=[{"id": "chunk-new"}])
+
+    db = MagicMock()
+    db.table.side_effect = lambda name: jobs_table if name == "transcribe_jobs" else chunks_table
+    db.rpc.return_value.execute.return_value = MagicMock()
+
+    with patch("app.routers.transcribe.get_supabase_or_none", return_value=db), \
+         patch("app.routers.transcribe.check_usage") as mock_check_usage:
+        res = client.post(
+            f"/v1/transcribe/jobs/{job_id}/chunks",
+            json={
+                "index": 0,
+                "storage_path": "user-123/chunks/job-storage-usage-1/0.wav",
+                "chunk_bytes": 2048,
+            },
+            headers=auth_headers,
+        )
+
+    assert res.status_code == 200
+    mock_check_usage.assert_any_call(
+        ANY,
+        "storage_bytes",
+        2048,
+    )
+    db.rpc.assert_called_with("increment_usage", {"p_user_id": "user-123", "p_storage_bytes": 2048})
 
 
 def test_register_chunk_handles_unique_violation_as_idempotent(client, auth_headers):
@@ -215,7 +355,7 @@ def test_register_chunk_handles_unique_violation_as_idempotent(client, auth_head
     with patch("app.routers.transcribe.get_supabase_or_none", return_value=db):
         res = client.post(
             f"/v1/transcribe/jobs/{job_id}/chunks",
-            json={"index": 1, "storage_path": "audio/chunk1.wav"},
+            json={"index": 1, "storage_path": "user-123/chunks/job-race-1/1.wav"},
             headers=auth_headers,
         )
 
@@ -235,7 +375,7 @@ def test_register_chunk_returns_404_when_job_not_found(client, auth_headers):
     with patch("app.routers.transcribe.get_supabase_or_none", return_value=db):
         res = client.post(
             "/v1/transcribe/jobs/missing-job/chunks",
-            json={"index": 0, "storage_path": "audio/chunk0.wav"},
+            json={"index": 0, "storage_path": "user-123/chunks/missing-job/0.wav"},
             headers=auth_headers,
         )
 

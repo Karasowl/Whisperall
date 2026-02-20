@@ -1,4 +1,6 @@
 import asyncio
+import re
+from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException
 from pathlib import Path
@@ -7,7 +9,7 @@ from urllib.parse import urlparse
 from ..auth import get_current_user, check_usage, AuthUser
 from ..schemas import TranscribeJobRequest, TranscribeChunkRegister, TranscribeRunRequest, TranscribeUrlRequest, TranscribeJobResponse
 from ..db import get_supabase_or_none
-from ..providers import groq_stt, deepgram
+from ..providers import groq_stt, deepgram, openai_stt
 from ..config import settings
 from ..usage_events import record_usage_event
 
@@ -58,12 +60,38 @@ DEFAULT_URL_FETCH_HEADERS: dict[str, str] = {
     )
 }
 
+SILENCE_RMS_THRESHOLD = 0.0012
+LOW_AUDIO_RMS_THRESHOLD = 0.008
+WORD_RE = re.compile(r"[0-9A-Za-zÀ-ÿ']+")
+
 
 def _guess_audio_meta_from_path(path_or_name: str | None) -> tuple[str, str]:
     suffix = Path(path_or_name or "").suffix.lower()
     content_type = EXT_TO_CONTENT_TYPE.get(suffix, "application/octet-stream")
     filename = f"audio{suffix}" if suffix else "audio.bin"
     return filename, content_type
+
+
+def _normalize_storage_path(path: str | None) -> str:
+    return (path or "").strip().lstrip("/")
+
+
+def _assert_storage_path_owned_by_user(path: str | None, user_id: str) -> str:
+    normalized = _normalize_storage_path(path)
+    if not normalized:
+        _raise_transcribe_http_error(
+            status_code=400,
+            detail="Invalid storage path",
+            code="TRANSCRIBE_INVALID_STORAGE_PATH",
+        )
+    expected_prefix = f"{user_id}/"
+    if not normalized.startswith(expected_prefix):
+        _raise_transcribe_http_error(
+            status_code=403,
+            detail="Storage path must be scoped to the current user",
+            code="TRANSCRIBE_STORAGE_FORBIDDEN",
+        )
+    return normalized
 
 
 def _normalize_content_type(raw: str | None) -> str | None:
@@ -312,12 +340,54 @@ def _latest_chunk_for_index(db, job_id: str, index: int) -> dict | None:
     return rows[0] if rows else None
 
 
+def _chunk_duration_seconds(chunk: dict, default_seconds: float) -> float:
+    meta_duration = _chunk_duration_meta_seconds(chunk)
+    if meta_duration is not None:
+        return meta_duration
+    return default_seconds
+
+
+def _chunk_duration_meta_seconds(chunk: dict) -> float | None:
+    result_json = chunk.get("result_json") or {}
+    raw_duration = result_json.get("duration_seconds")
+    try:
+        duration = float(raw_duration)
+    except Exception:
+        return None
+    if duration <= 0:
+        return None
+    return duration
+
+
+def _chunk_rms_level(chunk: dict) -> float | None:
+    result_json = chunk.get("result_json") or {}
+    raw_rms = result_json.get("rms_level")
+    try:
+        rms = float(raw_rms)
+    except Exception:
+        return None
+    if rms < 0:
+        return None
+    return rms
+
+
+def _is_near_silent_chunk(chunk: dict, threshold: float = SILENCE_RMS_THRESHOLD) -> bool:
+    rms = _chunk_rms_level(chunk)
+    return rms is not None and rms <= threshold
+
+
+def _chunk_billable_seconds(chunk: dict, default_seconds: float = 300.0) -> int:
+    return max(1, int(round(_chunk_duration_seconds(chunk, default_seconds))))
+
+
 def _merge_chunk_segments(chunks: list[dict], chunk_size_seconds: float = 300.0) -> list[dict]:
     merged: list[dict] = []
-    for chunk in chunks:
+    running_offset = 0.0
+    sorted_chunks = sorted(chunks, key=lambda c: int(c.get("index", 0)))
+    for chunk in sorted_chunks:
         result_json = chunk.get("result_json") or {}
         raw_segments = result_json.get("segments") or []
-        offset = float(chunk.get("index", 0)) * chunk_size_seconds
+        offset = running_offset
         for seg in raw_segments:
             text = (seg.get("text") or "").strip()
             if not text:
@@ -333,6 +403,7 @@ def _merge_chunk_segments(chunks: list[dict], chunk_size_seconds: float = 300.0)
                     "speaker": speaker,
                 }
             )
+        running_offset += _chunk_duration_seconds(chunk, chunk_size_seconds)
     merged.sort(key=lambda s: (s.get("start", 0.0), s.get("end", 0.0)))
     return merged
 
@@ -358,11 +429,116 @@ def _word_count(text: str) -> int:
     return len([part for part in (text or "").split() if part])
 
 
-def _should_fallback_to_chunk_text(diarized_text: str, chunk_text: str) -> bool:
+def _word_tokens(text: str) -> list[str]:
+    return [m.group(0).lower() for m in WORD_RE.finditer(text or "")]
+
+
+def _text_repetition_stats(text: str) -> dict[str, float]:
+    tokens = _word_tokens(text)
+    words = len(tokens)
+    if words == 0:
+        return {
+            "word_count": 0.0,
+            "unique_ratio": 1.0,
+            "top_token_ratio": 0.0,
+            "top_bigram_ratio": 0.0,
+        }
+
+    token_counts = Counter(tokens)
+    top_token_ratio = token_counts.most_common(1)[0][1] / words
+    unique_ratio = len(token_counts) / words
+
+    top_bigram_ratio = 0.0
+    if words >= 2:
+        bigrams = [f"{tokens[i]} {tokens[i + 1]}" for i in range(words - 1)]
+        bigram_counts = Counter(bigrams)
+        top_bigram_ratio = bigram_counts.most_common(1)[0][1] / max(1, words - 1)
+
+    return {
+        "word_count": float(words),
+        "unique_ratio": float(unique_ratio),
+        "top_token_ratio": float(top_token_ratio),
+        "top_bigram_ratio": float(top_bigram_ratio),
+    }
+
+
+def _is_repetitive_text(text: str, rms_level: float | None = None) -> bool:
+    stats = _text_repetition_stats(text)
+    words = int(stats["word_count"])
+    if words < 16:
+        return False
+
+    unique_ratio = stats["unique_ratio"]
+    top_token_ratio = stats["top_token_ratio"]
+    top_bigram_ratio = stats["top_bigram_ratio"]
+
+    repetitive_pattern = (
+        (words >= 24 and top_bigram_ratio >= 0.34)
+        or (words >= 30 and unique_ratio <= 0.2 and top_token_ratio >= 0.22)
+        or (words >= 18 and top_token_ratio >= 0.58)
+    )
+    if not repetitive_pattern:
+        return False
+
+    if rms_level is not None and rms_level <= LOW_AUDIO_RMS_THRESHOLD:
+        return True
+
+    return top_bigram_ratio >= 0.44 or unique_ratio <= 0.12 or top_token_ratio >= 0.66
+
+
+def _chunk_text_quality_score(text: str, rms_level: float | None = None) -> float:
+    normalized = " ".join((text or "").split()).strip()
+    if not normalized:
+        return -1e9
+
+    stats = _text_repetition_stats(normalized)
+    words = stats["word_count"]
+    unique_ratio = stats["unique_ratio"]
+    top_token_ratio = stats["top_token_ratio"]
+    top_bigram_ratio = stats["top_bigram_ratio"]
+
+    score = words
+    score += unique_ratio * 24.0
+    score -= max(0.0, top_token_ratio - 0.34) * words * 2.0
+    score -= max(0.0, top_bigram_ratio - 0.22) * words * 2.4
+    if rms_level is not None and rms_level <= LOW_AUDIO_RMS_THRESHOLD and words >= 20:
+        score -= 10.0
+    if _is_repetitive_text(normalized, rms_level):
+        score -= max(18.0, words * 0.85)
+    return float(score)
+
+
+def _pick_best_text_candidate(candidates: dict[str, str], rms_level: float | None = None) -> tuple[str, str, bool]:
+    best_source = ""
+    best_text = ""
+    best_score = -1e9
+
+    for source, value in candidates.items():
+        text = " ".join((value or "").split()).strip()
+        if not text:
+            continue
+        score = _chunk_text_quality_score(text, rms_level)
+        if score > best_score:
+            best_score = score
+            best_source = source
+            best_text = text
+
+    if not best_text:
+        return "", "", False
+    return best_text, best_source, _is_repetitive_text(best_text, rms_level)
+
+
+def _should_fallback_to_chunk_text(diarized_text: str, chunk_text: str, chunk_rms: float | None = None) -> bool:
     chunk_words = _word_count(chunk_text)
     if chunk_words == 0:
         return False
     diarized_words = _word_count(diarized_text)
+    diarized_repetitive = _is_repetitive_text(diarized_text, chunk_rms)
+    chunk_repetitive = _is_repetitive_text(chunk_text, chunk_rms)
+    if diarized_repetitive and not chunk_repetitive:
+        return True
+    if chunk_repetitive and not diarized_repetitive:
+        return False
     if diarized_words == 0:
         return True
     # Diarization can return partial utterances; avoid dropping most of the transcript.
@@ -428,11 +604,22 @@ async def register_chunk(job_id: str, payload: TranscribeChunkRegister, user: Au
     if existing_chunk:
         return {"ok": True, "chunk_id": existing_chunk["id"], "already_registered": True}
 
+    normalized_storage_path = _assert_storage_path_owned_by_user(payload.storage_path, user.user_id)
+    chunk_bytes = max(0, int(payload.chunk_bytes or 0))
+    if chunk_bytes > 0:
+        check_usage(user, "storage_bytes", chunk_bytes)
+
     try:
+        chunk_meta: dict[str, float] = {}
+        if payload.duration_seconds is not None and payload.duration_seconds > 0:
+            chunk_meta["duration_seconds"] = payload.duration_seconds
+        if payload.rms_level is not None and payload.rms_level >= 0:
+            chunk_meta["rms_level"] = payload.rms_level
         created = db.table("transcribe_chunks").insert({
             "job_id": job_id,
             "index": payload.index,
-            "storage_path": payload.storage_path,
+            "storage_path": normalized_storage_path,
+            "result_json": chunk_meta or None,
         }).execute()
     except Exception as exc:
         # Unique(job_id, index) race condition: return idempotent response.
@@ -446,6 +633,21 @@ async def register_chunk(job_id: str, payload: TranscribeChunkRegister, user: Au
         raise
 
     created_rows = created.data or []
+    if chunk_bytes > 0:
+        try:
+            db.rpc("increment_usage", {"p_user_id": user.user_id, "p_storage_bytes": chunk_bytes}).execute()
+        except Exception:
+            pass
+        record_usage_event(
+            db,
+            user_id=user.user_id,
+            module="transcribe_upload",
+            provider="supabase-storage",
+            model="audio",
+            resource="storage_bytes",
+            units=chunk_bytes,
+            metadata={"job_id": job_id, "chunk_index": payload.index},
+        )
     return {
         "ok": True,
         "chunk_id": created_rows[0]["id"] if created_rows else None,
@@ -496,8 +698,13 @@ async def run_job(job_id: str, payload: TranscribeRunRequest, user: AuthUser = D
             total_chunks=job_total_chunks,
         )
 
+    pending_bill_seconds = sum(
+        0 if _is_near_silent_chunk(chunk) else _chunk_billable_seconds(chunk)
+        for chunk in (chunks.data or [])
+    )
     try:
-        check_usage(user, "transcribe_seconds", 300 * pending_chunk_count)
+        if pending_bill_seconds > 0:
+            check_usage(user, "transcribe_seconds", pending_bill_seconds)
     except HTTPException as exc:
         if exc.status_code == 429:
             db.table("transcribe_jobs").update({"status": "paused"}).eq("id", job_id).execute()
@@ -523,44 +730,137 @@ async def run_job(job_id: str, payload: TranscribeRunRequest, user: AuthUser = D
             storage_path = chunk["storage_path"]
             file_bytes = db.storage.from_("audio").download(storage_path)
             filename, content_type = _guess_audio_meta_from_path(storage_path)
-            if enable_diarization:
+            chunk_duration = _chunk_duration_meta_seconds(chunk)
+            chunk_rms = _chunk_rms_level(chunk)
+            if _is_near_silent_chunk(chunk):
+                result_json = {
+                    "text": "",
+                    "segments": [] if enable_diarization else None,
+                    "silence_skipped": True,
+                }
+                if chunk_duration:
+                    result_json["duration_seconds"] = chunk_duration
+                if chunk_rms is not None:
+                    result_json["rms_level"] = chunk_rms
+                provider_name = "silence-skip:rms"
+            elif enable_diarization:
                 diarized = await deepgram.transcribe_chunk_diarized(
                     file_bytes,
                     language=job.get("language"),
                     content_type=content_type,
                 )
-                # Deepgram gives speaker segments; Groq yields better plain-text accuracy for long calls.
+                deepgram_text = (diarized.get("text") or "").strip()
+                # Deepgram gives speaker segments; Groq often yields better plain-text accuracy.
                 try:
-                    quality_text = await groq_stt.transcribe_chunk(
+                    groq_text = await groq_stt.transcribe_chunk(
                         file_bytes,
                         language=job.get("language"),
                         filename=filename,
                         content_type=content_type,
                     )
                 except Exception:
-                    quality_text = ""
-                text = (quality_text or "").strip() or diarized.get("text", "")
+                    groq_text = ""
+
+                candidate_text, candidate_source, low_quality = _pick_best_text_candidate(
+                    {"groq": groq_text, "deepgram": deepgram_text},
+                    chunk_rms,
+                )
+                openai_text = ""
+                if low_quality and settings.openai_api_key:
+                    try:
+                        openai_text = await openai_stt.transcribe(
+                            file_bytes,
+                            language=job.get("language"),
+                            content_type=content_type,
+                        )
+                    except Exception:
+                        openai_text = ""
+                    candidate_text, candidate_source, low_quality = _pick_best_text_candidate(
+                        {"openai": openai_text, candidate_source or "primary": candidate_text, "deepgram": deepgram_text},
+                        chunk_rms,
+                    )
+
+                text = candidate_text or deepgram_text or (groq_text or "").strip()
                 result_json = {
                     "text": text,
                     "segments": diarized.get("segments") or [],
                 }
-                provider_name = "groq:whisper-large-v3-turbo+deepgram:nova-2"
+                if candidate_source:
+                    result_json["text_source"] = candidate_source
+                if low_quality:
+                    result_json["quality_warning"] = "repetitive_text_detected"
+                if chunk_duration:
+                    result_json["duration_seconds"] = chunk_duration
+                if chunk_rms is not None:
+                    result_json["rms_level"] = chunk_rms
+                provider_parts = ["groq:whisper-large-v3-turbo", "deepgram:nova-2"]
+                if openai_text:
+                    provider_parts.append("openai:gpt-4o-mini-transcribe")
+                provider_name = "+".join(provider_parts)
             else:
-                text = await groq_stt.transcribe_chunk(
+                groq_text = await groq_stt.transcribe_chunk(
                     file_bytes,
                     language=job.get("language"),
                     filename=filename,
                     content_type=content_type,
                 )
+                candidate_text, candidate_source, low_quality = _pick_best_text_candidate(
+                    {"groq": groq_text},
+                    chunk_rms,
+                )
+                deepgram_text = ""
+                openai_text = ""
+                if low_quality and settings.deepgram_api_key:
+                    try:
+                        deepgram_text = await deepgram.transcribe_chunk(
+                            file_bytes,
+                            language=job.get("language"),
+                            content_type=content_type,
+                        )
+                    except Exception:
+                        deepgram_text = ""
+                if low_quality and settings.openai_api_key:
+                    try:
+                        openai_text = await openai_stt.transcribe(
+                            file_bytes,
+                            language=job.get("language"),
+                            content_type=content_type,
+                        )
+                    except Exception:
+                        openai_text = ""
+                if deepgram_text or openai_text:
+                    candidate_text, candidate_source, low_quality = _pick_best_text_candidate(
+                        {
+                            "deepgram": deepgram_text,
+                            "openai": openai_text,
+                            candidate_source or "groq": candidate_text,
+                        },
+                        chunk_rms,
+                    )
+                text = candidate_text or (groq_text or "").strip() or deepgram_text or openai_text
                 result_json = {"text": text}
-                provider_name = "groq:whisper-large-v3-turbo"
+                if candidate_source:
+                    result_json["text_source"] = candidate_source
+                if low_quality:
+                    result_json["quality_warning"] = "repetitive_text_detected"
+                if chunk_duration:
+                    result_json["duration_seconds"] = chunk_duration
+                if chunk_rms is not None:
+                    result_json["rms_level"] = chunk_rms
+                provider_parts = ["groq:whisper-large-v3-turbo"]
+                if deepgram_text:
+                    provider_parts.append("deepgram:nova-2")
+                if openai_text:
+                    provider_parts.append("openai:gpt-4o-mini-transcribe")
+                provider_name = "+".join(provider_parts)
             db.table("transcribe_chunks").update({
                 "status": "done",
                 "result_json": result_json,
                 "provider": provider_name,
             }).eq("id", chunk["id"]).execute()
             processed += 1
-            total_seconds += 300  # 5-min chunks
+            if provider_name != "silence-skip:rms":
+                total_seconds += _chunk_billable_seconds(chunk)
 
         new_count = job_processed_chunks + processed
         remaining_pending = (
@@ -700,18 +1000,49 @@ async def transcribe_from_url(payload: TranscribeUrlRequest, user: AuthUser = De
                 )
             except Exception:
                 quality_text = ""
-            text = ((quality_text or "").strip() or diarized.get("text", "")).strip()
+            deepgram_text = (diarized.get("text") or "").strip()
+            text, _, low_quality = _pick_best_text_candidate(
+                {"groq": quality_text, "deepgram": deepgram_text},
+                None,
+            )
+            if low_quality and settings.openai_api_key:
+                try:
+                    openai_text = await openai_stt.transcribe(
+                        audio_bytes,
+                        language=lang,
+                        content_type=content_type,
+                    )
+                except Exception:
+                    openai_text = ""
+                text, _, _ = _pick_best_text_candidate(
+                    {"openai": openai_text, "deepgram": deepgram_text, "groq": quality_text},
+                    None,
+                )
+            text = (text or deepgram_text or (quality_text or "").strip()).strip()
             segments = diarized.get("segments") or None
             labeled = _segments_to_labeled_text(segments or [])
             if labeled and not _should_fallback_to_chunk_text(labeled, text):
                 text = labeled
         else:
-            text = await groq_stt.transcribe_chunk(
+            groq_text = await groq_stt.transcribe_chunk(
                 audio_bytes,
                 language=lang,
                 filename=filename,
                 content_type=content_type,
             )
+            text, _, low_quality = _pick_best_text_candidate({"groq": groq_text}, None)
+            deepgram_text = ""
+            if low_quality and settings.deepgram_api_key:
+                try:
+                    deepgram_text = await deepgram.transcribe_chunk(
+                        audio_bytes,
+                        language=lang,
+                        content_type=content_type,
+                    )
+                except Exception:
+                    deepgram_text = ""
+                text, _, _ = _pick_best_text_candidate({"deepgram": deepgram_text, "groq": groq_text}, None)
+            text = (text or (groq_text or "").strip() or deepgram_text).strip()
             segments = None
     except hx.HTTPStatusError:
         _raise_transcribe_http_error(

@@ -15,9 +15,33 @@ log = logging.getLogger(__name__)
 API_KEY_PREFIX = "wsp_live_"
 
 PLAN_LIMITS = {
-    "free":  {"stt_seconds": 1800,   "tts_chars": 50_000,  "translate_chars": 50_000,  "transcribe_seconds": 600,    "ai_edit_tokens": 50_000,  "notes_count": 50},
-    "basic": {"stt_seconds": 36_000, "tts_chars": 500_000, "translate_chars": 500_000, "transcribe_seconds": 18_000, "ai_edit_tokens": 500_000, "notes_count": 200},
-    "pro":   {"stt_seconds": 108_000,"tts_chars": 2_000_000,"translate_chars": 2_000_000,"transcribe_seconds": 108_000,"ai_edit_tokens": 2_000_000,"notes_count": 1000},
+    "free":  {
+        "stt_seconds": 1800,
+        "tts_chars": 50_000,
+        "translate_chars": 50_000,
+        "transcribe_seconds": 600,
+        "ai_edit_tokens": 50_000,
+        "notes_count": 50,
+        "storage_bytes": 2 * 1024 * 1024 * 1024,
+    },
+    "basic": {
+        "stt_seconds": 36_000,
+        "tts_chars": 500_000,
+        "translate_chars": 500_000,
+        "transcribe_seconds": 18_000,
+        "ai_edit_tokens": 500_000,
+        "notes_count": 200,
+        "storage_bytes": 25 * 1024 * 1024 * 1024,
+    },
+    "pro":   {
+        "stt_seconds": 108_000,
+        "tts_chars": 2_000_000,
+        "translate_chars": 2_000_000,
+        "transcribe_seconds": 108_000,
+        "ai_edit_tokens": 2_000_000,
+        "notes_count": 1000,
+        "storage_bytes": 150 * 1024 * 1024 * 1024,
+    },
 }
 
 

@@ -1,4 +1,6 @@
-import { ipcMain, desktopCapturer, Notification, shell } from 'electron';
+import { ipcMain, desktopCapturer, Notification, shell, app } from 'electron';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { showMainWindow, getMainWindow } from './windows.js';
 import {
   showOverlay, hideOverlay, toggleOverlay, resizeOverlay, setOverlayIgnoreMouse, sendSubtitleText,
@@ -7,6 +9,36 @@ import {
 import { updateHotkeys, updateSttSettings, setLastDictationText } from './hotkeys.js';
 import { updateTraySettings, getTraySettings } from './tray.js';
 import { pasteText, undoPaste, readClipboard } from './clipboard.js';
+
+function getAuthStoragePath(): string {
+  return path.join(app.getPath('userData'), 'auth-storage.json');
+}
+
+function isValidAuthStorageKey(key: unknown): key is string {
+  return typeof key === 'string' && key.length > 0 && key.length <= 200;
+}
+
+async function readAuthStorage(): Promise<Record<string, string>> {
+  try {
+    const raw = await fs.readFile(getAuthStoragePath(), 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    const entries = Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => (
+      typeof entry[0] === 'string' && typeof entry[1] === 'string'
+    ));
+    return Object.fromEntries(entries);
+  } catch {
+    return {};
+  }
+}
+
+async function writeAuthStorage(storage: Record<string, string>): Promise<void> {
+  const storagePath = getAuthStoragePath();
+  await fs.mkdir(path.dirname(storagePath), { recursive: true });
+  await fs.writeFile(storagePath, JSON.stringify(storage), 'utf8');
+}
 
 export function registerIpcHandlers(): void {
   // --- Hotkeys ---
@@ -95,6 +127,29 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('open-external', async (_e, url: string) => {
     await shell.openExternal(url);
+  });
+
+  // --- Auth persistent storage (shared across dev ports) ---
+  ipcMain.handle('auth-storage:get', async (_e, key: string) => {
+    if (!isValidAuthStorageKey(key)) return null;
+    const storage = await readAuthStorage();
+    const value = storage[key];
+    return typeof value === 'string' ? value : null;
+  });
+
+  ipcMain.handle('auth-storage:set', async (_e, key: string, value: string) => {
+    if (!isValidAuthStorageKey(key) || typeof value !== 'string') return;
+    const storage = await readAuthStorage();
+    storage[key] = value;
+    await writeAuthStorage(storage);
+  });
+
+  ipcMain.handle('auth-storage:remove', async (_e, key: string) => {
+    if (!isValidAuthStorageKey(key)) return;
+    const storage = await readAuthStorage();
+    if (!(key in storage)) return;
+    delete storage[key];
+    await writeAuthStorage(storage);
   });
 
   // --- Desktop Capturer ---

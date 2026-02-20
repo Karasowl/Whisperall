@@ -39,6 +39,7 @@ const EMPTY_USAGE = {
   transcribe_seconds: 0,
   ai_edit_tokens: 0,
   notes_count: 0,
+  storage_bytes: 0,
 };
 
 function resetStore() {
@@ -71,18 +72,21 @@ describe('Plan store', () => {
       expect(usePlanStore.getState().getLimit('stt_seconds')).toBe(1800);
       expect(usePlanStore.getState().getLimit('tts_chars')).toBe(50_000);
       expect(usePlanStore.getState().getLimit('notes_count')).toBe(50);
+      expect(usePlanStore.getState().getLimit('storage_bytes')).toBe(2 * 1024 * 1024 * 1024);
     });
 
     it('returns basic plan limits when plan is basic', () => {
       usePlanStore.setState({ plan: 'basic' });
       expect(usePlanStore.getState().getLimit('stt_seconds')).toBe(36_000);
       expect(usePlanStore.getState().getLimit('notes_count')).toBe(200);
+      expect(usePlanStore.getState().getLimit('storage_bytes')).toBe(25 * 1024 * 1024 * 1024);
     });
 
     it('returns pro plan limits when plan is pro', () => {
       usePlanStore.setState({ plan: 'pro' });
       expect(usePlanStore.getState().getLimit('stt_seconds')).toBe(108_000);
       expect(usePlanStore.getState().getLimit('notes_count')).toBe(1000);
+      expect(usePlanStore.getState().getLimit('storage_bytes')).toBe(150 * 1024 * 1024 * 1024);
     });
   });
 
@@ -134,7 +138,15 @@ describe('Plan store', () => {
       mockUsageGet.mockResolvedValue({
         plan: 'free',
         usage: { ...EMPTY_USAGE },
-        limits: { stt_seconds: 1800, tts_chars: 50_000, translate_chars: 50_000, transcribe_seconds: 600, ai_edit_tokens: 50_000, notes_count: 50 },
+        limits: {
+          stt_seconds: 1800,
+          tts_chars: 50_000,
+          translate_chars: 50_000,
+          transcribe_seconds: 600,
+          ai_edit_tokens: 50_000,
+          notes_count: 50,
+          storage_bytes: 2 * 1024 * 1024 * 1024,
+        },
       });
 
       await usePlanStore.getState().fetch();
@@ -146,8 +158,24 @@ describe('Plan store', () => {
     it('fetches plan and usage from API', async () => {
       mockUsageGet.mockResolvedValue({
         plan: 'basic',
-        usage: { stt_seconds: 500, tts_chars: 100, translate_chars: 0, transcribe_seconds: 0, ai_edit_tokens: 0, notes_count: 3 },
-        limits: { stt_seconds: 36_000, tts_chars: 500_000, translate_chars: 500_000, transcribe_seconds: 18_000, ai_edit_tokens: 500_000, notes_count: 200 },
+        usage: {
+          stt_seconds: 500,
+          tts_chars: 100,
+          translate_chars: 0,
+          transcribe_seconds: 0,
+          ai_edit_tokens: 0,
+          notes_count: 3,
+          storage_bytes: 2048,
+        },
+        limits: {
+          stt_seconds: 36_000,
+          tts_chars: 500_000,
+          translate_chars: 500_000,
+          transcribe_seconds: 18_000,
+          ai_edit_tokens: 500_000,
+          notes_count: 200,
+          storage_bytes: 25 * 1024 * 1024 * 1024,
+        },
       });
 
       await usePlanStore.getState().fetch();
@@ -155,6 +183,7 @@ describe('Plan store', () => {
       expect(usePlanStore.getState().plan).toBe('basic');
       expect(usePlanStore.getState().usage.stt_seconds).toBe(500);
       expect(usePlanStore.getState().usage.notes_count).toBe(3);
+      expect(usePlanStore.getState().usage.storage_bytes).toBe(2048);
       expect(usePlanStore.getState().loading).toBe(false);
     });
 
@@ -193,7 +222,15 @@ describe('Plan store', () => {
       mockUsageGet.mockResolvedValue({
         plan: 'free',
         usage: { ...EMPTY_USAGE },
-        limits: { stt_seconds: 1800, tts_chars: 50_000, translate_chars: 50_000, transcribe_seconds: 600, ai_edit_tokens: 50_000, notes_count: 50 },
+        limits: {
+          stt_seconds: 1800,
+          tts_chars: 50_000,
+          translate_chars: 50_000,
+          transcribe_seconds: 600,
+          ai_edit_tokens: 50_000,
+          notes_count: 50,
+          storage_bytes: 2 * 1024 * 1024 * 1024,
+        },
       });
 
       await usePlanStore.getState().fetch();

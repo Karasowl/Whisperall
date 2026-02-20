@@ -38,6 +38,9 @@ describe('IPC channel registration', () => {
       'show-main-window',
       'notify',
       'open-external',
+      'auth-storage:get',
+      'auth-storage:set',
+      'auth-storage:remove',
       'desktop-sources',
       'update-title-bar',
     ];
@@ -54,6 +57,9 @@ describe('IPC channel registration', () => {
     const handleChannels = mockIpcMain.handle.mock.calls.map((c: unknown[]) => c[0]);
     expect(handleChannels).toContain('clipboard:read');
     expect(handleChannels).toContain('open-external');
+    expect(handleChannels).toContain('auth-storage:get');
+    expect(handleChannels).toContain('auth-storage:set');
+    expect(handleChannels).toContain('auth-storage:remove');
     expect(handleChannels).toContain('desktop-sources');
   });
 

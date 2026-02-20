@@ -29,6 +29,7 @@ USAGE_KEYS = (
     "transcribe_seconds",
     "ai_edit_tokens",
     "notes_count",
+    "storage_bytes",
 )
 
 

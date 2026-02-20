@@ -1,4 +1,10 @@
-import type { TranscriptionJob } from '../../stores/transcription';
+import {
+  resolveTranscriptionJobProgress,
+  resolveTranscriptionJobStage,
+  transcriptionStageDetailKey,
+  transcriptionStageLabelKey,
+  type TranscriptionJob,
+} from '../../stores/transcription';
 import { useT } from '../../lib/i18n';
 
 type Props = {
@@ -9,10 +15,17 @@ type Props = {
 
 export function FileCard({ job, isActive, onClick }: Props) {
   const t = useT();
-  const pct = job.total_chunks > 0 ? Math.round((job.processed_chunks / job.total_chunks) * 100) : 0;
-  const isProcessing = job.status === 'processing' || job.status === 'pending';
-  const isPaused = job.status === 'paused';
-  const isFailed = job.status === 'failed';
+  const stage = resolveTranscriptionJobStage(job);
+  const { done, total, pct } = resolveTranscriptionJobProgress(job);
+  const stageLabel = t(transcriptionStageLabelKey(stage));
+  const stageDetailKey = transcriptionStageDetailKey(stage);
+  const stageDetail = stageDetailKey ? t(stageDetailKey) : null;
+  const isActiveStage = stage !== 'completed' && stage !== 'paused' && stage !== 'failed';
+  const isPaused = stage === 'paused';
+  const isFailed = stage === 'failed';
+  const isCompleted = stage === 'completed';
+  const useUploadCounters = stage === 'uploading';
+  const rightCounter = `${done}/${total} ${t('transcribe.chunks')}`;
 
   return (
     <div
@@ -29,36 +42,42 @@ export function FileCard({ job, isActive, onClick }: Props) {
         <div className="flex-1 min-w-0">
           <div className="flex justify-between items-center mb-1">
             <h4 className="font-semibold text-text truncate">{job.filename ?? job.id}</h4>
-            {isProcessing && <span className="text-xs text-primary font-medium">{pct}%</span>}
+            {isActiveStage && <span className="text-xs text-primary font-medium">{pct}%</span>}
           </div>
-          {isProcessing && (
+          {isActiveStage && (
             <>
               <div className="relative w-full h-2 bg-black/40 rounded-full overflow-hidden mb-2">
                 <div className="absolute top-0 left-0 h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
                 <div className="absolute top-0 left-0 h-full w-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full animate-shimmer" />
               </div>
               <div className="flex justify-between">
-                <span className="text-xs text-primary font-medium capitalize">{job.status}...</span>
-                <span className="text-xs text-muted">{job.processed_chunks}/{job.total_chunks} {t('transcribe.chunks')}</span>
+                <span className="text-xs text-primary font-medium">{stageLabel}</span>
+                <span className="text-xs text-muted">{rightCounter}</span>
               </div>
+              {stageDetail && (
+                <p className="text-xs text-muted mt-1">
+                  {stageDetail}
+                  {!useUploadCounters && total > 0 ? ` (${rightCounter})` : ''}
+                </p>
+              )}
             </>
           )}
-          {job.status === 'completed' && (
+          {isCompleted && (
             <div className="flex items-center gap-3 mt-1">
-              <span className="text-xs font-medium text-green-400 uppercase">{t('transcribe.completed')}</span>
-              <span className="text-xs text-muted">{job.total_chunks} {t('transcribe.chunks')}</span>
+              <span className="text-xs font-medium text-green-400 uppercase">{stageLabel}</span>
+              <span className="text-xs text-muted">{rightCounter}</span>
             </div>
           )}
           {isPaused && (
             <div className="flex items-center gap-3 mt-1">
-              <span className="text-xs font-medium text-amber-400 uppercase">{t('transcribe.paused')}</span>
-              <span className="text-xs text-muted">{job.processed_chunks}/{job.total_chunks} {t('transcribe.chunks')}</span>
+              <span className="text-xs font-medium text-amber-400 uppercase">{stageLabel}</span>
+              <span className="text-xs text-muted">{rightCounter}</span>
             </div>
           )}
           {isFailed && (
             <div className="flex items-center gap-3 mt-1">
-              <span className="text-xs font-medium text-red-400 uppercase">{t('transcribe.failed')}</span>
-              <span className="text-xs text-muted">{job.processed_chunks}/{job.total_chunks} {t('transcribe.chunks')}</span>
+              <span className="text-xs font-medium text-red-400 uppercase">{stageLabel}</span>
+              <span className="text-xs text-muted">{rightCounter}</span>
             </div>
           )}
         </div>

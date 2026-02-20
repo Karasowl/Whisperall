@@ -29,6 +29,26 @@ def test_get_cors_origins_parses_and_deduplicates_csv():
     assert origins == ["https://a.example.com", "https://b.example.com"]
 
 
+def test_get_cors_origin_regex_defaults_for_dev():
+    with patch.object(settings, "env", "dev"), patch.object(settings, "cors_origin_regex", None):
+        regex = settings.get_cors_origin_regex()
+    assert regex is not None
+    assert "localhost" in regex
+    assert "127\\.0\\.0\\.1" in regex
+
+
+def test_get_cors_origin_regex_defaults_for_prod():
+    with patch.object(settings, "env", "prod"), patch.object(settings, "cors_origin_regex", None):
+        regex = settings.get_cors_origin_regex()
+    assert regex is None
+
+
+def test_get_cors_origin_regex_uses_explicit_value():
+    with patch.object(settings, "env", "dev"), patch.object(settings, "cors_origin_regex", "^https://custom.example.com$"):
+        regex = settings.get_cors_origin_regex()
+    assert regex == "^https://custom.example.com$"
+
+
 def test_validate_runtime_flags_rejects_auth_disabled_in_prod():
     with patch.object(settings, "env", "prod"), patch.object(settings, "auth_disabled", True):
         with pytest.raises(RuntimeError, match="AUTH_DISABLED cannot be true in prod"):

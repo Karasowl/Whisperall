@@ -26,7 +26,9 @@ export type TranscribeJobParams = {
 export type TranscribeChunkParams = {
   index: number;
   storage_path: string;
+  chunk_bytes?: number;
   duration_seconds?: number;
+  rms_level?: number;
 };
 
 export type TranscribeRunParams = {
@@ -152,6 +154,7 @@ export type UsageRecord = {
   transcribe_seconds: number;
   ai_edit_tokens: number;
   notes_count: number;
+  storage_bytes: number;
 };
 
 export type PlanLimits = Record<UserPlan, UsageRecord>;
@@ -286,6 +289,7 @@ export type Document = {
   content: string;
   source: DocumentSource | null;
   source_id: string | null;
+  audio_url: string | null;
   tags: string[];
   folder_id: string | null;
   created_at: string;
@@ -296,6 +300,8 @@ export type CreateDocumentParams = {
   title: string;
   content: string;
   source?: DocumentSource;
+  source_id?: string;
+  audio_url?: string;
   tags?: string[];
   folder_id?: string;
 };
@@ -303,8 +309,35 @@ export type CreateDocumentParams = {
 export type UpdateDocumentParams = {
   title?: string;
   content?: string;
+  source_id?: string | null;
+  audio_url?: string | null;
   tags?: string[];
   folder_id?: string | null;
+};
+
+export type DocumentTranscriptionEntry = {
+  id: string;
+  document_id: string;
+  user_id: string;
+  block_id: string | null;
+  source: "mic" | "system" | "audio" | null;
+  language: string;
+  diarization: boolean;
+  text: string;
+  segments: Array<{ start?: number; end?: number; speaker?: string; text: string }>;
+  audio_url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateDocumentTranscriptionParams = {
+  block_id?: string | null;
+  source?: "mic" | "system" | "audio" | null;
+  language?: string;
+  diarization?: boolean;
+  text: string;
+  segments?: Array<{ start?: number; end?: number; speaker?: string; text: string }>;
+  audio_url?: string | null;
 };
 
 // ── Reader ──────────────────────────────────────────
@@ -335,6 +368,8 @@ export type ReaderImportResponse = {
   title: string;
   source: "file" | "url";
   document_id?: string | null;
+  rich_html?: string | null;
+  toc?: Array<{ id: string; title: string; level: number }>;
   warning?: string | null;
 };
 

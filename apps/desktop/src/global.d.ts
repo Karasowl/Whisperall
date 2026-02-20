@@ -29,6 +29,9 @@ declare global {
       onSubtitleText: (cb: (text: string) => void) => Unsubscribe;
 
       // Auth
+      getAuthStorageItem: (key: string) => Promise<string | null>;
+      setAuthStorageItem: (key: string, value: string) => Promise<void>;
+      removeAuthStorageItem: (key: string) => Promise<void>;
       onAuthCallback: (cb: (url: string) => void) => Unsubscribe;
 
       // Tray

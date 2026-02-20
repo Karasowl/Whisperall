@@ -159,41 +159,75 @@ export function stopMeetingStream(): void {
 /** Target 16 kHz mono — Whisper's native format, keeps chunks under 10 MB. */
 const TARGET_SR = 16000;
 
-export function splitFileIntoChunks(file: File, chunkDurationMs = 300_000): Promise<Blob[]> {
+export type SplitChunkOptions = {
+  chunkDurationMs?: number;
+  targetSampleRate?: number;
+  channels?: 1 | 2;
+};
+
+export type SplitChunkPart = {
+  blob: Blob;
+  durationSeconds: number;
+  rmsLevel?: number;
+};
+
+function normalizeSplitOptions(options?: SplitChunkOptions | number): Required<SplitChunkOptions> {
+  if (typeof options === 'number') {
+    return { chunkDurationMs: options, targetSampleRate: TARGET_SR, channels: 1 };
+  }
+  return {
+    chunkDurationMs: options?.chunkDurationMs ?? 300_000,
+    targetSampleRate: options?.targetSampleRate ?? TARGET_SR,
+    channels: options?.channels ?? 1,
+  };
+}
+
+export function splitFileIntoChunkParts(file: File, options?: SplitChunkOptions | number): Promise<SplitChunkPart[]> {
+  const cfg = normalizeSplitOptions(options);
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = async () => {
-      const chunks: Blob[] = [];
+      const chunks: SplitChunkPart[] = [];
       const ctx = new OfflineAudioContext(1, 1, 44100);
       try {
         const buffer = await ctx.decodeAudioData(reader.result as ArrayBuffer);
         const totalMs = buffer.duration * 1000;
-        const numChunks = Math.ceil(totalMs / chunkDurationMs);
+        const numChunks = Math.ceil(totalMs / cfg.chunkDurationMs);
+        const outChannels = cfg.channels;
 
         for (let i = 0; i < numChunks; i++) {
-          const startSec = (i * chunkDurationMs) / 1000;
-          const endSec = Math.min(((i + 1) * chunkDurationMs) / 1000, buffer.duration);
+          const startSec = (i * cfg.chunkDurationMs) / 1000;
+          const endSec = Math.min(((i + 1) * cfg.chunkDurationMs) / 1000, buffer.duration);
           const durSec = endSec - startSec;
-          const outLen = Math.ceil(durSec * TARGET_SR);
+          const outLen = Math.ceil(durSec * cfg.targetSampleRate);
 
-          // OfflineAudioContext at 16 kHz mono handles resampling + downmix
-          const offCtx = new OfflineAudioContext(1, outLen, TARGET_SR);
+          // OfflineAudioContext handles resampling and channel remap.
+          const offCtx = new OfflineAudioContext(outChannels, outLen, cfg.targetSampleRate);
           const source = offCtx.createBufferSource();
           source.buffer = buffer;
           source.connect(offCtx.destination);
           source.start(0, startSec, durSec);
 
           const rendered = await offCtx.startRendering();
-          chunks.push(audioBufferToWav(rendered));
+          chunks.push({
+            blob: audioBufferToWav(rendered),
+            durationSeconds: durSec,
+            rmsLevel: audioBufferRms(rendered),
+          });
         }
       } catch {
         // If decode fails, send the whole file as one chunk
-        chunks.push(file);
+        chunks.push({ blob: file, durationSeconds: 0 });
       }
       resolve(chunks);
     };
     reader.readAsArrayBuffer(file);
   });
+}
+
+export async function splitFileIntoChunks(file: File, options?: SplitChunkOptions | number): Promise<Blob[]> {
+  const parts = await splitFileIntoChunkParts(file, options);
+  return parts.map((part) => part.blob);
 }
 
 function audioBufferToWav(buffer: AudioBuffer): Blob {
@@ -236,4 +270,23 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   }
 
   return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+function audioBufferRms(buffer: AudioBuffer): number {
+  const channels = Math.max(buffer.numberOfChannels, 1);
+  const channelData = Array.from({ length: channels }, (_, ch) => buffer.getChannelData(ch));
+  const stride = 4; // Sample every 4th frame to keep splitting fast on long files.
+  let sumSquares = 0;
+  let count = 0;
+  for (let i = 0; i < buffer.length; i += stride) {
+    let mixed = 0;
+    for (let ch = 0; ch < channels; ch++) {
+      mixed += channelData[ch]?.[i] ?? 0;
+    }
+    const sample = mixed / channels;
+    sumSquares += sample * sample;
+    count += 1;
+  }
+  if (count === 0) return 0;
+  return Math.sqrt(sumSquares / count);
 }

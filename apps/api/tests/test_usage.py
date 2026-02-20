@@ -10,6 +10,7 @@ USAGE_KEYS = {
     "transcribe_seconds",
     "ai_edit_tokens",
     "notes_count",
+    "storage_bytes",
 }
 
 
@@ -62,6 +63,7 @@ def test_usage_normalizes_db_values_and_plan(client, auth_headers):
             "transcribe_seconds": 1.8,
             "ai_edit_tokens": "42",
             "notes_count": "7",
+            "storage_bytes": "1048576",
         }
     )
 
@@ -87,6 +89,7 @@ def test_usage_normalizes_db_values_and_plan(client, auth_headers):
         "transcribe_seconds": 1,
         "ai_edit_tokens": 42,
         "notes_count": 7,
+        "storage_bytes": 1048576,
     }
     assert payload["limits"] == PLAN_LIMITS["basic"]
     assert datetime.fromisoformat(payload["period_end"]) > datetime.fromisoformat(payload["period_start"])

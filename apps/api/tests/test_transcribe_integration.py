@@ -118,7 +118,7 @@ class TestRegisterChunk:
     def test_registers_chunk(self, client, auth_headers, mock_supabase):
         res = client.post(
             f"/v1/transcribe/jobs/{JOB_ID}/chunks",
-            json={"index": 0, "storage_path": "audio/chunk0.wav"},
+            json={"index": 0, "storage_path": "user-123/chunks/job-abc-123/0.wav"},
             headers=auth_headers,
         )
         assert res.status_code == 200
@@ -131,7 +131,7 @@ class TestRegisterChunk:
         headers = {"Authorization": f"Bearer {other_token}"}
         res = client.post(
             f"/v1/transcribe/jobs/{JOB_ID}/chunks",
-            json={"index": 0, "storage_path": "p.wav"},
+            json={"index": 0, "storage_path": "other-user/chunks/job-abc-123/0.wav"},
             headers=headers,
         )
         assert res.status_code == 403

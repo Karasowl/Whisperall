@@ -15,6 +15,7 @@ DEFAULT_DEV_CORS_ORIGINS = (
     "http://127.0.0.1:5173",
     *DEFAULT_PROD_CORS_ORIGINS,
 )
+DEFAULT_DEV_CORS_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
 # Keys that can be loaded from Supabase app_config table
 _REMOTE_KEYS = {
@@ -77,6 +78,14 @@ class Settings(BaseSettings):
                 return normalized
         defaults = DEFAULT_PROD_CORS_ORIGINS if self.env == "prod" else DEFAULT_DEV_CORS_ORIGINS
         return list(defaults)
+
+    def get_cors_origin_regex(self) -> str | None:
+        """Resolve CORS origin regex from env with safe defaults."""
+        if self.cors_origin_regex:
+            normalized = self.cors_origin_regex.strip()
+            if normalized:
+                return normalized
+        return None if self.env == "prod" else DEFAULT_DEV_CORS_ORIGIN_REGEX
 
     def validate_runtime_flags(self) -> None:
         """Fail fast on unsafe production runtime flags."""

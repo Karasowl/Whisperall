@@ -1,4 +1,8 @@
-import { useTranscriptionStore } from '../../stores/transcription';
+import {
+  resolveTranscriptionJobStage,
+  transcriptionStageLabelKey,
+  useTranscriptionStore,
+} from '../../stores/transcription';
 import { useT } from '../../lib/i18n';
 
 const LANGUAGES = [
@@ -40,6 +44,7 @@ export function TranscribeSettings({ onOpenInNotes }: Props) {
   } = useTranscriptionStore();
 
   const activeJob = activeJobId ? jobs.find((j) => j.id === activeJobId) : null;
+  const activeStage = activeJob ? resolveTranscriptionJobStage(activeJob) : null;
   const hasResumableJob = !!activeJob && (
     activeJob.status === 'paused' ||
     activeJob.status === 'processing' ||
@@ -48,7 +53,7 @@ export function TranscribeSettings({ onOpenInNotes }: Props) {
   const hasInput = !!stagedFile || !!stagedUrl.trim();
   const canStart = (hasInput || hasResumableJob) && !loading;
   const buttonLabel = loading
-    ? t('transcribe.processing')
+    ? (activeStage ? t(transcriptionStageLabelKey(activeStage)) : t('transcribe.processing'))
     : hasInput
       ? t('transcribe.start')
       : hasResumableJob

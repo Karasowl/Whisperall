@@ -17,7 +17,7 @@ vi.mock('../../src/lib/api', () => ({
 }));
 
 vi.mock('../../src/lib/audio', () => ({
-  splitFileIntoChunks: vi.fn(),
+  splitFileIntoChunkParts: vi.fn(),
   getMicStream: vi.fn(),
   stopMicStream: vi.fn(),
   createRecorder: vi.fn(),
@@ -29,23 +29,29 @@ vi.mock('../../src/stores/documents', () => ({
   },
 }));
 
+vi.mock('../../src/stores/auth', () => ({
+  useAuthStore: {
+    getState: vi.fn(() => ({ user: { id: 'user-123' }, session: null })),
+  },
+}));
+
 const mockUpload = vi.fn().mockResolvedValue({ error: null });
 vi.mock('../../src/lib/supabase', () => ({
   getSupabase: vi.fn().mockReturnValue({
-    storage: { from: () => ({ upload: mockUpload }) },
+    storage: { from: () => ({ upload: mockUpload, getPublicUrl: () => ({ data: { publicUrl: 'https://example.com/original.wav' } }) }) },
     channel: () => ({ on: () => ({ subscribe: vi.fn() }) }),
     removeChannel: vi.fn(),
   }),
 }));
 
-import { useTranscriptionStore } from '../../src/stores/transcription';
+import { resolveTranscriptionJobProgress, resolveTranscriptionJobStage, useTranscriptionStore } from '../../src/stores/transcription';
 import { api } from '../../src/lib/api';
-import { splitFileIntoChunks } from '../../src/lib/audio';
+import { splitFileIntoChunkParts } from '../../src/lib/audio';
 
 const mockCreateJob = vi.mocked(api.transcribe.createJob);
 const mockGetJob = vi.mocked(api.transcribe.getJob);
 const mockGetResult = vi.mocked(api.transcribe.getResult);
-const mockSplit = vi.mocked(splitFileIntoChunks);
+const mockSplit = vi.mocked(splitFileIntoChunkParts);
 
 describe('Transcription store', () => {
   beforeEach(() => {
@@ -64,6 +70,8 @@ describe('Transcription store', () => {
       stagedFile: null,
       stagedUrl: '',
       savedDocumentId: null,
+      sourceAudioUrl: null,
+      urlStartedAt: null,
     });
   });
 
@@ -76,7 +84,10 @@ describe('Transcription store', () => {
 
   it('createJob splits file, uploads chunks, registers, and runs', async () => {
     const chunkBlob = new Blob(['wav-data'], { type: 'audio/wav' });
-    mockSplit.mockResolvedValue([chunkBlob, chunkBlob]);
+    mockSplit.mockResolvedValue([
+      { blob: chunkBlob, durationSeconds: 120, rmsLevel: 0.01 },
+      { blob: chunkBlob, durationSeconds: 120, rmsLevel: 0.01 },
+    ]);
     mockCreateJob.mockResolvedValue({
       id: 'job-1', status: 'pending', processed_chunks: 0, total_chunks: 2,
     });
@@ -86,22 +97,29 @@ describe('Transcription store', () => {
     await useTranscriptionStore.getState().createJob(file);
 
     expect(useTranscriptionStore.getState().jobs[0]?.id).toBe('job-1');
-    expect(mockSplit).toHaveBeenCalledWith(file);
+    expect(mockSplit).toHaveBeenCalledWith(file, { chunkDurationMs: 120000, channels: 2 });
     expect(mockCreateJob).toHaveBeenCalledWith(expect.objectContaining({ total_chunks: 2 }));
-    expect(mockUpload).toHaveBeenCalledTimes(2);
+    expect(mockUpload).toHaveBeenCalledTimes(3);
     expect(mockUpload).toHaveBeenNthCalledWith(
-      1,
-      'chunks/job-1/0.wav',
+      2,
+      'user-123/chunks/job-1/0.wav',
       expect.any(ArrayBuffer),
       { contentType: 'audio/wav' },
     );
     expect(api.transcribe.registerChunk).toHaveBeenCalledTimes(2);
+    expect(api.transcribe.registerChunk).toHaveBeenNthCalledWith(
+      1,
+      'job-1',
+      expect.objectContaining({ index: 0, duration_seconds: 120, rms_level: 0.01, chunk_bytes: expect.any(Number) }),
+    );
     expect(api.transcribe.run).toHaveBeenCalledWith('job-1', { max_chunks: 5 });
+    const job = useTranscriptionStore.getState().jobs[0];
+    expect(resolveTranscriptionJobStage(job)).toBe('completed');
   });
 
   it('createJob preserves non-wav chunk content type and extension', async () => {
     const m4aChunk = new Blob(['m4a-data'], { type: 'audio/mp4' });
-    mockSplit.mockResolvedValue([m4aChunk]);
+    mockSplit.mockResolvedValue([{ blob: m4aChunk, durationSeconds: 120, rmsLevel: 0.01 }]);
     mockCreateJob.mockResolvedValue({
       id: 'job-1', status: 'pending', processed_chunks: 0, total_chunks: 1,
     });
@@ -111,14 +129,14 @@ describe('Transcription store', () => {
     await useTranscriptionStore.getState().createJob(file);
 
     expect(mockUpload).toHaveBeenCalledWith(
-      'chunks/job-1/0.m4a',
+      'user-123/chunks/job-1/0.m4a',
       expect.any(ArrayBuffer),
       { contentType: 'audio/mp4' },
     );
   });
 
   it('createJob sets error on failure', async () => {
-    mockSplit.mockResolvedValue([new Blob(['x'])]);
+    mockSplit.mockResolvedValue([{ blob: new Blob(['x']), durationSeconds: 0, rmsLevel: 0 }]);
     mockCreateJob.mockRejectedValue(new Error('API error: 500'));
 
     const file = new File(['audio'], 'test.wav', { type: 'audio/wav' });
@@ -130,7 +148,7 @@ describe('Transcription store', () => {
 
   it('marks job paused when run returns plan limit', async () => {
     const chunkBlob = new Blob(['wav-data'], { type: 'audio/wav' });
-    mockSplit.mockResolvedValue([chunkBlob]);
+    mockSplit.mockResolvedValue([{ blob: chunkBlob, durationSeconds: 120, rmsLevel: 0.01 }]);
     mockCreateJob.mockResolvedValue({
       id: 'job-1', status: 'pending', processed_chunks: 0, total_chunks: 1,
     });
@@ -148,7 +166,7 @@ describe('Transcription store', () => {
 
   it('marks job failed for generic 500 even if message mentions transcribe_seconds', async () => {
     const chunkBlob = new Blob(['wav-data'], { type: 'audio/wav' });
-    mockSplit.mockResolvedValue([chunkBlob]);
+    mockSplit.mockResolvedValue([{ blob: chunkBlob, durationSeconds: 120, rmsLevel: 0.01 }]);
     mockCreateJob.mockResolvedValue({
       id: 'job-1', status: 'pending', processed_chunks: 0, total_chunks: 1,
     });
@@ -238,6 +256,8 @@ describe('Transcription store', () => {
       title: 'call.m4a',
       content: '<p>Speaker 1: Hola</p><p><br></p><p>Speaker 2: Buenas</p>',
       source: 'transcription',
+      source_id: 'job-1',
+      audio_url: undefined,
     });
     expect(useTranscriptionStore.getState().savedDocumentId).toBe('doc-1');
   });
@@ -245,6 +265,21 @@ describe('Transcription store', () => {
   it('setActiveJob updates activeJobId', () => {
     useTranscriptionStore.getState().setActiveJob('job-2');
     expect(useTranscriptionStore.getState().activeJobId).toBe('job-2');
+  });
+
+  it('resolveTranscriptionJobProgress uses upload counters while uploading', () => {
+    const progress = resolveTranscriptionJobProgress({
+      id: 'job-1',
+      status: 'pending',
+      processed_chunks: 0,
+      total_chunks: 10,
+      stage: 'uploading',
+      uploadedChunks: 4,
+      uploadTotalChunks: 8,
+    });
+    expect(progress.done).toBe(4);
+    expect(progress.total).toBe(8);
+    expect(progress.pct).toBe(50);
   });
 
   it('reset clears all state', () => {

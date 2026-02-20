@@ -59,6 +59,9 @@ contextBridge.exposeInMainWorld('whisperall', {
   undoPaste: () => ipcRenderer.send('clipboard:undo'),
 
   // ── Auth ───────────────────────────────────────────────────
+  getAuthStorageItem: (key: string) => ipcRenderer.invoke('auth-storage:get', key) as Promise<string | null>,
+  setAuthStorageItem: (key: string, value: string) => ipcRenderer.invoke('auth-storage:set', key, value) as Promise<void>,
+  removeAuthStorageItem: (key: string) => ipcRenderer.invoke('auth-storage:remove', key) as Promise<void>,
   onAuthCallback: (cb: (url: string) => void): Unsubscribe => {
     const handler = (_e: Electron.IpcRendererEvent, url: string) => cb(url);
     ipcRenderer.on('auth:callback', handler);

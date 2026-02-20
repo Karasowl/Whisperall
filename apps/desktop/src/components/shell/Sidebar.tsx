@@ -12,10 +12,10 @@ const NAV_KEYS: { id: Page; key: string; icon: string }[] = [
   { id: 'history', key: 'nav.history', icon: 'history' },
 ];
 
-const RESOURCES: (keyof UsageRecord)[] = ['stt_seconds', 'transcribe_seconds', 'tts_chars', 'translate_chars', 'ai_edit_tokens', 'notes_count'];
+const RESOURCES: (keyof UsageRecord)[] = ['stt_seconds', 'transcribe_seconds', 'tts_chars', 'translate_chars', 'ai_edit_tokens', 'notes_count', 'storage_bytes'];
 const RESOURCE_LABELS: Record<string, string> = {
   stt_seconds: 'usage.dictation', transcribe_seconds: 'usage.transcription', tts_chars: 'usage.tts',
-  translate_chars: 'usage.translation', ai_edit_tokens: 'usage.aiEditing', notes_count: 'usage.notes',
+  translate_chars: 'usage.translation', ai_edit_tokens: 'usage.aiEditing', notes_count: 'usage.notes', storage_bytes: 'usage.storage',
 };
 
 type Props = { page: Page; onNavigate: (p: Page) => void; onOpenSettings: () => void; onOpenPricing: () => void };

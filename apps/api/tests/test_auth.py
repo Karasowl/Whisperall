@@ -181,3 +181,5 @@ def test_plan_limits_structure():
         assert "translate_chars" in limits
         assert "transcribe_seconds" in limits
         assert "ai_edit_tokens" in limits
+        assert "notes_count" in limits
+        assert "storage_bytes" in limits

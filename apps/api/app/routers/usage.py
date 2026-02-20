@@ -10,7 +10,7 @@ router = APIRouter(prefix="/v1/usage", tags=["usage"])
 
 EMPTY_USAGE = {
     "stt_seconds": 0, "tts_chars": 0, "translate_chars": 0,
-    "transcribe_seconds": 0, "ai_edit_tokens": 0, "notes_count": 0,
+    "transcribe_seconds": 0, "ai_edit_tokens": 0, "notes_count": 0, "storage_bytes": 0,
 }
 
 
@@ -63,7 +63,7 @@ async def get_usage(response: Response, user: AuthUser = Depends(get_current_use
         try:
             usage_row = (
                 db.table("usage")
-                .select("stt_seconds, tts_chars, translate_chars, transcribe_seconds, ai_edit_tokens, notes_count")
+                .select("stt_seconds, tts_chars, translate_chars, transcribe_seconds, ai_edit_tokens, notes_count, storage_bytes")
                 .eq("user_id", user.user_id)
                 .eq("month", period_start.date().isoformat())
                 .maybe_single()
@@ -77,7 +77,7 @@ async def get_usage(response: Response, user: AuthUser = Depends(get_current_use
 
     limits = PLAN_LIMITS.get(normalize_plan(plan), PLAN_LIMITS["free"])
     usage_payload = usage
-    limits_payload = {**limits, "notes_count": _int_or_zero(limits.get("notes_count", 0))}
+    limits_payload = {k: _int_or_zero(limits.get(k, 0)) for k in EMPTY_USAGE}
 
     return {
         "plan": normalize_plan(plan),

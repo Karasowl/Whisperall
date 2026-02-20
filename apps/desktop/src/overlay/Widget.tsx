@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
-import { useWidgetStore, OVERLAY_BASE_SIZE, SUBTITLE_SIZE } from './widget-store';
+import { useWidgetStore, OVERLAY_BAR_SIZE, OVERLAY_DICTATING_SIZE, SUBTITLE_SIZE } from './widget-store';
 import type { WidgetModule } from './widget-store';
 import { electron } from '../lib/electron';
 import { getMicStream, stopMicStream, createRecorder } from '../lib/audio';
@@ -10,11 +10,10 @@ import { requestPlanRefresh } from '../stores/plan';
 import { t as i18nT } from '../lib/i18n';
 import { inferTTSLanguage } from '../lib/lang-detect';
 import type { TTSProgress } from '../lib/tts';
-import { downloadTTSAudio, hasTTSAudio, pauseTTS, resumeTTS, seekTTSOverall, setTTSPlaybackRate, startReading, stopTTS } from '../lib/tts';
+import { pauseTTS, resumeTTS, setTTSPlaybackRate, startReading, stopTTS } from '../lib/tts';
 
 let recorder: MediaRecorder | null = null;
 let audioChunks: Blob[] = [];
-const READER_SPEEDS = [1, 1.5, 2, 3, 4];
 const CUSTOM_PROMPTS_KEY = 'whisperall-custom-prompts';
 
 type CustomPrompt = { id: string; name: string; prompt: string };
@@ -36,8 +35,8 @@ function Waveform({ processing }: { processing?: boolean }): JSX.Element {
 export function Widget() {
   const t = useWT();
   const {
-    mode, activeModule, dictateStatus, text, translatedText, error, dragging,
-    expand, collapse, switchModule, setTranslatedText, startDictation,
+    mode, dictateStatus, translatedText, dragging,
+    collapse, switchModule, setTranslatedText, startDictation,
     stopDictation, setDone, setError, resetDictation, setDragging,
   } = useWidgetStore();
   const hotkeyMode = useSettingsStore((s) => s.hotkeyMode);
@@ -51,17 +50,15 @@ export function Widget() {
   const [subtitleRaw, setSubtitleRaw] = useState('');
   const [subtitleTranslateEnabled, setSubtitleTranslateEnabled] = useState(true);
   const [readerProgress, setReaderProgress] = useState<TTSProgress>(IDLE_READER_PROGRESS);
-  const [pendingReaderSeek, setPendingReaderSeek] = useState<number | null>(null);
-  const [readerSpeedIdx, setReaderSpeedIdx] = useState(0);
-  const [translatorInput, setTranslatorInput] = useState('');
-  const [translatorOutput, setTranslatorOutput] = useState('');
-  const [translatorTarget, setTranslatorTarget] = useState(translateTo || 'es');
   const [quickOpen, setQuickOpen] = useState(false);
   const quickCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draggingRef = useRef(dragging);
 
   useEffect(() => {
-    const size = mode === 'subtitles' ? SUBTITLE_SIZE : OVERLAY_BASE_SIZE;
+    const size =
+      mode === 'subtitles' ? SUBTITLE_SIZE :
+      mode === 'dictating' ? OVERLAY_DICTATING_SIZE :
+      OVERLAY_BAR_SIZE;
     electron?.resizeOverlay(size);
   }, [mode]);
 
@@ -92,10 +89,6 @@ export function Widget() {
     }, 160);
   }, [cancelQuickClose]);
 
-  useEffect(() => {
-    setTranslatorTarget(translateTo || 'es');
-  }, [translateTo]);
-
   const promptOptions = useMemo(() => {
     const base = [{ id: 'default', name: t('widget.promptDefault'), prompt: '' }];
     try {
@@ -108,7 +101,7 @@ export function Widget() {
   }, [t]);
 
   const selectedPrompt = promptOptions.find((p) => p.id === selectedPromptId) ?? promptOptions[0];
-  const readerSpeed = READER_SPEEDS[readerSpeedIdx];
+  const readerSpeed = 1;
 
   const endDrag = useCallback(() => {
     if (!dragging) return;
@@ -127,10 +120,6 @@ export function Widget() {
     if (!dragging) return;
     electron?.overlayDragMove({ screenX: e.screenX, screenY: e.screenY });
   }, [dragging]);
-
-  useEffect(() => {
-    if (readerProgress.status === 'idle') setPendingReaderSeek(null);
-  }, [readerProgress.status]);
 
   const loadClipboardText = useCallback(async () => {
     try {
@@ -161,39 +150,22 @@ export function Widget() {
   const handleReaderStop = useCallback(() => {
     stopTTS();
     setReaderProgress(IDLE_READER_PROGRESS);
-    setPendingReaderSeek(null);
-  }, []);
-
-  const handleReaderDownload = useCallback(() => {
-    const blob = downloadTTSAudio();
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'reading.mp3';
-    a.click();
-    URL.revokeObjectURL(url);
   }, []);
 
   const handleTranslateClipboard = useCallback(async () => {
     const clip = await loadClipboardText();
     if (!clip) return;
-    setTranslatorInput(clip);
     try {
-      const res = await api.translate.translate({ text: clip, target_language: translatorTarget });
+      const res = await api.translate.translate({ text: clip, target_language: translateTo || 'es' });
       requestPlanRefresh();
-      setTranslatorOutput(res.text);
+      electron?.setDictationText(res.text);
+      try {
+        await navigator.clipboard.writeText(res.text);
+      } catch {
+        // best-effort
+      }
     } catch { /* best-effort */ }
-  }, [loadClipboardText, translatorTarget]);
-
-  const handleTranslateFromInput = useCallback(async () => {
-    if (!translatorInput.trim()) return;
-    try {
-      const res = await api.translate.translate({ text: translatorInput, target_language: translatorTarget });
-      requestPlanRefresh();
-      setTranslatorOutput(res.text);
-    } catch { /* best-effort */ }
-  }, [translatorInput, translatorTarget]);
+  }, [loadClipboardText, translateTo]);
 
   useEffect(() => {
     return electron?.onHotkey((action) => {
@@ -202,10 +174,10 @@ export function Widget() {
         if (s === 'recording') handleStop(); else handleStart();
       } else if (action === 'dictate-start') handleStart();
       else if (action === 'dictate-stop') handleStop();
-      else if (action === 'read-clipboard') { switchModule('reader'); void handleReaderPrimary(); }
-      else if (action === 'translate') { switchModule('translator'); void handleTranslateClipboard(); }
+      else if (action === 'read-clipboard') { void handleReaderPrimary(); }
+      else if (action === 'translate') { void handleTranslateClipboard(); }
     });
-  }, [handleReaderPrimary, handleTranslateClipboard, switchModule]);
+  }, [handleReaderPrimary, handleTranslateClipboard]);
 
   useEffect(() => {
     return electron?.onOverlayVisible((visible) => {
@@ -214,8 +186,13 @@ export function Widget() {
   }, [collapse]);
 
   useEffect(() => {
-    return electron?.onOverlaySwitchModule((m) => switchModule(m as WidgetModule));
-  }, [switchModule]);
+    return electron?.onOverlaySwitchModule((m) => {
+      const module = m as WidgetModule;
+      switchModule(module);
+      if (module === 'reader') void handleReaderPrimary();
+      if (module === 'translator') void handleTranslateClipboard();
+    });
+  }, [handleReaderPrimary, handleTranslateClipboard, switchModule]);
 
   useEffect(() => {
     return electron?.onSubtitleText((txt) => setSubtitleRaw(txt));
@@ -297,9 +274,6 @@ export function Widget() {
     setQuickOpen(false);
   };
 
-  const readerDuration = Math.max(readerProgress.overallDuration, 0);
-  const readerHasAudio = hasTTSAudio();
-
   if (mode === 'subtitles') {
     return (
       <div className="widget-subtitles">
@@ -334,182 +308,9 @@ export function Widget() {
     );
   }
 
-  if (mode === 'panel') {
-    const tabs: { module: WidgetModule; icon: string }[] = [
-      { module: 'dictate', icon: 'mic' },
-      { module: 'reader', icon: 'volume_up' },
-      { module: 'translator', icon: 'translate' },
-      { module: 'subtitles', icon: 'subtitles' },
-    ];
-    return (
-      <div className="widget-expanded">
-        <div className="widget-header">
-          <div
-            className="widget-drag-handle"
-            onPointerDown={startDrag}
-            onPointerMove={moveDrag}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
-          >
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className="widget-tabs">
-            {tabs.map((tab) => (
-              <button
-                key={tab.module}
-                className={`widget-tab ${activeModule === tab.module ? 'active' : ''}`}
-                onClick={() => switchModule(tab.module)}
-                title={tab.module}
-              >
-                <span className="material-symbols-outlined">{tab.icon}</span>
-              </button>
-            ))}
-          </div>
-          <button className="widget-btn-icon" onClick={handleClose} title={t('widget.minimize')}>
-            <span className="material-symbols-outlined">close</span>
-          </button>
-        </div>
-        <div className="widget-body">
-          {activeModule === 'dictate' && dictateStatus === 'idle' && (
-            <div className="widget-module-stack">
-              <label className="widget-label" htmlFor="widget-prompt-select">{t('widget.prompt')}</label>
-              <select
-                id="widget-prompt-select"
-                className="widget-select"
-                value={selectedPromptId}
-                onChange={(e) => setSelectedPromptId(e.target.value)}
-              >
-                {promptOptions.map((prompt) => (
-                  <option key={prompt.id} value={prompt.id}>{prompt.name}</option>
-                ))}
-              </select>
-              <button className="widget-btn-record" onClick={handleStart}>
-                <span className="material-symbols-outlined">mic</span> {t('widget.dictate')}
-              </button>
-            </div>
-          )}
-          {activeModule === 'dictate' && dictateStatus === 'done' && text && (
-            <div className="widget-result">
-              <p className="widget-text">{text}</p>
-              <p className="widget-hint">{t('widget.autoPasted')}</p>
-              <div className="widget-actions">
-                <button className="widget-btn-primary" onClick={() => electron?.pasteText(text)}>
-                  <span className="material-symbols-outlined">content_paste</span> {t('widget.paste')}
-                </button>
-                <button className="widget-btn-ghost" onClick={resetDictation}>{t('widget.again')}</button>
-              </div>
-            </div>
-          )}
-          {activeModule === 'dictate' && dictateStatus === 'error' && (
-            <div className="widget-error">
-              <span>{error}</span>
-              <button className="widget-btn-ghost" onClick={resetDictation}>{t('widget.retry')}</button>
-            </div>
-          )}
-          {activeModule === 'reader' && (
-            <div className="widget-module-stack">
-              <div className="widget-reader-actions">
-                <button className="widget-btn-record" onClick={() => { void handleReaderPrimary(); }}>
-                  <span className="material-symbols-outlined">
-                    {readerProgress.status === 'playing' ? 'pause' : 'play_arrow'}
-                  </span>
-                  {t('widget.readClipboard')}
-                </button>
-                <button
-                  className="widget-btn-ghost"
-                  onClick={() => setReaderSpeedIdx((idx) => {
-                    const nextIdx = (idx + 1) % READER_SPEEDS.length;
-                    const nextSpeed = READER_SPEEDS[nextIdx];
-                    setTTSPlaybackRate(nextSpeed);
-                    setReaderProgress((p) => ({ ...p, rate: nextSpeed }));
-                    return nextIdx;
-                  })}
-                >
-                  {t('widget.readerSpeed')}: {readerSpeed.toFixed(readerSpeed % 1 === 0 ? 0 : 1)}x
-                </button>
-                <button
-                  className="widget-btn-ghost"
-                  onClick={handleReaderStop}
-                  disabled={readerProgress.status === 'idle'}
-                  title={t('widget.stop')}
-                >
-                  <span className="material-symbols-outlined">stop</span>
-                </button>
-                <button
-                  className="widget-btn-ghost"
-                  onClick={handleReaderDownload}
-                  disabled={!readerHasAudio}
-                  title={t('reader.download')}
-                >
-                  <span className="material-symbols-outlined">download</span>
-                </button>
-              </div>
-              <label className="widget-label" htmlFor="widget-reader-slider">
-                {t('widget.readerSlider')}
-              </label>
-              <input
-                id="widget-reader-slider"
-                type="range"
-                min={0}
-                max={readerDuration || 0}
-                step={0.01}
-                disabled={readerProgress.status === 'idle' || !readerDuration}
-                value={Math.min(pendingReaderSeek ?? readerProgress.overallTime, readerDuration)}
-                onChange={(e) => {
-                  setPendingReaderSeek(Number(e.target.value));
-                }}
-                onMouseUp={(e) => { seekTTSOverall(Number((e.target as HTMLInputElement).value)); setPendingReaderSeek(null); }}
-                onTouchEnd={(e) => { seekTTSOverall(Number((e.target as HTMLInputElement).value)); setPendingReaderSeek(null); }}
-                onKeyUp={(e) => { seekTTSOverall(Number((e.target as HTMLInputElement).value)); setPendingReaderSeek(null); }}
-                className="widget-slider"
-              />
-            </div>
-          )}
-          {activeModule === 'translator' && (
-            <div className="widget-module-stack">
-              <label className="widget-label" htmlFor="widget-translate-target">{t('widget.translationTarget')}</label>
-              <select
-                id="widget-translate-target"
-                className="widget-select"
-                value={translatorTarget}
-                onChange={(e) => setTranslatorTarget(e.target.value)}
-              >
-                <option value="en">English</option>
-                <option value="es">Espanol</option>
-                <option value="fr">Francais</option>
-                <option value="de">Deutsch</option>
-                <option value="pt">Portugues</option>
-                <option value="ja">日本語</option>
-                <option value="zh">中文</option>
-              </select>
-              <div className="widget-actions">
-                <button className="widget-btn-record" onClick={() => { void handleTranslateClipboard(); }}>
-                  <span className="material-symbols-outlined">content_paste</span> {t('widget.translateClipboard')}
-                </button>
-                <button className="widget-btn-ghost" onClick={() => { void handleTranslateFromInput(); }}>
-                  {t('widget.translateNow')}
-                </button>
-              </div>
-              <textarea
-                className="widget-textarea"
-                value={translatorInput}
-                onChange={(e) => setTranslatorInput(e.target.value)}
-                placeholder={t('widget.translateHint')}
-              />
-              {translatorOutput && <p className="widget-text">{translatorOutput}</p>}
-              <p className="widget-hint">{t('widget.translateHint')}</p>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   if (mode === 'dictating') {
     return (
-      <div className="widget-base">
+      <div className="widget-base widget-base-dictating">
         <div
           className="widget-drag-handle"
           onPointerDown={startDrag}
@@ -585,13 +386,24 @@ export function Widget() {
           </button>
           <button
             className="hover-btn"
-            onClick={() => switchModule('translator')}
+            onClick={() => { void handleReaderPrimary(); }}
+            title={t('widget.readClipboard')}
+          >
+            <span className="material-symbols-outlined">
+              {readerProgress.status === 'playing' ? 'pause' : 'volume_up'}
+            </span>
+          </button>
+          {readerProgress.status !== 'idle' && (
+            <button className="hover-btn" onClick={handleReaderStop} title={t('widget.stop')}>
+              <span className="material-symbols-outlined">stop</span>
+            </button>
+          )}
+          <button
+            className="hover-btn"
+            onClick={() => { void handleTranslateClipboard(); }}
             title={t('widget.translateClipboard')}
           >
             <span className="material-symbols-outlined">translate</span>
-          </button>
-          <button className="hover-btn" onClick={() => expand()} title={t('widget.minimize')}>
-            <span className="material-symbols-outlined">open_in_full</span>
           </button>
         </div>
       )}

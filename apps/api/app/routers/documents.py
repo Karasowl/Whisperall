@@ -1,4 +1,7 @@
 import logging
+from collections.abc import Callable
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -7,12 +10,17 @@ from ..db import get_supabase_or_none
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/documents", tags=["documents"])
+OPTIONAL_COMPAT_COLUMNS = ("audio_url", "source_id")
+OPTIONAL_TRANSCRIPTION_COMPAT_COLUMNS = ("block_id", "source")
+TRANSCRIPTION_HISTORY_LIMIT = 200
 
 
 class CreateDocReq(BaseModel):
     title: str
     content: str
     source: str | None = None
+    source_id: str | None = None
+    audio_url: str | None = None
     tags: list[str] = []
     folder_id: str | None = None
 
@@ -20,8 +28,20 @@ class CreateDocReq(BaseModel):
 class UpdateDocReq(BaseModel):
     title: str | None = None
     content: str | None = None
+    source_id: str | None = None
+    audio_url: str | None = None
     tags: list[str] | None = None
     folder_id: str | None = None
+
+
+class CreateTranscriptionEntryReq(BaseModel):
+    block_id: str | None = None
+    source: str | None = None
+    language: str = "auto"
+    diarization: bool = False
+    text: str
+    segments: list[dict] = []
+    audio_url: str | None = None
 
 
 def _get_db():
@@ -29,6 +49,54 @@ def _get_db():
     if not db:
         raise HTTPException(503, "Database not configured")
     return db
+
+
+def _error_mentions_missing_column(exc: Exception, column: str) -> bool:
+    msg = str(exc).lower()
+    return f"'{column}' column" in msg or f"\"{column}\" column" in msg
+
+
+def _execute_with_optional_column_fallback(
+    *,
+    payload: dict[str, Any],
+    operation: str,
+    run: Callable[[dict[str, Any]], Any],
+):
+    attempted = dict(payload)
+    last_exc: Exception | None = None
+    max_attempts = len(OPTIONAL_COMPAT_COLUMNS) + 1
+    for _ in range(max_attempts):
+        try:
+            return run(dict(attempted))
+        except Exception as exc:
+            missing = [c for c in OPTIONAL_COMPAT_COLUMNS if c in attempted and _error_mentions_missing_column(exc, c)]
+            if not missing:
+                raise
+            last_exc = exc
+            for c in missing:
+                attempted.pop(c, None)
+            log.warning(
+                "documents %s retry without missing schema-cache columns: %s",
+                operation,
+                ", ".join(missing),
+            )
+            if not attempted:
+                return None
+    if last_exc:
+        raise last_exc
+    return None
+
+
+def _get_document_row(db, *, doc_id: str, user_id: str):
+    res = db.table("documents").select("*").eq("id", doc_id).eq("user_id", user_id).maybe_single().execute()
+    return res.data
+
+
+def _assert_document_owner(db, *, doc_id: str, user_id: str):
+    row = _get_document_row(db, doc_id=doc_id, user_id=user_id)
+    if not row:
+        raise HTTPException(404, "Not found")
+    return row
 
 
 @router.get("")
@@ -50,10 +118,10 @@ async def list_documents(user: AuthUser = Depends(get_current_user), folder_id: 
 @router.get("/{doc_id}")
 async def get_document(doc_id: str, user: AuthUser = Depends(get_current_user)):
     db = _get_db()
-    res = db.table("documents").select("*").eq("id", doc_id).eq("user_id", user.user_id).maybe_single().execute()
-    if not res.data:
+    row = _get_document_row(db, doc_id=doc_id, user_id=user.user_id)
+    if not row:
         raise HTTPException(404, "Not found")
-    return res.data
+    return row
 
 
 @router.post("")
@@ -63,11 +131,21 @@ async def create_document(req: CreateDocReq, user: AuthUser = Depends(get_curren
     try:
         insert_data: dict = {
             "user_id": user.user_id, "title": req.title,
-            "content": req.content, "source": req.source, "tags": req.tags,
+            "content": req.content,
+            "source": req.source,
+            "source_id": req.source_id,
+            "audio_url": req.audio_url,
+            "tags": req.tags,
         }
         if req.folder_id:
             insert_data["folder_id"] = req.folder_id
-        res = db.table("documents").insert(insert_data).execute()
+        res = _execute_with_optional_column_fallback(
+            payload=insert_data,
+            operation="create",
+            run=lambda payload: db.table("documents").insert(payload).execute(),
+        )
+        if not res or not getattr(res, "data", None):
+            raise HTTPException(500, "Failed to create document")
         try:
             db.rpc("increment_usage", {"p_user_id": user.user_id, "p_notes_count": 1}).execute()
         except Exception as exc:
@@ -90,11 +168,21 @@ async def create_document(req: CreateDocReq, user: AuthUser = Depends(get_curren
 async def update_document(doc_id: str, req: UpdateDocReq, user: AuthUser = Depends(get_current_user)):
     db = _get_db()
     dumped = req.model_dump(exclude_unset=True)
-    data = {k: v for k, v in dumped.items() if v is not None or k == "folder_id"}
+    nullable_update_fields = {"folder_id", "source_id", "audio_url"}
+    data = {k: v for k, v in dumped.items() if v is not None or k in nullable_update_fields}
     if not data:
         raise HTTPException(400, "No fields to update")
     try:
-        res = db.table("documents").update(data).eq("id", doc_id).eq("user_id", user.user_id).execute()
+        res = _execute_with_optional_column_fallback(
+            payload=data,
+            operation="update",
+            run=lambda payload: db.table("documents").update(payload).eq("id", doc_id).eq("user_id", user.user_id).execute(),
+        )
+        if not res:
+            row = _get_document_row(db, doc_id=doc_id, user_id=user.user_id)
+            if not row:
+                raise HTTPException(404, "Not found")
+            return row
         if not res.data:
             raise HTTPException(404, "Not found")
         return res.data[0]
@@ -103,6 +191,107 @@ async def update_document(doc_id: str, req: UpdateDocReq, user: AuthUser = Depen
     except Exception as e:
         log.error("update_document failed: %s", e)
         raise HTTPException(500, f"Failed to update document: {e}")
+
+
+@router.get("/{doc_id}/transcriptions")
+async def list_transcription_history(doc_id: str, user: AuthUser = Depends(get_current_user), block_id: str | None = None):
+    db = _get_db()
+    _assert_document_owner(db, doc_id=doc_id, user_id=user.user_id)
+    try:
+        q = (
+            db.table("document_transcriptions")
+            .select("*")
+            .eq("document_id", doc_id)
+            .eq("user_id", user.user_id)
+        )
+        if block_id:
+            q = q.eq("block_id", block_id)
+        try:
+            res = q.order("created_at", desc=True).limit(TRANSCRIPTION_HISTORY_LIMIT).execute()
+        except Exception as exc:
+            if block_id and _error_mentions_missing_column(exc, "block_id"):
+                # Backward compatibility for instances where migration adding block_id is pending.
+                res = (
+                    db.table("document_transcriptions")
+                    .select("*")
+                    .eq("document_id", doc_id)
+                    .eq("user_id", user.user_id)
+                    .order("created_at", desc=True)
+                    .limit(TRANSCRIPTION_HISTORY_LIMIT)
+                    .execute()
+                )
+            else:
+                raise
+        return res.data or []
+    except Exception as e:
+        log.error("list_transcription_history failed: %s", e)
+        raise HTTPException(500, f"Failed to list transcription history: {e}")
+
+
+@router.post("/{doc_id}/transcriptions")
+async def create_transcription_entry(doc_id: str, req: CreateTranscriptionEntryReq, user: AuthUser = Depends(get_current_user)):
+    db = _get_db()
+    _assert_document_owner(db, doc_id=doc_id, user_id=user.user_id)
+    try:
+        payload = {
+            "user_id": user.user_id,
+            "document_id": doc_id,
+            "block_id": req.block_id,
+            "source": req.source,
+            "language": req.language or "auto",
+            "diarization": bool(req.diarization),
+            "text": req.text or "",
+            "segments": req.segments or [],
+            "audio_url": req.audio_url,
+        }
+        attempted = dict(payload)
+        while True:
+            try:
+                res = db.table("document_transcriptions").insert(dict(attempted)).execute()
+                break
+            except Exception as exc:
+                missing = [c for c in OPTIONAL_TRANSCRIPTION_COMPAT_COLUMNS if c in attempted and _error_mentions_missing_column(exc, c)]
+                if not missing:
+                    raise
+                for c in missing:
+                    attempted.pop(c, None)
+                log.warning(
+                    "documents create_transcription retry without missing schema-cache columns: %s",
+                    ", ".join(missing),
+                )
+                if not attempted:
+                    raise
+        if not res.data:
+            raise HTTPException(500, "Failed to create transcription entry")
+        return res.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("create_transcription_entry failed: %s", e)
+        raise HTTPException(500, f"Failed to create transcription entry: {e}")
+
+
+@router.delete("/{doc_id}/transcriptions/{entry_id}")
+async def delete_transcription_entry(doc_id: str, entry_id: str, user: AuthUser = Depends(get_current_user)):
+    db = _get_db()
+    _assert_document_owner(db, doc_id=doc_id, user_id=user.user_id)
+    try:
+        res = (
+            db.table("document_transcriptions")
+            .delete()
+            .eq("id", entry_id)
+            .eq("document_id", doc_id)
+            .eq("user_id", user.user_id)
+            .execute()
+        )
+        if isinstance(res.data, list) and len(res.data) == 0:
+            raise HTTPException(404, "Not found")
+        return {"status": "deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("delete_transcription_entry failed: %s", e)
+        raise HTTPException(500, f"Failed to delete transcription entry: {e}")
 
 
 @router.delete("/{doc_id}")

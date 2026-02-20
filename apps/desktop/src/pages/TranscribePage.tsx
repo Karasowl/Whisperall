@@ -1,5 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useTranscriptionStore } from '../stores/transcription';
+import {
+  resolveTranscriptionJobProgress,
+  resolveTranscriptionJobStage,
+  transcriptionStageDetailKey,
+  transcriptionStageLabelKey,
+  useTranscriptionStore,
+} from '../stores/transcription';
 import { useDocumentsStore } from '../stores/documents';
 import { UploadZone } from '../components/transcribe/UploadZone';
 import { FileCard } from '../components/transcribe/FileCard';
@@ -33,6 +39,17 @@ export function TranscribePage({ onNavigate }: Props) {
       onNavigate('dictate');
     }
   };
+
+  const activeJob = activeJobId ? jobs.find((j) => j.id === activeJobId) : null;
+  const activeStage = activeJob ? resolveTranscriptionJobStage(activeJob) : null;
+  const activeProgress = activeJob ? resolveTranscriptionJobProgress(activeJob) : null;
+  const activeStageLabel = activeStage
+    ? t(transcriptionStageLabelKey(activeStage))
+    : stagedFile
+      ? t('transcribe.stagePreparing')
+      : t('transcribe.processing');
+  const activeStageDetailKey = activeStage ? transcriptionStageDetailKey(activeStage) : null;
+  const activeStageDetail = activeStageDetailKey ? t(activeStageDetailKey) : null;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden p-8 pt-12" data-testid="transcribe-page">
@@ -72,7 +89,14 @@ export function TranscribePage({ onNavigate }: Props) {
           )}
           {loading && (
             <div className="flex items-center gap-3">
-              <p className="text-primary text-sm animate-pulse">{t('transcribe.processing')}</p>
+              <div className="min-w-0">
+                <p className="text-primary text-sm animate-pulse">{activeStageLabel}</p>
+                {activeStageDetail && activeProgress && (
+                  <p className="text-xs text-muted">
+                    {activeStageDetail} ({activeProgress.done}/{activeProgress.total} {t('transcribe.chunks')})
+                  </p>
+                )}
+              </div>
               {urlStartedAt != null && (
                 <>
                   <span className="text-xs text-muted font-mono">{Math.floor(elapsed / 60)}:{(elapsed % 60).toString().padStart(2, '0')}</span>

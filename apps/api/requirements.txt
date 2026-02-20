@@ -21,3 +21,4 @@ odfpy>=1.4.1
 beautifulsoup4>=4.12.3
 trafilatura>=1.9.0
 PyMuPDF>=1.24.14
+markdown>=3.7

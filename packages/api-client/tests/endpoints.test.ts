@@ -8,6 +8,7 @@ import { createAiEditEndpoint } from "../src/endpoints/ai-edit";
 import { createTranscribeEndpoint } from "../src/endpoints/transcribe";
 import { createDictateEndpoint } from "../src/endpoints/dictate";
 import { createLiveEndpoint } from "../src/endpoints/live";
+import { createDocumentsEndpoint } from "../src/endpoints/documents";
 
 const BASE = "http://localhost:8080";
 
@@ -253,5 +254,79 @@ describe("Live endpoint", () => {
 
     expect(capturedForm!.get("session_id")).toBe("sess-1");
     expect(capturedForm!.get("chunk_index")).toBe("5");
+  });
+});
+
+describe("Documents endpoint", () => {
+  it("creates and lists transcription history entries", async () => {
+    let capturedBody: unknown;
+    server.use(
+      http.post(`${BASE}/v1/documents/doc-1/transcriptions`, async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({
+          id: "h-1",
+          document_id: "doc-1",
+          user_id: "u-1",
+          block_id: "block-1",
+          source: "audio",
+          language: "es",
+          diarization: true,
+          text: "hola",
+          segments: [{ text: "hola", speaker: "Speaker 1" }],
+          audio_url: "https://cdn.example.com/a.mp3",
+          created_at: "2026-02-20T00:00:00Z",
+          updated_at: "2026-02-20T00:00:00Z",
+        });
+      }),
+      http.get(`${BASE}/v1/documents/doc-1/transcriptions`, () => {
+        return HttpResponse.json([
+          {
+            id: "h-1",
+            document_id: "doc-1",
+            user_id: "u-1",
+            block_id: "block-1",
+            source: "audio",
+            language: "es",
+            diarization: true,
+            text: "hola",
+            segments: [{ text: "hola", speaker: "Speaker 1" }],
+            audio_url: "https://cdn.example.com/a.mp3",
+            created_at: "2026-02-20T00:00:00Z",
+            updated_at: "2026-02-20T00:00:00Z",
+          },
+        ]);
+      })
+    );
+
+    const documents = createDocumentsEndpoint(makeClient());
+    const created = await documents.createTranscription("doc-1", {
+      block_id: "block-1",
+      source: "audio",
+      language: "es",
+      diarization: true,
+      text: "hola",
+      segments: [{ text: "hola", speaker: "Speaker 1" }],
+      audio_url: "https://cdn.example.com/a.mp3",
+    });
+    const listed = await documents.listTranscriptions("doc-1");
+
+    expect(created.id).toBe("h-1");
+    expect(created.block_id).toBe("block-1");
+    expect(listed).toHaveLength(1);
+    expect((capturedBody as { diarization: boolean }).diarization).toBe(true);
+  });
+
+  it("supports filtering transcription history by block_id", async () => {
+    let hitFiltered = false;
+    server.use(
+      http.get(`${BASE}/v1/documents/doc-1/transcriptions?block_id=block-2`, () => {
+        hitFiltered = true;
+        return HttpResponse.json([]);
+      }),
+    );
+
+    const documents = createDocumentsEndpoint(makeClient());
+    await documents.listTranscriptions("doc-1", "block-2");
+    expect(hitFiltered).toBe(true);
   });
 });

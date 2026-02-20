@@ -2,7 +2,9 @@ import io
 import hashlib
 import logging
 import mimetypes
+import re
 from datetime import datetime, timezone
+from html import escape as html_escape
 from pathlib import Path
 from time import perf_counter
 from urllib.parse import urlparse
@@ -48,6 +50,13 @@ EPUB_MIME = "application/epub+zip"
 RTF_MIME = "application/rtf"
 ODT_MIME = "application/vnd.oasis.opendocument.text"
 HTML_MIME = "text/html"
+MARKDOWN_EXTS = {".md", ".markdown"}
+MARKDOWN_MIME_TYPES = {
+    "text/markdown",
+    "text/x-markdown",
+    "application/markdown",
+    "application/x-markdown",
+}
 
 
 def _raise_reader_http_error(
@@ -72,6 +81,26 @@ def _require_db():
             code="READER_DB_UNAVAILABLE",
         )
     return db
+
+
+def _is_missing_table_error(exc: Exception, table: str) -> bool:
+    msg = str(exc).lower()
+    return (
+        "pgrst205" in msg
+        or f"public.{table.lower()}" in msg
+        or f"relation \"{table.lower()}\" does not exist" in msg
+        or f"relation '{table.lower()}' does not exist" in msg
+    )
+
+
+def _default_progress(document_id: str) -> ReaderProgressResponse:
+    return ReaderProgressResponse(
+        document_id=document_id,
+        char_offset=0,
+        playback_seconds=0,
+        section_index=0,
+        updated_at=datetime.now(timezone.utc),
+    )
 
 
 def _rollout_bucket(user_id: str) -> int:
@@ -161,6 +190,163 @@ def _extract_html_text(html: str) -> str:
     for tag in soup(["script", "style", "noscript"]):
         tag.extract()
     return "\n".join(line.strip() for line in soup.get_text("\n").splitlines() if line.strip())
+
+
+def _slugify_heading(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9\s-]", "", value.lower())
+    slug = re.sub(r"[\s_-]+", "-", slug).strip("-")
+    return slug or "section"
+
+
+def _extract_toc_from_html(html_content: str) -> tuple[str, list[dict]]:
+    soup = BeautifulSoup(html_content, "html.parser")
+    toc: list[dict] = []
+    used_ids: set[str] = set()
+    for heading in soup.find_all(re.compile(r"^h[1-6]$")):
+        title = heading.get_text(" ", strip=True)
+        if not title:
+            continue
+        level = int(heading.name[1]) if heading.name and len(heading.name) > 1 and heading.name[1].isdigit() else 2
+        base = (heading.get("id") or _slugify_heading(title)).strip() or _slugify_heading(title)
+        final_id = base
+        suffix = 2
+        while final_id in used_ids:
+            final_id = f"{base}-{suffix}"
+            suffix += 1
+        used_ids.add(final_id)
+        heading["id"] = final_id
+        toc.append({"id": final_id, "title": title, "level": max(1, min(3, level))})
+    return str(soup), toc
+
+
+def _looks_like_heading_line(line: str) -> bool:
+    if len(line) < 3 or len(line) > 90:
+        return False
+    if line.endswith((".", ":", ";", "?", "!")):
+        return False
+    words = line.split()
+    if len(words) > 12:
+        return False
+    if line.isupper():
+        return True
+    title_case = sum(1 for w in words if w[:1].isupper())
+    return title_case >= max(2, int(len(words) * 0.7))
+
+
+def _plain_text_to_rich_html(text: str) -> tuple[str, list[dict]]:
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    html_parts: list[str] = []
+    toc: list[dict] = []
+    used_ids: set[str] = set()
+    list_mode: str | None = None
+
+    def close_list() -> None:
+        nonlocal list_mode
+        if list_mode:
+            html_parts.append(f"</{list_mode}>")
+            list_mode = None
+
+    def heading_id(title: str) -> str:
+        base = _slugify_heading(title)
+        final_id = base
+        suffix = 2
+        while final_id in used_ids:
+            final_id = f"{base}-{suffix}"
+            suffix += 1
+        used_ids.add(final_id)
+        return final_id
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            close_list()
+            html_parts.append("<p><br></p>")
+            continue
+
+        md_heading = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if md_heading:
+            close_list()
+            level = min(3, len(md_heading.group(1)))
+            title = md_heading.group(2).strip()
+            hid = heading_id(title)
+            toc.append({"id": hid, "title": title, "level": level})
+            html_parts.append(f"<h{level} id=\"{hid}\">{html_escape(title)}</h{level}>")
+            continue
+
+        if _looks_like_heading_line(line):
+            close_list()
+            hid = heading_id(line)
+            toc.append({"id": hid, "title": line, "level": 2})
+            html_parts.append(f"<h2 id=\"{hid}\">{html_escape(line)}</h2>")
+            continue
+
+        bullet = re.match(r"^[-*•]\s+(.+)$", line)
+        if bullet:
+            if list_mode != "ul":
+                close_list()
+                list_mode = "ul"
+                html_parts.append("<ul>")
+            html_parts.append(f"<li>{html_escape(bullet.group(1).strip())}</li>")
+            continue
+
+        numbered = re.match(r"^\d+[\.)]\s+(.+)$", line)
+        if numbered:
+            if list_mode != "ol":
+                close_list()
+                list_mode = "ol"
+                html_parts.append("<ol>")
+            html_parts.append(f"<li>{html_escape(numbered.group(1).strip())}</li>")
+            continue
+
+        close_list()
+        html_parts.append(f"<p>{html_escape(line)}</p>")
+
+    close_list()
+    rich_html = "".join(html_parts).strip() or "<p><br></p>"
+    return rich_html, toc
+
+
+def _markdown_to_rich_html(markdown_text: str) -> tuple[str, list[dict]]:
+    try:
+        import markdown as md  # type: ignore
+
+        rendered = md.markdown(
+            markdown_text.lstrip("\ufeff"),
+            extensions=["extra", "sane_lists", "nl2br"],
+            output_format="html5",
+        )
+        rich_html, toc = _extract_toc_from_html(rendered or "<p><br></p>")
+        return rich_html, toc
+    except Exception as exc:
+        log.warning("reader markdown parse fallback: %s", exc)
+        return _plain_text_to_rich_html(markdown_text)
+
+
+def _build_rich_import_payload(
+    *,
+    file_bytes: bytes,
+    filename: str,
+    content_type: str,
+    text: str,
+) -> tuple[str | None, list[dict]]:
+    ext = Path(filename).suffix.lower()
+    ctype = _normalize_content_type(content_type)
+    is_markdown = ext in MARKDOWN_EXTS or ctype in MARKDOWN_MIME_TYPES
+    if is_markdown:
+        markdown_text = _safe_decode(file_bytes)
+        return _markdown_to_rich_html(markdown_text)
+
+    is_html = ctype == HTML_MIME or ext in {".html", ".htm"}
+    if is_html:
+        raw_html = _safe_decode(file_bytes)
+        soup = BeautifulSoup(raw_html, "html.parser")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.extract()
+        root = soup.body or soup
+        html_content = "".join(str(node) for node in root.contents).strip() or "<p><br></p>"
+        rich_html, toc = _extract_toc_from_html(html_content)
+        return rich_html, toc
+    return _plain_text_to_rich_html(text)
 
 
 def _extract_txt_like(file_bytes: bytes, ext: str) -> str:
@@ -499,6 +685,12 @@ async def import_file(
             language_hint=language_hint,
         )
         title = _title_from_name(filename)
+        rich_html, toc = _build_rich_import_payload(
+            file_bytes=payload,
+            filename=filename,
+            content_type=content_type,
+            text=text,
+        )
         document_id = _save_reader_document(db, user=user, text=text, title=title) if save else None
         elapsed_ms = int((perf_counter() - started) * 1000)
         _record_reader_metric(
@@ -543,6 +735,8 @@ async def import_file(
             title=title,
             source="file",
             document_id=document_id,
+            rich_html=rich_html,
+            toc=toc,
             warning=warning,
         )
     except HTTPException as exc:
@@ -627,6 +821,12 @@ async def import_url(payload: ReaderImportUrlRequest, user: AuthUser = Depends(g
             warning = warning or warning2
 
         title = _title_from_name(filename or payload.url)
+        rich_html, toc = _build_rich_import_payload(
+            file_bytes=content,
+            filename=filename,
+            content_type=content_type,
+            text=text,
+        )
         document_id = _save_reader_document(db, user=user, text=text, title=title) if payload.save else None
         elapsed_ms = int((perf_counter() - started) * 1000)
         _record_reader_metric(
@@ -671,6 +871,8 @@ async def import_url(payload: ReaderImportUrlRequest, user: AuthUser = Depends(g
             title=title,
             source="url",
             document_id=document_id,
+            rich_html=rich_html,
+            toc=toc,
             warning=warning,
         )
     except HTTPException as exc:
@@ -766,16 +968,22 @@ async def upsert_reader_progress(
         "section_index": payload.section_index,
         "updated_at": updated_at,
     }
-    db.table("reader_progress").upsert(row, on_conflict="user_id,document_id").execute()
-    current = (
-        db.table("reader_progress")
-        .select("*")
-        .eq("user_id", user.user_id)
-        .eq("document_id", document_id)
-        .maybe_single()
-        .execute()
-    )
-    out = current.data or row
+    try:
+        db.table("reader_progress").upsert(row, on_conflict="user_id,document_id").execute()
+        current = (
+            db.table("reader_progress")
+            .select("*")
+            .eq("user_id", user.user_id)
+            .eq("document_id", document_id)
+            .maybe_single()
+            .execute()
+        )
+        out = current.data or row
+    except Exception as exc:
+        if not _is_missing_table_error(exc, "reader_progress"):
+            raise
+        log.warning("reader upsert_progress fallback: reader_progress table missing (%s)", exc)
+        out = row
     return ReaderProgressResponse(
         document_id=document_id,
         char_offset=int(out.get("char_offset") or 0),
@@ -790,22 +998,23 @@ async def get_reader_progress(document_id: str, user: AuthUser = Depends(get_cur
     _require_reader_v2_enabled(user)
     db = _require_db()
     _assert_document_owner(db, document_id, user)
-    current = (
-        db.table("reader_progress")
-        .select("*")
-        .eq("user_id", user.user_id)
-        .eq("document_id", document_id)
-        .maybe_single()
-        .execute()
-    )
-    if not current.data:
-        return ReaderProgressResponse(
-            document_id=document_id,
-            char_offset=0,
-            playback_seconds=0,
-            section_index=0,
-            updated_at=datetime.now(timezone.utc),
+    try:
+        current = (
+            db.table("reader_progress")
+            .select("*")
+            .eq("user_id", user.user_id)
+            .eq("document_id", document_id)
+            .maybe_single()
+            .execute()
         )
+    except Exception as exc:
+        if not _is_missing_table_error(exc, "reader_progress"):
+            raise
+        log.warning("reader get_progress fallback: reader_progress table missing (%s)", exc)
+        return _default_progress(document_id)
+
+    if not current.data:
+        return _default_progress(document_id)
     out = current.data
     return ReaderProgressResponse(
         document_id=document_id,
@@ -821,15 +1030,21 @@ async def list_bookmarks(document_id: str, user: AuthUser = Depends(get_current_
     _require_reader_v2_enabled(user)
     db = _require_db()
     _assert_document_owner(db, document_id, user)
-    rows = (
-        db.table("reader_bookmarks")
-        .select("*")
-        .eq("user_id", user.user_id)
-        .eq("document_id", document_id)
-        .order("created_at")
-        .execute()
-    )
-    return rows.data or []
+    try:
+        rows = (
+            db.table("reader_bookmarks")
+            .select("*")
+            .eq("user_id", user.user_id)
+            .eq("document_id", document_id)
+            .order("created_at")
+            .execute()
+        )
+        return rows.data or []
+    except Exception as exc:
+        if not _is_missing_table_error(exc, "reader_bookmarks"):
+            raise
+        log.warning("reader list_bookmarks fallback: reader_bookmarks table missing (%s)", exc)
+        return []
 
 
 @router.post("/bookmarks", response_model=ReaderBookmarkResponse)
@@ -868,15 +1083,21 @@ async def list_annotations(document_id: str, user: AuthUser = Depends(get_curren
     _require_reader_v2_enabled(user)
     db = _require_db()
     _assert_document_owner(db, document_id, user)
-    rows = (
-        db.table("reader_annotations")
-        .select("*")
-        .eq("user_id", user.user_id)
-        .eq("document_id", document_id)
-        .order("created_at")
-        .execute()
-    )
-    return rows.data or []
+    try:
+        rows = (
+            db.table("reader_annotations")
+            .select("*")
+            .eq("user_id", user.user_id)
+            .eq("document_id", document_id)
+            .order("created_at")
+            .execute()
+        )
+        return rows.data or []
+    except Exception as exc:
+        if not _is_missing_table_error(exc, "reader_annotations"):
+            raise
+        log.warning("reader list_annotations fallback: reader_annotations table missing (%s)", exc)
+        return []
 
 
 @router.post("/annotations", response_model=ReaderAnnotationResponse)

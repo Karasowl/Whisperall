@@ -221,6 +221,40 @@ html.dark {
   height: 0;
 }
 
+.prose-editor .wa-transcription-block {
+  border: 1px solid rgba(19, 127, 236, 0.35);
+  background: rgba(19, 127, 236, 0.08);
+  border-radius: 0.75rem;
+  padding: 0.85rem 1rem;
+  margin: 0.85rem 0;
+}
+
+.prose-editor .wa-transcription-block h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #8ec9ff;
+}
+
+.prose-editor .wa-transcription-meta {
+  margin: 0.3rem 0 0.5rem;
+  font-size: 0.74rem;
+  color: var(--theme-muted);
+}
+
+.prose-editor .wa-transcription-link {
+  margin: 0 0 0.45rem;
+}
+
+.prose-editor .wa-transcription-link a {
+  color: #8ec9ff;
+  text-decoration: underline;
+}
+
+.prose-editor .wa-transcription-body p {
+  margin: 0.2rem 0;
+}
+
 /* ── TipTap Bubble Menu ─────────────────────────── */
 .bubble-menu {
   background: #1e293b;

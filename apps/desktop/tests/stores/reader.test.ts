@@ -33,6 +33,7 @@ const DOC = {
   content: 'Hello world',
   source: 'reader',
   source_id: null,
+  audio_url: null,
   tags: [],
   folder_id: null,
   created_at: '2026-02-17T00:00:00Z',
