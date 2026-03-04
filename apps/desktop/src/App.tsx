@@ -13,6 +13,7 @@ import { playTTS } from './lib/tts';
 import { inferTTSLanguage } from './lib/lang-detect';
 import { useT } from './lib/i18n';
 import { PricingContext } from './lib/pricing-context';
+import { useNotesActionsStore } from './stores/notes-actions';
 
 export type Page = 'dictate' | 'transcribe' | 'reader' | 'history';
 
@@ -79,10 +80,12 @@ export default function App() {
   }
 
   const openPricing = () => setShowPricing(true);
+  const { triggerNewNote, triggerVoiceNote, requestDeleteFolder } = useNotesActionsStore();
 
   return (
     <PricingContext.Provider value={openPricing}>
-      <AppShell page={page} onNavigate={handleNavigate} showSettings={showSettings} onToggleSettings={setShowSettings} showPricing={showPricing} onTogglePricing={setShowPricing}>
+      <AppShell page={page} onNavigate={handleNavigate} showSettings={showSettings} onToggleSettings={setShowSettings} showPricing={showPricing} onTogglePricing={setShowPricing}
+        onNewNote={triggerNewNote} onVoiceNote={triggerVoiceNote} onDeleteFolder={requestDeleteFolder}>
         {content}
       </AppShell>
     </PricingContext.Provider>

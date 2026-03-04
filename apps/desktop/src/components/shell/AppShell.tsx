@@ -12,15 +12,19 @@ type Props = {
   onToggleSettings: (show: boolean) => void;
   showPricing: boolean;
   onTogglePricing: (show: boolean) => void;
+  onNewNote?: () => void;
+  onVoiceNote?: () => void;
+  onDeleteFolder?: (id: string) => void;
   children: ReactNode;
 };
 
-export function AppShell({ page, onNavigate, showSettings, onToggleSettings, showPricing, onTogglePricing, children }: Props) {
+export function AppShell({ page, onNavigate, showSettings, onToggleSettings, showPricing, onTogglePricing, onNewNote, onVoiceNote, onDeleteFolder, children }: Props) {
   const openPricing = () => { onToggleSettings(false); onTogglePricing(true); };
 
   return (
     <div className="flex h-screen overflow-hidden bg-base text-text font-display">
-      <Sidebar page={page} onNavigate={onNavigate} onOpenSettings={() => onToggleSettings(true)} onOpenPricing={openPricing} />
+      <Sidebar page={page} onNavigate={onNavigate} onOpenSettings={() => onToggleSettings(true)} onOpenPricing={openPricing}
+        onNewNote={onNewNote} onVoiceNote={onVoiceNote} onDeleteFolder={onDeleteFolder} />
       <main className="flex-1 relative flex flex-col overflow-hidden">
         <div className="drag-region absolute top-0 left-0 right-0 h-10 z-10" />
         {!isElectron() && (

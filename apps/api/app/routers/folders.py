@@ -11,10 +11,12 @@ router = APIRouter(prefix="/v1/folders", tags=["folders"])
 
 class CreateFolderReq(BaseModel):
     name: str = "Untitled"
+    parent_id: str | None = None
 
 
 class UpdateFolderReq(BaseModel):
-    name: str
+    name: str | None = None
+    parent_id: str | None = None
 
 
 def _get_db():
@@ -54,9 +56,10 @@ async def list_folders(user: AuthUser = Depends(get_current_user)):
 async def create_folder(req: CreateFolderReq, user: AuthUser = Depends(get_current_user)):
     db = _get_db()
     try:
-        res = db.table("folders").insert({
-            "user_id": user.user_id, "name": req.name,
-        }).execute()
+        row = {"user_id": user.user_id, "name": req.name}
+        if req.parent_id:
+            row["parent_id"] = req.parent_id
+        res = db.table("folders").insert(row).execute()
         return res.data[0]
     except Exception as e:
         if _is_missing_folders_table(e):
@@ -70,7 +73,14 @@ async def create_folder(req: CreateFolderReq, user: AuthUser = Depends(get_curre
 async def update_folder(folder_id: str, req: UpdateFolderReq, user: AuthUser = Depends(get_current_user)):
     db = _get_db()
     try:
-        res = db.table("folders").update({"name": req.name}).eq("id", folder_id).eq("user_id", user.user_id).execute()
+        payload = {}
+        if req.name is not None:
+            payload["name"] = req.name
+        if req.parent_id is not None:
+            payload["parent_id"] = req.parent_id
+        if not payload:
+            raise HTTPException(400, "Nothing to update")
+        res = db.table("folders").update(payload).eq("id", folder_id).eq("user_id", user.user_id).execute()
         if not res.data:
             raise HTTPException(404, "Not found")
         return res.data[0]
