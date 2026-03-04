@@ -57,6 +57,7 @@ export default function App() {
   }, []);
 
   const t = useT();
+  const { triggerNewNote, triggerVoiceNote, requestDeleteFolder } = useNotesActionsStore();
 
   if (authLoading) {
     return (
@@ -80,7 +81,6 @@ export default function App() {
   }
 
   const openPricing = () => setShowPricing(true);
-  const { triggerNewNote, triggerVoiceNote, requestDeleteFolder } = useNotesActionsStore();
 
   return (
     <PricingContext.Provider value={openPricing}>
