@@ -55,11 +55,18 @@ export function Sidebar({ page, onNavigate, onOpenSettings, onOpenPricing, onNew
             <p className="text-muted text-xs font-medium">{t('sidebar.workspace')}</p>
           </div>
         </div>
+        <nav className="flex flex-col gap-1 no-drag">
+          <button data-testid="nav-dictate" onClick={() => onNavigate('dictate')}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${page === 'dictate' ? 'bg-primary/10 text-primary' : 'text-muted hover:bg-surface hover:text-text'}`}>
+            <span className={`material-symbols-outlined text-[24px] ${page === 'dictate' ? 'fill-1' : ''}`}>note_stack</span>
+            <span className={`text-sm ${page === 'dictate' ? 'font-semibold' : 'font-medium'}`}>{t('nav.notes')}</span>
+          </button>
+        </nav>
         <div className="flex flex-col gap-2 no-drag">
-          <button onClick={onNewNote} className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors" data-testid="sidebar-new-note">
+          <button onClick={() => { onNavigate('dictate'); onNewNote?.(); }} className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors" data-testid="sidebar-new-note">
             <span className="material-symbols-outlined text-[18px]">add</span>{t('notes.new')}
           </button>
-          <button onClick={onVoiceNote} className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-surface border border-edge text-muted text-sm font-medium hover:text-primary hover:border-primary/30 transition-colors" data-testid="sidebar-voice-note">
+          <button onClick={() => { onNavigate('dictate'); onVoiceNote?.(); }} className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-surface border border-edge text-muted text-sm font-medium hover:text-primary hover:border-primary/30 transition-colors" data-testid="sidebar-voice-note">
             <span className="material-symbols-outlined text-[18px] fill-1">mic</span>{t('notes.voiceNote')}
           </button>
         </div>
