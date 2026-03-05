@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AppShell } from './components/shell/AppShell';
 import { DictatePage } from './pages/DictatePage';
-import { TranscribePage } from './pages/TranscribePage';
-import { ReaderPage } from './pages/ReaderPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { AuthPage } from './pages/AuthPage';
 import { useAuthStore } from './stores/auth';
@@ -15,7 +13,7 @@ import { useT } from './lib/i18n';
 import { PricingContext } from './lib/pricing-context';
 import { useNotesActionsStore } from './stores/notes-actions';
 
-export type Page = 'dictate' | 'transcribe' | 'reader' | 'history';
+export type Page = 'dictate' | 'history';
 
 export default function App() {
   const [page, setPage] = useState<Page>('dictate');
@@ -75,8 +73,6 @@ export default function App() {
   let content: JSX.Element;
   switch (page) {
     case 'dictate': content = <DictatePage />; break;
-    case 'transcribe': content = <TranscribePage onNavigate={handleNavigate} />; break;
-    case 'reader': content = <ReaderPage />; break;
     case 'history': content = <HistoryPage />; break;
   }
 
