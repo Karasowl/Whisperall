@@ -80,6 +80,8 @@ const en: Dict = {
   'dictate.paste': 'Paste to active app', 'dictate.copy': 'Copy to clipboard', 'dictate.clear': 'Clear',
   'dictate.flushError': 'Transcription chunk failed', 'live.autoSaveError': 'Auto-save failed',
   'voice.record': 'Record', 'voice.recording': 'Recording...',
+  // Note toolbar groups
+  'noteToolbar.capture': 'Capture', 'noteToolbar.import': 'Import', 'noteToolbar.read': 'Read', 'noteToolbar.ai': 'AI',
   // Transcribe
   'transcribe.title': 'Transcribe',
   'transcribe.desc': 'Convert your audio and video files into text with AI power. Drag, drop, and customize your output.',
@@ -392,6 +394,7 @@ const es: Dict = {
   'dictate.paste': 'Pegar en app activa', 'dictate.copy': 'Copiar al portapapeles', 'dictate.clear': 'Limpiar',
   'dictate.flushError': 'Fallo al transcribir fragmento', 'live.autoSaveError': 'Fallo al auto-guardar',
   'voice.record': 'Grabar', 'voice.recording': 'Grabando...',
+  'noteToolbar.capture': 'Capturar', 'noteToolbar.import': 'Importar', 'noteToolbar.read': 'Leer', 'noteToolbar.ai': 'IA',
   'transcribe.title': 'Transcribir',
   'transcribe.desc': 'Convierte tus archivos de audio y video en texto con IA. Arrastra, suelta y personaliza el resultado.',
   'transcribe.creatingJob': 'Creando tarea...',

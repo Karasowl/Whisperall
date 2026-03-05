@@ -25,11 +25,10 @@ import {
   stopTTS,
   type TTSProgress,
 } from '../lib/tts';
-import { PlanGate } from '../components/PlanGate';
 import { RichEditor } from '../components/editor/RichEditor';
 import { TranscriptView } from '../components/editor/TranscriptView';
 import { AudioPlayer, type AudioSeekRequest } from '../components/editor/AudioPlayer';
-import { VoiceToolbar } from '../components/editor/VoiceToolbar';
+import { NoteToolbar } from '../components/editor/NoteToolbar';
 import { CustomPromptDialog, type CustomPrompt } from '../components/editor/CustomPromptDialog';
 import { AiBudgetDialog } from '../components/editor/AiBudgetDialog';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
@@ -40,10 +39,6 @@ import { projectAiEditBudget } from '../lib/ai-edit-budget';
 import { requestPlanRefresh, usePlanStore } from '../stores/plan';
 
 const SOURCE_ICONS: Record<string, string> = { dictation: 'mic', live: 'groups', transcription: 'description', manual: 'edit_note', reader: 'menu_book' };
-const BUILT_IN_MODES = [
-  { id: 'casual', icon: 'chat' }, { id: 'clean_fillers', icon: 'cleaning_services' },
-  { id: 'formal', icon: 'school' }, { id: 'summarize', icon: 'summarize' },
-] as const;
 
 // ─── Color tag system ───
 const NOTE_COLORS = ['blue', 'red', 'orange', 'yellow', 'green', 'purple', 'pink'] as const;
@@ -1080,106 +1075,28 @@ export function DictatePage() {
             ))}
           </div>
         </div>
-        {/* Voice controls + AI modes */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            ref={importFileInputRef}
-            type="file"
-            accept=".txt,.md,.markdown,.html,.htm,.pdf,.docx,.epub,.rtf,.odt,.png,.jpg,.jpeg,.webp,.tif,.tiff"
-            className="hidden"
-            onChange={(e) => { void handleImportDocument(e.target.files?.[0]); e.currentTarget.value = ''; }}
-            data-testid="note-import-file-input"
-          />
-          <PlanGate resource="stt_seconds">
-            <VoiceToolbar status={status} source={live.source}
-              onToggleRecord={handleToggle} onToggleSource={handleToggleSource}
-              translateEnabled={translateEnabled} onToggleTranslate={() => setTranslateEnabled(!translateEnabled)}
-              subtitlesActive={subtitlesActive} onToggleSubtitles={handleToggleSubtitles} />
-          </PlanGate>
-          <button
-            type="button"
-            onClick={() => importFileInputRef.current?.click()}
-            disabled={importDocLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
-            data-testid="note-import-file-btn"
-          >
-            <span className="material-symbols-outlined text-[16px]">upload_file</span>
-            {importDocLoading ? t('history.loading') : t('notes.importDocument')}
-          </button>
-          <label className="inline-flex items-center gap-1.5 text-xs text-muted select-none px-2 py-1.5 rounded-lg border border-edge bg-surface">
-            <input
-              type="checkbox"
-              checked={importDocForceOcr}
-              onChange={(e) => setImportDocForceOcr(e.target.checked)}
-              className="accent-primary"
-              data-testid="note-import-force-ocr"
-            />
-            {t('notes.importForceOcr')}
-          </label>
-          <PlanGate resource="tts_chars">
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={handleToggleNoteReader}
-                disabled={!noteReaderHasText}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
-                data-testid="note-reader-toggle-btn"
-              >
-                <span className="material-symbols-outlined text-[16px]">{noteReadProgress.status === 'playing' ? 'pause' : 'play_arrow'}</span>
-                {noteReaderPlayLabel}
-              </button>
-              <button
-                type="button"
-                onClick={handleStopNoteReader}
-                disabled={noteReadProgress.status === 'idle'}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
-                data-testid="note-reader-stop-btn"
-                title={t('reader.stop')}
-              >
-                <span className="material-symbols-outlined text-[16px]">stop</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleCycleNoteReaderSpeed}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors"
-                data-testid="note-reader-speed-btn"
-                title={t('reader.speed')}
-              >
-                <span className="material-symbols-outlined text-[16px]">speed</span>
-                {(noteReadProgress.rate || 1).toFixed(2)}x
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadNoteRead}
-                disabled={!noteCanDownloadRead}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
-                data-testid="note-reader-download-btn"
-                title={t('reader.download')}
-              >
-                <span className="material-symbols-outlined text-[16px]">download</span>
-              </button>
-            </div>
-          </PlanGate>
-          <div className="w-px h-5 bg-edge mx-1" />
-          {BUILT_IN_MODES.map((m) => (
-            <button key={m.id} onClick={() => handleAiEdit(m.id)} disabled={processing || !hasContent}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-30 capitalize" data-testid={`ai-${m.id}`}>
-              <span className="material-symbols-outlined text-[16px]">{m.icon}</span>{t(`editor.${m.id}`)}
-            </button>
-          ))}
-          {customPrompts.map((p) => (
-            <button key={p.id} onClick={() => handleAiEdit('custom', p.prompt)} disabled={processing || !hasContent}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary/80 bg-primary/5 border border-primary/20 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors disabled:opacity-30">
-              <span className="material-symbols-outlined text-[16px]">{p.icon}</span>{p.name}
-            </button>
-          ))}
-          <button onClick={() => setShowPromptDialog(true)} className="flex items-center gap-1 px-2 py-1.5 text-xs text-muted hover:text-primary transition-colors" title={t('editor.customPrompts')}>
-            <span className="material-symbols-outlined text-[16px]">add_circle</span>
-          </button>
-          {processing && <span className="text-xs text-primary ml-2">{t('editor.processing')}</span>}
-          {aiError && <span className="text-xs text-red-400 ml-2">{aiError}</span>}
-          {noteReadProgress.error && <span className="text-xs text-red-400 ml-2">{noteReadProgress.error}</span>}
-        </div>
+        {/* Hidden file input for import */}
+        <input ref={importFileInputRef} type="file"
+          accept=".txt,.md,.markdown,.html,.htm,.pdf,.docx,.epub,.rtf,.odt,.png,.jpg,.jpeg,.webp,.tif,.tiff"
+          className="hidden"
+          onChange={(e) => { void handleImportDocument(e.target.files?.[0]); e.currentTarget.value = ''; }}
+          data-testid="note-import-file-input" />
+        {/* Grouped action toolbar */}
+        <NoteToolbar
+          status={status} source={live.source}
+          onToggleRecord={handleToggle} onToggleSource={handleToggleSource}
+          translateEnabled={translateEnabled} onToggleTranslate={() => setTranslateEnabled(!translateEnabled)}
+          subtitlesActive={subtitlesActive} onToggleSubtitles={handleToggleSubtitles}
+          importFileInputRef={importFileInputRef} importDocLoading={importDocLoading}
+          importDocForceOcr={importDocForceOcr} onImportDocForceOcrChange={setImportDocForceOcr}
+          noteReaderHasText={noteReaderHasText} noteReadProgress={noteReadProgress}
+          noteReaderPlayLabel={noteReaderPlayLabel} noteCanDownloadRead={noteCanDownloadRead}
+          onToggleNoteReader={handleToggleNoteReader} onStopNoteReader={handleStopNoteReader}
+          onCycleNoteReaderSpeed={handleCycleNoteReaderSpeed} onDownloadNoteRead={handleDownloadNoteRead}
+          hasContent={hasContent} processing={processing} onAiEdit={handleAiEdit}
+          customPrompts={customPrompts} onShowPromptDialog={() => setShowPromptDialog(true)}
+          aiError={aiError} noteReadError={noteReadProgress.error ?? undefined}
+        />
         {docId && currentAudioUrl && (
           <div className="mt-2 rounded-xl border border-edge bg-surface/50 px-3 py-2 flex flex-wrap items-center gap-2" data-testid="note-retranscribe-controls">
             <span className="text-xs text-muted">{t('notes.retranscribe')}</span>
