@@ -48,9 +48,25 @@ function Toolbar({ editor }: { editor: Editor }) {
   );
 }
 
-function FloatingToolbar({ editor }: { editor: Editor }) {
+function getSelectedText(editor: Editor): string {
+  const { from, to } = editor.state.selection;
+  if (from === to) return '';
+  return editor.state.doc.textBetween(from, to, ' ').trim();
+}
+
+function FloatingToolbar({
+  editor,
+  onReadSelection,
+  onAiSelection,
+}: {
+  editor: Editor;
+  onReadSelection?: (text: string) => void;
+  onAiSelection?: (text: string) => void;
+}) {
   const b = (active: boolean) =>
     `p-1 rounded transition-colors ${active ? 'bg-white/20 text-white' : 'text-white/70 hover:text-white hover:bg-white/10'}`;
+  const selectedText = getSelectedText(editor);
+  const hasSelection = selectedText.length > 0;
 
   return (
     <BubbleMenu editor={editor}>
@@ -77,6 +93,17 @@ function FloatingToolbar({ editor }: { editor: Editor }) {
         <button onClick={() => editor.chain().focus().toggleCode().run()} className={b(editor.isActive('code'))} title="Inline Code">
           <span className="material-symbols-outlined text-[16px]">code</span>
         </button>
+        {hasSelection && (onReadSelection || onAiSelection) && <span className="w-px h-4 bg-white/20 mx-0.5" />}
+        {hasSelection && onReadSelection && (
+          <button onClick={() => onReadSelection(selectedText)} className={b(false)} title="Read Selection">
+            <span className="material-symbols-outlined text-[16px]">play_arrow</span>
+          </button>
+        )}
+        {hasSelection && onAiSelection && (
+          <button onClick={() => onAiSelection(selectedText)} className={b(false)} title="AI Edit Selection">
+            <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
+          </button>
+        )}
       </div>
     </BubbleMenu>
   );
@@ -87,9 +114,11 @@ type Props = {
   onChange: (html: string, text: string) => void;
   placeholder?: string;
   onEditorReady?: (editor: Editor) => void;
+  onReadSelection?: (text: string) => void;
+  onAiSelection?: (text: string) => void;
 };
 
-export function RichEditor({ content, onChange, placeholder, onEditorReady }: Props) {
+export function RichEditor({ content, onChange, placeholder, onEditorReady, onReadSelection, onAiSelection }: Props) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ underline: false }),
@@ -122,7 +151,7 @@ export function RichEditor({ content, onChange, placeholder, onEditorReady }: Pr
   return (
     <div className="bg-surface border border-edge rounded-xl overflow-hidden" data-testid="rich-editor">
       <Toolbar editor={editor} />
-      <FloatingToolbar editor={editor} />
+      <FloatingToolbar editor={editor} onReadSelection={onReadSelection} onAiSelection={onAiSelection} />
       <EditorContent editor={editor} />
     </div>
   );

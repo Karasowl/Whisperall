@@ -1,9 +1,12 @@
 import type { ApiClient } from "../client";
 import type {
+  DocumentDebateSearchResponse,
+  DocumentDebateStateResponse,
   CreateDocumentParams,
   CreateDocumentTranscriptionParams,
   Document,
   DocumentTranscriptionEntry,
+  UpsertDocumentDebateStateParams,
   UpdateDocumentParams,
 } from "../types";
 
@@ -25,5 +28,11 @@ export function createDocumentsEndpoint(client: ApiClient) {
       client.postJson<DocumentTranscriptionEntry>(`/v1/documents/${documentId}/transcriptions`, params),
     deleteTranscription: (documentId: string, entryId: string) =>
       client.delete(`/v1/documents/${documentId}/transcriptions/${entryId}`),
+    getDebateState: (documentId: string) =>
+      client.get<DocumentDebateStateResponse>(`/v1/documents/${documentId}/debate-state`),
+    upsertDebateState: (documentId: string, params: UpsertDocumentDebateStateParams) =>
+      client.putJson<DocumentDebateStateResponse>(`/v1/documents/${documentId}/debate-state`, params),
+    searchDebateWeb: (documentId: string, query: string, limit = 6) =>
+      client.postJson<DocumentDebateSearchResponse>(`/v1/documents/${documentId}/debate/web-search`, { query, limit }),
   };
 }

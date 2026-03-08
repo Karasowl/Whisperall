@@ -271,12 +271,13 @@ export type Folder = {
   id: string;
   user_id: string;
   name: string;
+  parent_id?: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export type CreateFolderParams = { name: string };
-export type UpdateFolderParams = { name: string };
+export type CreateFolderParams = { name: string; parent_id?: string | null };
+export type UpdateFolderParams = { name?: string; parent_id?: string | null };
 
 // ── Documents ──────────────────────────────────────────
 
@@ -338,6 +339,27 @@ export type CreateDocumentTranscriptionParams = {
   text: string;
   segments?: Array<{ start?: number; end?: number; speaker?: string; text: string }>;
   audio_url?: string | null;
+};
+
+export type DocumentDebateStateResponse = {
+  state_json: Record<string, unknown>;
+  persisted: boolean;
+};
+
+export type UpsertDocumentDebateStateParams = {
+  state_json: Record<string, unknown>;
+};
+
+export type DebateWebResult = {
+  title: string;
+  url: string;
+  snippet: string;
+  source: string;
+};
+
+export type DocumentDebateSearchResponse = {
+  query: string;
+  results: DebateWebResult[];
 };
 
 // ── Reader ──────────────────────────────────────────
@@ -453,3 +475,47 @@ export type CreateApiKeyParams = {
 export type CreateApiKeyResponse = ApiKey & {
   key: string; // full key, shown once
 };
+
+// ── Processes ──────────────────────────────────────────
+
+export type ProcessStatus = "queued" | "running" | "paused" | "failed" | "completed" | "canceled";
+export type ProcessType = "note_import" | "ai_edit" | "tts_read" | "transcribe_file";
+
+export type ProcessRecord = {
+  id: string;
+  user_id: string;
+  process_type: ProcessType;
+  title: string;
+  status: ProcessStatus;
+  stage_label_key: string;
+  done: number;
+  total: number;
+  pct: number;
+  document_id: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+};
+
+export type ListProcessesParams = {
+  status?: ProcessStatus;
+  process_type?: ProcessType;
+  document_id?: string;
+  limit?: number;
+};
+
+export type UpsertProcessParams = {
+  process_type: ProcessType;
+  title: string;
+  status: ProcessStatus;
+  stage_label_key: string;
+  done: number;
+  total: number;
+  pct: number;
+  document_id?: string | null;
+  error?: string | null;
+  completed_at?: string | null;
+};
+
+export type UpdateProcessParams = Partial<UpsertProcessParams>;

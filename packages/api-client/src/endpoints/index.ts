@@ -11,3 +11,4 @@ export { createHistoryEndpoint } from "./history";
 export { createUsageEndpoint } from "./usage";
 export { createApiKeysEndpoint } from "./api-keys";
 export { createAdminEndpoint } from "./admin";
+export { createProcessesEndpoint } from "./processes";

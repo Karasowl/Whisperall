@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .db import get_supabase_or_none
-from .routers import health, dictate, live, transcribe, tts, translate, ai_edit, documents, folders, history, usage, api_keys, admin, reader
+from .routers import health, dictate, live, transcribe, tts, translate, ai_edit, documents, folders, history, usage, api_keys, admin, reader, processes
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +125,7 @@ app.include_router(usage.router)
 app.include_router(api_keys.router)
 app.include_router(admin.router)
 app.include_router(reader.router)
+app.include_router(processes.router)
 
 # Keep `app` as FastAPI for tests (dependency overrides), and expose a
 # runtime ASGI wrapper so CORS headers are preserved even on outer 500s.

@@ -16,6 +16,7 @@ export type TranscriptionJobStage =
   | 'finalizing'
   | 'saving'
   | 'completed'
+  | 'canceled'
   | 'paused'
   | 'failed';
 
@@ -25,6 +26,7 @@ export type TranscriptionJob = TranscribeJobResponse & {
   stage?: TranscriptionJobStage;
   uploadedChunks?: number;
   uploadTotalChunks?: number;
+  documentId?: string | null;
 };
 
 type TranscriptionErrorKind = 'plan_limit' | 'storage' | 'diarization_config' | 'generic';
@@ -162,6 +164,9 @@ export type TranscriptionState = {
   pollJob: (jobId: string) => Promise<void>;
   loadResult: (jobId: string) => Promise<void>;
   setActiveJob: (jobId: string | null) => void;
+  pauseJob: (jobId: string) => void;
+  cancelJob: (jobId: string) => void;
+  resumeJob: (jobId: string) => Promise<void>;
   subscribeToRealtime: () => () => void;
   reset: () => void;
 };
@@ -171,6 +176,7 @@ let urlAbortController: AbortController | null = null;
 
 function stageFromServerStatus(status: string): TranscriptionJobStage {
   if (status === 'completed') return 'completed';
+  if (status === 'canceled') return 'canceled';
   if (status === 'paused') return 'paused';
   if (status === 'failed') return 'failed';
   if (status === 'pending') return 'queued';
@@ -202,6 +208,7 @@ export function transcriptionStageLabelKey(stage: TranscriptionJobStage): string
   if (stage === 'processing') return 'transcribe.stageProcessing';
   if (stage === 'finalizing') return 'transcribe.stageFinalizing';
   if (stage === 'saving') return 'transcribe.stageSaving';
+  if (stage === 'canceled') return 'processes.filter.canceled';
   if (stage === 'paused') return 'transcribe.paused';
   if (stage === 'failed') return 'transcribe.failed';
   return 'transcribe.completed';
@@ -534,7 +541,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         });
         set((s) => ({
           savedDocumentId: docId,
-          jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'completed', status: 'completed' } : j)),
+          jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'completed', status: 'completed', documentId: docId } : j)),
         }));
       } else {
         set((s) => ({
@@ -551,6 +558,28 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
   },
 
   setActiveJob: (jobId) => set({ activeJobId: jobId }),
+
+  pauseJob: (jobId) => {
+    set((s) => ({
+      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: 'paused', stage: 'paused' } : j)),
+      activeJobId: jobId,
+    }));
+  },
+
+  cancelJob: (jobId) => {
+    set((s) => ({
+      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: 'canceled', stage: 'canceled' } : j)),
+      activeJobId: s.activeJobId === jobId ? null : s.activeJobId,
+    }));
+  },
+
+  resumeJob: async (jobId) => {
+    set((s) => ({
+      activeJobId: jobId,
+      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: 'processing', stage: 'processing' } : j)),
+    }));
+    await get().startTranscription();
+  },
 
   subscribeToRealtime: () => {
     const sb = getSupabase();

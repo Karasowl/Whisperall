@@ -20,6 +20,8 @@ export type ReaderDisplaySettings = {
 export type SettingsState = {
   theme: Theme;
   uiLanguage: UiLocale;
+  codexApiKey: string;
+  claudeApiKey: string;
   ttsLanguage: TtsLanguage;
   ttsVoice: string;
   hotkeyMode: 'toggle' | 'hold';
@@ -35,6 +37,8 @@ export type SettingsState = {
 
   setTheme: (theme: Theme) => void;
   setUiLanguage: (lang: UiLocale) => void;
+  setCodexApiKey: (value: string) => void;
+  setClaudeApiKey: (value: string) => void;
   setTtsLanguage: (lang: string) => void;
   setTtsVoice: (voice: string) => void;
   setHotkeyMode: (mode: 'toggle' | 'hold') => void;
@@ -146,6 +150,8 @@ function setupSystemListener(theme: Theme): void {
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   theme: 'dark',
   uiLanguage: 'en',
+  codexApiKey: '',
+  claudeApiKey: '',
   ttsLanguage: 'auto',
   ttsVoice: 'auto',
   hotkeyMode: 'toggle',
@@ -182,6 +188,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setUiLanguage: (uiLanguage) => {
     set({ uiLanguage });
     persist({ uiLanguage });
+  },
+
+  setCodexApiKey: (codexApiKey) => {
+    const next = codexApiKey.trim();
+    set({ codexApiKey: next });
+    persist({ codexApiKey: next });
+  },
+
+  setClaudeApiKey: (claudeApiKey) => {
+    const next = claudeApiKey.trim();
+    set({ claudeApiKey: next });
+    persist({ claudeApiKey: next });
   },
 
   setTtsLanguage: (ttsLanguage) => {

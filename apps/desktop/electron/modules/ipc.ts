@@ -1,6 +1,4 @@
-import { ipcMain, desktopCapturer, Notification, shell, app } from 'electron';
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import { ipcMain, desktopCapturer, Notification, shell } from 'electron';
 import { showMainWindow, getMainWindow } from './windows.js';
 import {
   showOverlay, hideOverlay, toggleOverlay, resizeOverlay, setOverlayIgnoreMouse, sendSubtitleText,
@@ -9,36 +7,13 @@ import {
 import { updateHotkeys, updateSttSettings, setLastDictationText } from './hotkeys.js';
 import { updateTraySettings, getTraySettings } from './tray.js';
 import { pasteText, undoPaste, readClipboard } from './clipboard.js';
-
-function getAuthStoragePath(): string {
-  return path.join(app.getPath('userData'), 'auth-storage.json');
-}
-
-function isValidAuthStorageKey(key: unknown): key is string {
-  return typeof key === 'string' && key.length > 0 && key.length <= 200;
-}
-
-async function readAuthStorage(): Promise<Record<string, string>> {
-  try {
-    const raw = await fs.readFile(getAuthStoragePath(), 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return {};
-    }
-    const entries = Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => (
-      typeof entry[0] === 'string' && typeof entry[1] === 'string'
-    ));
-    return Object.fromEntries(entries);
-  } catch {
-    return {};
-  }
-}
-
-async function writeAuthStorage(storage: Record<string, string>): Promise<void> {
-  const storagePath = getAuthStoragePath();
-  await fs.mkdir(path.dirname(storagePath), { recursive: true });
-  await fs.writeFile(storagePath, JSON.stringify(storage), 'utf8');
-}
+import { isValidAuthStorageKey, readAuthStorage, writeAuthStorage } from './auth-storage.js';
+import {
+  startCodexAuth, cancelCodexAuth, disconnectCodex, testCodexConnection, getCodexAuthStatus, codexCanInfer, codexChat,
+} from './codex-auth.js';
+import {
+  startClaudeAuth, exchangeClaudeCode, disconnectClaude, testClaudeConnection, getClaudeAuthStatus, claudeCanInfer, claudeChat,
+} from './claude-auth.js';
 
 export function registerIpcHandlers(): void {
   // --- Hotkeys ---
@@ -151,6 +126,37 @@ export function registerIpcHandlers(): void {
     delete storage[key];
     await writeAuthStorage(storage);
   });
+
+  // --- OpenAI / Codex Auth ---
+  ipcMain.handle('codex-auth:start', async () => startCodexAuth());
+  ipcMain.on('codex-auth:cancel', () => {
+    cancelCodexAuth();
+  });
+  ipcMain.handle('codex-auth:disconnect', async () => {
+    await disconnectCodex();
+  });
+  ipcMain.handle('codex-auth:test', async () => testCodexConnection());
+  ipcMain.handle('codex-auth:status', async () => getCodexAuthStatus());
+  ipcMain.handle('codex-auth:can-infer', async () => codexCanInfer());
+  ipcMain.handle('codex-auth:chat', async (_e, payload: { system: string; userPrompt: string; maxTokens?: number }) => {
+    return codexChat(payload.system, payload.userPrompt, payload.maxTokens);
+  });
+
+  // --- Claude Auth ---
+  ipcMain.handle('claude-auth:start', async () => startClaudeAuth());
+  ipcMain.handle('claude-auth:exchange', async (_e, codeWithState: string) => exchangeClaudeCode(codeWithState));
+  ipcMain.handle('claude-auth:disconnect', async () => {
+    await disconnectClaude();
+  });
+  ipcMain.handle('claude-auth:test', async () => testClaudeConnection());
+  ipcMain.handle('claude-auth:status', async () => getClaudeAuthStatus());
+  ipcMain.handle('claude-auth:can-infer', async () => claudeCanInfer());
+  ipcMain.handle(
+    'claude-auth:chat',
+    async (_e, payload: { system: string; userPrompt: string; model?: string; maxTokens?: number; temperature?: number }) => {
+      return claudeChat(payload.system, payload.userPrompt, payload.model, payload.maxTokens, payload.temperature);
+    },
+  );
 
   // --- Desktop Capturer ---
   ipcMain.handle('desktop-sources', async () => {

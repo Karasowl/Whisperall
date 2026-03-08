@@ -33,6 +33,24 @@ declare global {
       setAuthStorageItem: (key: string, value: string) => Promise<void>;
       removeAuthStorageItem: (key: string) => Promise<void>;
       onAuthCallback: (cb: (url: string) => void) => Unsubscribe;
+      codexAuth: {
+        start: () => Promise<{ ok: true; email: string } | { ok: false; error: string }>;
+        cancel: () => void;
+        disconnect: () => Promise<void>;
+        test: () => Promise<{ ok: true; latency: number } | { ok: false; error: string }>;
+        status: () => Promise<{ connected: boolean; email: string }>;
+        canInfer: () => Promise<boolean>;
+        chat: (payload: { system: string; userPrompt: string; maxTokens?: number }) => Promise<string>;
+      };
+      claudeAuth: {
+        start: () => Promise<{ verifier: string }>;
+        exchange: (codeWithState: string) => Promise<{ ok: true; email: string } | { ok: false; error: string }>;
+        disconnect: () => Promise<void>;
+        test: () => Promise<{ ok: true; latency: number } | { ok: false; error: string }>;
+        status: () => Promise<{ connected: boolean; email: string }>;
+        canInfer: () => Promise<boolean>;
+        chat: (payload: { system: string; userPrompt: string; model?: string; maxTokens?: number; temperature?: number }) => Promise<string>;
+      };
 
       // Tray
       updateTraySettings: (settings: { minimizeToTray?: boolean; showNotifications?: boolean }) => void;

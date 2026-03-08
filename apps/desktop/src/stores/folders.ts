@@ -8,13 +8,14 @@ export type FoldersState = {
   loading: boolean;
   error: string | null;
   fetchFolders: () => Promise<void>;
-  createFolder: (name: string) => Promise<Folder>;
+  createFolder: (name: string, parentId?: string | null) => Promise<Folder>;
   renameFolder: (id: string, name: string) => Promise<void>;
+  moveFolder: (id: string, parentId: string | null) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
   selectFolder: (id: string | null) => void;
 };
 
-export const useFoldersStore = create<FoldersState>((set) => ({
+export const useFoldersStore = create<FoldersState>((set, get) => ({
   folders: [],
   selectedFolderId: null,
   loading: false,
@@ -30,10 +31,10 @@ export const useFoldersStore = create<FoldersState>((set) => ({
     }
   },
 
-  createFolder: async (name) => {
+  createFolder: async (name, parentId = null) => {
     set({ error: null });
     try {
-      const folder = await api.folders.create({ name });
+      const folder = await api.folders.create(parentId ? { name, parent_id: parentId } : { name });
       set((s) => ({ folders: [...s.folders, folder] }));
       return folder;
     } catch (err) {
@@ -46,6 +47,21 @@ export const useFoldersStore = create<FoldersState>((set) => ({
     set({ error: null });
     try {
       const updated = await api.folders.update(id, { name });
+      set((s) => ({
+        folders: s.folders.map((f) => (f.id === id ? updated : f)),
+      }));
+    } catch (err) {
+      set({ error: (err as Error).message });
+      throw err;
+    }
+  },
+
+  moveFolder: async (id, parentId) => {
+    set({ error: null });
+    try {
+      const existing = get().folders.find((f) => f.id === id);
+      if (!existing) throw new Error('Folder not found');
+      const updated = await api.folders.update(id, { name: existing.name, parent_id: parentId });
       set((s) => ({
         folders: s.folders.map((f) => (f.id === id ? updated : f)),
       }));

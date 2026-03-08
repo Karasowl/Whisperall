@@ -11,6 +11,7 @@ import {
   createReaderEndpoint,
   createHistoryEndpoint,
   createUsageEndpoint,
+  createProcessesEndpoint,
 } from '@whisperall/api-client';
 import { getSupabase } from './supabase';
 
@@ -57,4 +58,5 @@ export const api = {
   reader: createReaderEndpoint(client),
   history: createHistoryEndpoint(client),
   usage: createUsageEndpoint(client),
+  processes: createProcessesEndpoint(client),
 };

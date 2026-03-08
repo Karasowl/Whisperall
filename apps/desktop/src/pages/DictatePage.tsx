@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type MouseEvent as ReactMouseEvent } from 'react';
 import type { Editor } from '@tiptap/react';
 import { ApiError, type TranscriptSegment } from '@whisperall/api-client';
 import { useDictationStore } from '../stores/dictation';
@@ -29,9 +29,9 @@ import { PlanGate } from '../components/PlanGate';
 import { RichEditor } from '../components/editor/RichEditor';
 import { TranscriptView } from '../components/editor/TranscriptView';
 import { AudioPlayer, type AudioSeekRequest } from '../components/editor/AudioPlayer';
-import { VoiceToolbar } from '../components/editor/VoiceToolbar';
 import { CustomPromptDialog, type CustomPrompt } from '../components/editor/CustomPromptDialog';
 import { AiBudgetDialog } from '../components/editor/AiBudgetDialog';
+import { DebatePanel } from '../components/notes/DebatePanel';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { FolderChips } from '../components/notes/FolderChips';
 import { useT } from '../lib/i18n';
@@ -62,6 +62,7 @@ function setColorTag(tags: string[], color: NoteColor): string[] { return [...ta
 
 type ViewMode = 'grid' | 'list';
 type BudgetDialogKind = 'warn' | 'blocked';
+type ContextMenuMode = 'convert' | 'work';
 const VIEW_KEY = 'whisperall-notes-view';
 function loadViewMode(): ViewMode { return (localStorage.getItem(VIEW_KEY) as ViewMode) || 'grid'; }
 
@@ -168,6 +169,8 @@ export function DictatePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [colorFilter, setColorFilter] = useState<NoteColor | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
+  const [contextMenuMode, setContextMenuMode] = useState<ContextMenuMode>('convert');
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [showBulkExport, setShowBulkExport] = useState(false);
   const [retranscribeLanguage, setRetranscribeLanguage] = useState('auto');
@@ -198,6 +201,7 @@ export function DictatePage() {
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const actionFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const budgetResolverRef = useRef<((ok: boolean) => void) | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const seekNonceRef = useRef(0);
   const historyRequestSeq = useRef(0);
   const seededHistoryNotes = useRef<Record<string, boolean>>({});
@@ -226,8 +230,57 @@ export function DictatePage() {
     : noteReadProgress.status === 'paused'
       ? t('reader.resume')
       : t('reader.readAloud');
+  const contextMenuStyle = useMemo(() => {
+    if (!contextMenuPos) return null;
+    if (typeof window === 'undefined') return { left: contextMenuPos.x, top: contextMenuPos.y };
+    const menuWidth = 236;
+    const menuHeight = 540;
+    const margin = 12;
+    const clampedX = Math.max(margin, Math.min(contextMenuPos.x, window.innerWidth - menuWidth - margin));
+    const clampedY = Math.max(72, Math.min(contextMenuPos.y, window.innerHeight - menuHeight - margin));
+    return { left: clampedX, top: clampedY };
+  }, [contextMenuPos]);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenuPos(null);
+  }, []);
+
+  const getSelectedEditorText = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return '';
+    const { from, to } = editor.state.selection;
+    if (from === to) return '';
+    return editor.state.doc.textBetween(from, to, ' ').trim();
+  }, []);
+
+  const handleEditorContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (!target?.closest('.prose-editor')) return;
+    event.preventDefault();
+    const selectedText = getSelectedEditorText();
+    setContextMenuMode(selectedText ? 'work' : 'convert');
+    setContextMenuPos({ x: event.clientX + 10, y: event.clientY + 10 });
+  }, [getSelectedEditorText]);
 
   useEffect(() => { if (user) { fetchFolders(); fetchDocuments(selectedFolderId ?? undefined); } }, [user, fetchFolders, fetchDocuments, selectedFolderId]);
+
+  useEffect(() => {
+    if (!contextMenuPos) return;
+    const onWindowMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (contextMenuRef.current?.contains(target as Node)) return;
+      closeContextMenu();
+    };
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeContextMenu();
+    };
+    window.addEventListener('mousedown', onWindowMouseDown);
+    window.addEventListener('keydown', onWindowKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', onWindowMouseDown);
+      window.removeEventListener('keydown', onWindowKeyDown);
+    };
+  }, [contextMenuPos, closeContextMenu]);
 
   // Handle pending document open (from Transcribe → Open in Notes)
   const pendingOpenId = useDocumentsStore((s) => s.pendingOpenId);
@@ -314,6 +367,7 @@ export function DictatePage() {
   const openNote = (id: string) => {
     const doc = documents.find((d) => d.id === id);
     if (!doc) return;
+    closeContextMenu();
     stopTTS();
     setNoteReadProgress(NOTE_READER_IDLE);
     historyRequestSeq.current += 1;
@@ -335,6 +389,7 @@ export function DictatePage() {
   };
 
   const newNote = (autoRecord = false) => {
+    closeContextMenu();
     stopTTS();
     setNoteReadProgress(NOTE_READER_IDLE);
     historyRequestSeq.current += 1;
@@ -360,6 +415,7 @@ export function DictatePage() {
   };
 
   const goBack = () => {
+    closeContextMenu();
     stopTTS();
     setNoteReadProgress(NOTE_READER_IDLE);
     historyRequestSeq.current += 1;
@@ -556,14 +612,15 @@ export function DictatePage() {
     setActionFeedback({ tone, message });
     actionFeedbackTimer.current = setTimeout(() => { setActionFeedback(null); }, 2200);
   };
-  const startNoteReader = () => {
-    if (!noteReaderHasText) {
+  const startNoteReader = (textOverride?: string) => {
+    const textToRead = (textOverride?.trim() || noteReaderText).trim();
+    if (!textToRead) {
       showActionFeedback(t('notes.readerNoText'), 'info');
       return;
     }
     const voice = ttsVoice && ttsVoice.toLowerCase() !== 'auto' ? ttsVoice : undefined;
     const language = ttsLanguage && ttsLanguage.toLowerCase() !== 'auto' ? ttsLanguage : undefined;
-    void startReading(noteReaderText, voice, language, setNoteReadProgress);
+    void startReading(textToRead, voice, language, setNoteReadProgress);
   };
   const handleToggleNoteReader = () => {
     if (noteReadProgress.status === 'playing') {
@@ -669,6 +726,58 @@ export function DictatePage() {
       showActionFeedback(t('notes.copyError'), 'error');
     }
   };
+  const handleContextCopy = async () => {
+    const selected = getSelectedEditorText();
+    if (selected) {
+      try {
+        await navigator.clipboard.writeText(selected);
+        showActionFeedback(t('notes.copySuccess'), 'success');
+      } catch {
+        showActionFeedback(t('notes.copyError'), 'error');
+      }
+      return;
+    }
+    await handleCopy();
+  };
+  const handleContextCut = async () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) {
+      showActionFeedback(t('notes.cutNoSelection'), 'info');
+      return;
+    }
+    const selected = editor.state.doc.textBetween(from, to, ' ');
+    try {
+      await navigator.clipboard.writeText(selected);
+      editor.chain().focus().deleteSelection().run();
+      setSaved(false);
+      showActionFeedback(t('notes.cutSuccess'), 'success');
+    } catch {
+      showActionFeedback(t('notes.cutError'), 'error');
+    }
+  };
+  const handleContextPaste = async () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    try {
+      const clipText = await navigator.clipboard.readText();
+      if (!clipText.trim()) {
+        showActionFeedback(t('notes.pasteEmpty'), 'info');
+        return;
+      }
+      editor.chain().focus().insertContent(safeHtmlParagraphs(clipText)).run();
+      setSaved(false);
+      showActionFeedback(t('notes.pasteSuccess'), 'success');
+    } catch {
+      showActionFeedback(t('notes.pasteError'), 'error');
+    }
+  };
+  const handleContextSelectAll = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.chain().focus().selectAll().run();
+  };
   const handleExport = (fmt: ExportFormat) => {
     const noteTitle = title.trim() || smartTitle(uiLanguage);
     const ok = exportNote(noteTitle, htmlContent, fmt);
@@ -739,8 +848,8 @@ export function DictatePage() {
     }
     return true;
   };
-  const handleAiEdit = async (aiMode: string, prompt?: string) => {
-    const txt = plainText || htmlContent.replace(/<[^>]*>/g, '');
+  const handleAiEdit = async (aiMode: string, prompt?: string, textOverride?: string) => {
+    const txt = (textOverride?.trim() || plainText || htmlContent.replace(/<[^>]*>/g, '')).trim();
     if (!txt) return;
     setAiError('');
     if (!(await validateAiBudget(txt))) return;
@@ -760,6 +869,280 @@ export function DictatePage() {
       }
     } finally { setProcessing(false); }
   };
+
+  const handleReadSelection = useCallback((text: string) => {
+    startNoteReader(text);
+  }, [startNoteReader]);
+
+  const handleAiSelection = useCallback((text: string) => {
+    void handleAiEdit('casual', undefined, text);
+  }, [handleAiEdit]);
+
+  const renderDockAction = ({
+    icon,
+    label,
+    onClick,
+    disabled,
+    tone = 'neutral',
+    kind = 'action',
+    testId,
+    title,
+    iconClassName,
+  }: {
+    icon: string;
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    tone?: 'neutral' | 'primary' | 'danger';
+    kind?: 'action' | 'setting';
+    testId?: string;
+    title?: string;
+    iconClassName?: string;
+  }) => {
+    const isAction = kind === 'action';
+    const color = tone === 'primary'
+      ? 'text-primary'
+      : tone === 'danger'
+        ? 'text-red-400'
+        : isAction ? 'text-text/90' : 'text-muted/70';
+
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          onClick();
+          if (isAction) closeContextMenu();
+        }}
+        disabled={disabled}
+        data-testid={testId}
+        title={title ?? label}
+        className={`group flex min-h-8 w-full items-center gap-2.5 rounded px-2 py-1 text-[13px] leading-5 transition-colors hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-25 ${color}`}
+      >
+        <span className={`material-symbols-outlined w-4 shrink-0 text-center text-[16px] ${!isAction ? 'opacity-60' : ''} ${iconClassName ?? ''}`}>{icon}</span>
+        <span className={`truncate ${isAction ? 'font-medium' : 'font-normal opacity-80'}`}>{label}</span>
+      </button>
+    );
+  };
+
+  const renderDockDivider = () => (
+    <div className="mx-2 my-1 h-px bg-white/[0.06]" />
+  );
+
+  const noteContextMenu = contextMenuPos && contextMenuStyle ? (
+    <div
+      ref={contextMenuRef}
+      style={{ left: contextMenuStyle.left, top: contextMenuStyle.top }}
+      className="fixed z-[90] w-[236px] rounded-lg border border-white/[0.08] bg-[#161e29]/[0.98] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.5),0_0_0_0.5px_rgba(255,255,255,0.04)] backdrop-blur-xl"
+      data-testid="note-context-menu"
+    >
+      <div className="max-h-[60vh] overflow-y-auto">
+        <div data-testid="note-panel-edit">
+          <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.groupEdit')}</p>
+          {renderDockAction({
+            icon: 'content_copy',
+            label: t('dictate.copy'),
+            onClick: () => { void handleContextCopy(); },
+            testId: 'note-context-copy-btn',
+          })}
+          {renderDockAction({
+            icon: 'content_cut',
+            label: t('notes.cut'),
+            onClick: () => { void handleContextCut(); },
+            testId: 'note-context-cut-btn',
+          })}
+          {renderDockAction({
+            icon: 'content_paste',
+            label: t('widget.paste'),
+            onClick: () => { void handleContextPaste(); },
+            testId: 'note-context-paste-btn',
+          })}
+          {renderDockAction({
+            icon: 'select_all',
+            label: t('notes.selectAll'),
+            onClick: handleContextSelectAll,
+            testId: 'note-context-select-all-btn',
+          })}
+        </div>
+
+        {renderDockDivider()}
+
+        {contextMenuMode === 'convert' && (
+          <div data-testid="note-panel-convert">
+            <PlanGate resource="stt_seconds">
+              <div>
+                <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.groupCapture')}</p>
+                {renderDockAction({
+                  icon: status === 'recording' ? 'stop' : 'mic',
+                  iconClassName: status === 'recording' ? '' : 'fill-1',
+                  label: status === 'recording' ? t('voice.recording') : t('voice.record'),
+                  onClick: handleToggle,
+                  disabled: status === 'processing',
+                  tone: status === 'recording' ? 'danger' : 'primary',
+                  testId: 'record-btn',
+                })}
+                {renderDockAction({
+                  icon: live.source === 'mic' ? 'mic' : 'desktop_windows',
+                  label: live.source === 'mic' ? `${t('dictate.mic')} → ${t('dictate.system')}` : `${t('dictate.system')} → ${t('dictate.mic')}`,
+                  onClick: handleToggleSource,
+                  disabled: status === 'recording',
+                  kind: 'setting',
+                  testId: 'source-toggle',
+                  title: live.source === 'mic' ? t('dictate.switchSystem') : t('dictate.switchMic'),
+                })}
+                {renderDockAction({
+                  icon: 'translate',
+                  label: t('dictate.translate'),
+                  onClick: () => setTranslateEnabled(!translateEnabled),
+                  tone: translateEnabled ? 'primary' : 'neutral',
+                  kind: 'setting',
+                  testId: 'translate-toggle',
+                  title: translateEnabled ? t('dictate.disableTranslation') : t('dictate.enableTranslation'),
+                })}
+                {isLive && renderDockAction({
+                  icon: 'subtitles',
+                  label: subtitlesActive ? t('dictate.hideSubtitles') : t('dictate.showSubtitles'),
+                  onClick: handleToggleSubtitles,
+                  tone: subtitlesActive ? 'primary' : 'neutral',
+                  kind: 'setting',
+                  testId: 'subtitles-toggle',
+                })}
+
+                {renderDockDivider()}
+                <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.groupImport')}</p>
+                {renderDockAction({
+                  icon: 'upload_file',
+                  label: importDocLoading ? t('history.loading') : t('notes.importDocument'),
+                  onClick: () => importFileInputRef.current?.click(),
+                  disabled: importDocLoading,
+                  testId: 'note-import-file-btn',
+                })}
+                {renderDockAction({
+                  icon: importDocForceOcr ? 'check_box' : 'check_box_outline_blank',
+                  label: t('notes.importForceOcr'),
+                  onClick: () => setImportDocForceOcr((prev) => !prev),
+                  tone: importDocForceOcr ? 'primary' : 'neutral',
+                  kind: 'setting',
+                  testId: 'note-import-force-ocr',
+                })}
+
+                {renderDockDivider()}
+                <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.groupTranscribe')}</p>
+                {renderDockAction({
+                  icon: 'graphic_eq',
+                  label: retranscribeLoading ? t('transcribe.processing') : t('notes.retranscribeNow'),
+                  onClick: () => { void handleRetranscribeFromNote(); },
+                  disabled: retranscribeLoading || !docId || !currentAudioUrl,
+                  tone: 'primary',
+                  testId: 'note-transcribe-file-btn',
+                })}
+                {renderDockAction({
+                  icon: retranscribeDiarization ? 'check_box' : 'check_box_outline_blank',
+                  label: t('transcribe.diarization'),
+                  onClick: () => setRetranscribeDiarization((v) => !v),
+                  tone: retranscribeDiarization ? 'primary' : 'neutral',
+                  kind: 'setting',
+                  testId: 'note-transcribe-diarize',
+                })}
+              </div>
+            </PlanGate>
+          </div>
+        )}
+
+        {contextMenuMode === 'work' && (
+          <div data-testid="note-panel-work">
+            <div>
+              <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.groupRead')}</p>
+              <PlanGate resource="tts_chars">
+                <div>
+                  {renderDockAction({
+                    icon: noteReadProgress.status === 'playing' ? 'pause' : 'play_arrow',
+                    label: noteReaderPlayLabel,
+                    onClick: () => {
+                      const selected = getSelectedEditorText();
+                      if (selected) {
+                        handleReadSelection(selected);
+                        return;
+                      }
+                      handleToggleNoteReader();
+                    },
+                    disabled: !noteReaderHasText && !getSelectedEditorText(),
+                    testId: 'note-reader-toggle-btn',
+                  })}
+                  {renderDockAction({
+                    icon: 'stop',
+                    label: t('reader.stop'),
+                    onClick: handleStopNoteReader,
+                    disabled: noteReadProgress.status === 'idle',
+                    testId: 'note-reader-stop-btn',
+                  })}
+                  {renderDockAction({
+                    icon: 'speed',
+                    label: `${(noteReadProgress.rate || 1).toFixed(2)}x`,
+                    onClick: handleCycleNoteReaderSpeed,
+                    kind: 'setting',
+                    testId: 'note-reader-speed-btn',
+                    title: `${t('reader.speed')} ${(noteReadProgress.rate || 1).toFixed(2)}x`,
+                  })}
+                  {renderDockAction({
+                    icon: 'download',
+                    label: t('reader.download'),
+                    onClick: handleDownloadNoteRead,
+                    disabled: !noteCanDownloadRead,
+                    testId: 'note-reader-download-btn',
+                  })}
+                </div>
+              </PlanGate>
+
+              {renderDockDivider()}
+              <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.groupAi')}</p>
+              <div>
+                {renderDockAction({
+                  icon: 'auto_awesome',
+                  label: t('editor.casual'),
+                  onClick: () => {
+                    const selected = getSelectedEditorText();
+                    void handleAiEdit('casual', undefined, selected || undefined);
+                  },
+                  disabled: processing || !hasContent,
+                  tone: 'primary',
+                  testId: 'ai-casual',
+                })}
+                {BUILT_IN_MODES.filter((m) => m.id !== 'casual').map((m) => renderDockAction({
+                  icon: m.icon,
+                  label: t(`editor.${m.id}`),
+                  onClick: () => {
+                    const selected = getSelectedEditorText();
+                    void handleAiEdit(m.id, undefined, selected || undefined);
+                  },
+                  disabled: processing || !hasContent,
+                  testId: `ai-${m.id}`,
+                }))}
+                {renderDockAction({
+                  icon: 'add_circle',
+                  label: t('editor.customPrompts'),
+                  onClick: () => setShowPromptDialog(true),
+                })}
+                {customPrompts.slice(0, 2).map((p) => renderDockAction({
+                  icon: p.icon,
+                  label: p.name,
+                  onClick: () => {
+                    const selected = getSelectedEditorText();
+                    void handleAiEdit('custom', p.prompt, selected || undefined);
+                  },
+                  disabled: processing || !hasContent,
+                  tone: 'primary',
+                  title: p.name,
+                }))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {renderDockDivider()}
+        <p className="px-3 pb-1 text-[10px] leading-tight text-muted/40">{t('notes.processNeedsSave')}</p>
+      </div>
+    </div>
+  ) : null;
 
   useEffect(() => {
     return () => {
@@ -1077,106 +1460,14 @@ export function DictatePage() {
             ))}
           </div>
         </div>
-        {/* Voice controls + AI modes */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            ref={importFileInputRef}
-            type="file"
-            accept=".txt,.md,.markdown,.html,.htm,.pdf,.docx,.epub,.rtf,.odt,.png,.jpg,.jpeg,.webp,.tif,.tiff"
-            className="hidden"
-            onChange={(e) => { void handleImportDocument(e.target.files?.[0]); e.currentTarget.value = ''; }}
-            data-testid="note-import-file-input"
-          />
-          <PlanGate resource="stt_seconds">
-            <VoiceToolbar status={status} source={live.source}
-              onToggleRecord={handleToggle} onToggleSource={handleToggleSource}
-              translateEnabled={translateEnabled} onToggleTranslate={() => setTranslateEnabled(!translateEnabled)}
-              subtitlesActive={subtitlesActive} onToggleSubtitles={handleToggleSubtitles} />
-          </PlanGate>
-          <button
-            type="button"
-            onClick={() => importFileInputRef.current?.click()}
-            disabled={importDocLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
-            data-testid="note-import-file-btn"
-          >
-            <span className="material-symbols-outlined text-[16px]">upload_file</span>
-            {importDocLoading ? t('history.loading') : t('notes.importDocument')}
-          </button>
-          <label className="inline-flex items-center gap-1.5 text-xs text-muted select-none px-2 py-1.5 rounded-lg border border-edge bg-surface">
-            <input
-              type="checkbox"
-              checked={importDocForceOcr}
-              onChange={(e) => setImportDocForceOcr(e.target.checked)}
-              className="accent-primary"
-              data-testid="note-import-force-ocr"
-            />
-            {t('notes.importForceOcr')}
-          </label>
-          <PlanGate resource="tts_chars">
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={handleToggleNoteReader}
-                disabled={!noteReaderHasText}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
-                data-testid="note-reader-toggle-btn"
-              >
-                <span className="material-symbols-outlined text-[16px]">{noteReadProgress.status === 'playing' ? 'pause' : 'play_arrow'}</span>
-                {noteReaderPlayLabel}
-              </button>
-              <button
-                type="button"
-                onClick={handleStopNoteReader}
-                disabled={noteReadProgress.status === 'idle'}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
-                data-testid="note-reader-stop-btn"
-                title={t('reader.stop')}
-              >
-                <span className="material-symbols-outlined text-[16px]">stop</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleCycleNoteReaderSpeed}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors"
-                data-testid="note-reader-speed-btn"
-                title={t('reader.speed')}
-              >
-                <span className="material-symbols-outlined text-[16px]">speed</span>
-                {(noteReadProgress.rate || 1).toFixed(2)}x
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadNoteRead}
-                disabled={!noteCanDownloadRead}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-40"
-                data-testid="note-reader-download-btn"
-                title={t('reader.download')}
-              >
-                <span className="material-symbols-outlined text-[16px]">download</span>
-              </button>
-            </div>
-          </PlanGate>
-          <div className="w-px h-5 bg-edge mx-1" />
-          {BUILT_IN_MODES.map((m) => (
-            <button key={m.id} onClick={() => handleAiEdit(m.id)} disabled={processing || !hasContent}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted bg-surface border border-edge rounded-lg hover:bg-surface-alt hover:text-text transition-colors disabled:opacity-30 capitalize" data-testid={`ai-${m.id}`}>
-              <span className="material-symbols-outlined text-[16px]">{m.icon}</span>{t(`editor.${m.id}`)}
-            </button>
-          ))}
-          {customPrompts.map((p) => (
-            <button key={p.id} onClick={() => handleAiEdit('custom', p.prompt)} disabled={processing || !hasContent}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary/80 bg-primary/5 border border-primary/20 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors disabled:opacity-30">
-              <span className="material-symbols-outlined text-[16px]">{p.icon}</span>{p.name}
-            </button>
-          ))}
-          <button onClick={() => setShowPromptDialog(true)} className="flex items-center gap-1 px-2 py-1.5 text-xs text-muted hover:text-primary transition-colors" title={t('editor.customPrompts')}>
-            <span className="material-symbols-outlined text-[16px]">add_circle</span>
-          </button>
-          {processing && <span className="text-xs text-primary ml-2">{t('editor.processing')}</span>}
-          {aiError && <span className="text-xs text-red-400 ml-2">{aiError}</span>}
-          {noteReadProgress.error && <span className="text-xs text-red-400 ml-2">{noteReadProgress.error}</span>}
-        </div>
+        <input
+          ref={importFileInputRef}
+          type="file"
+          accept=".txt,.md,.markdown,.html,.htm,.pdf,.docx,.epub,.rtf,.odt,.png,.jpg,.jpeg,.webp,.tif,.tiff"
+          className="hidden"
+          onChange={(e) => { void handleImportDocument(e.target.files?.[0]); e.currentTarget.value = ''; }}
+          data-testid="note-import-file-input"
+        />
         {docId && currentAudioUrl && (
           <div className="mt-2 rounded-xl border border-edge bg-surface/50 px-3 py-2 flex flex-wrap items-center gap-2" data-testid="note-retranscribe-controls">
             <span className="text-xs text-muted">{t('notes.retranscribe')}</span>
@@ -1219,102 +1510,121 @@ export function DictatePage() {
         )}
       </header>
 
-      <div className="flex-1 overflow-y-auto px-8 pb-8 flex justify-center">
-        <div className="w-full max-w-3xl">
-          {isLive && live.status === 'recording' && live.segments.length === 0 && !live.interimText && !live.error && (
-            <div className="flex flex-col items-center justify-center py-16 gap-4" data-testid="live-listening-inline">
-              <div className="relative flex items-center justify-center h-16 w-16">
-                <span className="material-symbols-outlined text-[52px] text-primary">hearing</span>
-                <span className="absolute inset-0 rounded-full border-2 border-primary/30 animate-ping" />
-              </div>
-              <p className="text-base font-semibold text-text">{t('live.listening')}</p>
-              <p className="text-sm text-muted text-center max-w-md">{t('live.listeningDesc')}</p>
-            </div>
-          )}
-          {isLive && live.status === 'recording' && live.interimText && (
-            <div className="px-4 py-3 mb-4 rounded-lg border border-primary/30 bg-primary/10" data-testid="live-interim">
-              <span className="text-base text-text-secondary/70">{live.interimText}</span>
-              <span className="inline-block w-0.5 h-5 bg-primary ml-1 animate-pulse align-middle" />
-            </div>
-          )}
-          {docId && (historyLoading || !!historyError || transcriptHistory.length > 0) && (
-            <div className="mb-4 rounded-xl border border-edge bg-surface/50 p-3" data-testid="note-transcript-history">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-text">{t('notes.transcriptionHistory')}</p>
-                <span className="text-[11px] text-muted">{transcriptHistory.length}</span>
-              </div>
-              {historyLoading && <p className="text-xs text-muted">{t('history.loading')}</p>}
-              {historyError && !historyLoading && <p className="text-xs text-red-400">{historyError}</p>}
-              <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
-                {transcriptHistory.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className={`rounded-lg border px-2 py-2 ${activeHistoryId === entry.id ? 'border-primary/50 bg-primary/10' : 'border-edge bg-surface'}`}
-                    data-testid={`history-entry-${entry.id}`}
-                  >
-                    <div className="flex items-center gap-2 text-[11px] text-muted">
-                      <span>{new Date(entry.created_at).toLocaleString(uiLanguage === 'es' ? 'es-ES' : 'en-US')}</span>
-                      <span>•</span>
-                      <span>{entry.language}</span>
-                      <span>•</span>
-                      <span>{entry.diarization ? t('transcribe.diarization') : t('notes.noDiarization')}</span>
-                    </div>
-                    <p className="text-xs text-text mt-1 line-clamp-2">{entry.text || '...'}</p>
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleApplyHistoryEntry(entry.id)}
-                        className="text-[11px] px-2 py-1 rounded bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
-                        data-testid={`history-apply-${entry.id}`}
-                      >
-                        {t('notes.applyTranscription')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { void handleDeleteHistoryEntry(entry.id); }}
-                        className="text-[11px] px-2 py-1 rounded bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
-                        data-testid={`history-delete-${entry.id}`}
-                      >
-                        {t('notes.deleteTranscription')}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <RichEditor content={htmlContent} onChange={handleEditorChange} placeholder={t('dictate.placeholder')} onEditorReady={(e) => { editorRef.current = e; }} />
-          {showAudioPanel && (
-            <div className="mt-6 rounded-xl border border-edge bg-surface/40 p-4">
-              {showTranscriptPanel ? (
-                <TranscriptView
-                  segments={activeSegments}
-                  activeIndex={activeSegmentIndex}
-                  speakerAliases={speakerAliases}
-                  onSelectSegment={handleSelectSegment}
-                  onRenameSpeaker={handleRenameSpeaker}
-                />
-              ) : (
-                <p className="text-xs text-muted mb-2">{t('notes.audioNoTranscript')}</p>
-              )}
-              {currentAudioUrl && (
-                <div className="mt-4">
-                  <AudioPlayer
-                    audioUrl={currentAudioUrl}
-                    title={title || t('notes.voiceNote')}
-                    activeSegmentText={activeSegmentText}
-                    seekRequest={seekRequest}
-                    onTimeUpdate={handlePlayerTimeUpdate}
-                  />
+      <div className="flex-1 min-h-0 flex">
+        <div className="flex-1 min-w-0 overflow-y-auto px-8 pb-8 flex justify-center">
+          <div className="w-full max-w-3xl">
+            {isLive && live.status === 'recording' && live.segments.length === 0 && !live.interimText && !live.error && (
+              <div className="flex flex-col items-center justify-center py-16 gap-4" data-testid="live-listening-inline">
+                <div className="relative flex items-center justify-center h-16 w-16">
+                  <span className="material-symbols-outlined text-[52px] text-primary">hearing</span>
+                  <span className="absolute inset-0 rounded-full border-2 border-primary/30 animate-ping" />
                 </div>
-              )}
+                <p className="text-base font-semibold text-text">{t('live.listening')}</p>
+                <p className="text-sm text-muted text-center max-w-md">{t('live.listeningDesc')}</p>
+              </div>
+            )}
+            {isLive && live.status === 'recording' && live.interimText && (
+              <div className="px-4 py-3 mb-4 rounded-lg border border-primary/30 bg-primary/10" data-testid="live-interim">
+                <span className="text-base text-text-secondary/70">{live.interimText}</span>
+                <span className="inline-block w-0.5 h-5 bg-primary ml-1 animate-pulse align-middle" />
+              </div>
+            )}
+            {docId && (historyLoading || !!historyError || transcriptHistory.length > 0) && (
+              <div className="mb-4 rounded-xl border border-edge bg-surface/50 p-3" data-testid="note-transcript-history">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-text">{t('notes.transcriptionHistory')}</p>
+                  <span className="text-[11px] text-muted">{transcriptHistory.length}</span>
+                </div>
+                {historyLoading && <p className="text-xs text-muted">{t('history.loading')}</p>}
+                {historyError && !historyLoading && <p className="text-xs text-red-400">{historyError}</p>}
+                <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
+                  {transcriptHistory.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className={`rounded-lg border px-2 py-2 ${activeHistoryId === entry.id ? 'border-primary/50 bg-primary/10' : 'border-edge bg-surface'}`}
+                      data-testid={`history-entry-${entry.id}`}
+                    >
+                      <div className="flex items-center gap-2 text-[11px] text-muted">
+                        <span>{new Date(entry.created_at).toLocaleString(uiLanguage === 'es' ? 'es-ES' : 'en-US')}</span>
+                        <span>•</span>
+                        <span>{entry.language}</span>
+                        <span>•</span>
+                        <span>{entry.diarization ? t('transcribe.diarization') : t('notes.noDiarization')}</span>
+                      </div>
+                      <p className="text-xs text-text mt-1 line-clamp-2">{entry.text || '...'}</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleApplyHistoryEntry(entry.id)}
+                          className="text-[11px] px-2 py-1 rounded bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
+                          data-testid={`history-apply-${entry.id}`}
+                        >
+                          {t('notes.applyTranscription')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { void handleDeleteHistoryEntry(entry.id); }}
+                          className="text-[11px] px-2 py-1 rounded bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
+                          data-testid={`history-delete-${entry.id}`}
+                        >
+                          {t('notes.deleteTranscription')}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="relative" onContextMenu={handleEditorContextMenu} data-testid="note-editor-interaction-zone">
+              <RichEditor
+                content={htmlContent}
+                onChange={handleEditorChange}
+                placeholder={t('dictate.placeholder')}
+                onEditorReady={(e) => { editorRef.current = e; }}
+                onReadSelection={handleReadSelection}
+                onAiSelection={handleAiSelection}
+              />
             </div>
-          )}
-          {dictation.translatedText && (
-            <div className="pt-2 mt-4 border-t border-edge text-base text-muted italic whitespace-pre-wrap" data-testid="translated-text">{dictation.translatedText}</div>
-          )}
+            {showAudioPanel && (
+              <div className="mt-6 rounded-xl border border-edge bg-surface/40 p-4">
+                {showTranscriptPanel ? (
+                  <TranscriptView
+                    segments={activeSegments}
+                    activeIndex={activeSegmentIndex}
+                    speakerAliases={speakerAliases}
+                    onSelectSegment={handleSelectSegment}
+                    onRenameSpeaker={handleRenameSpeaker}
+                  />
+                ) : (
+                  <p className="text-xs text-muted mb-2">{t('notes.audioNoTranscript')}</p>
+                )}
+                {currentAudioUrl && (
+                  <div className="mt-4">
+                    <AudioPlayer
+                      audioUrl={currentAudioUrl}
+                      title={title || t('notes.voiceNote')}
+                      activeSegmentText={activeSegmentText}
+                      seekRequest={seekRequest}
+                      onTimeUpdate={handlePlayerTimeUpdate}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+            {dictation.translatedText && (
+              <div className="pt-2 mt-4 border-t border-edge text-base text-muted italic whitespace-pre-wrap" data-testid="translated-text">{dictation.translatedText}</div>
+            )}
+          </div>
         </div>
+        <DebatePanel
+          noteId={docId}
+          noteTitle={title}
+          noteText={noteReaderText}
+          getEditor={() => editorRef.current}
+          onNotify={(message, tone) => { showActionFeedback(message, tone); }}
+        />
       </div>
+      {noteContextMenu}
       {showPromptDialog && <CustomPromptDialog prompts={customPrompts} onSave={(p) => { setCustomPrompts(p); saveCustomPrompts(p); }} onClose={() => setShowPromptDialog(false)} />}
       <AiBudgetDialog
         open={budgetDialog.open}

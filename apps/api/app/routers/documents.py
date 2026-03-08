@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -35,13 +36,22 @@ class UpdateDocReq(BaseModel):
 
 
 class CreateTranscriptionEntryReq(BaseModel):
-    block_id: str | None = None
-    source: str | None = None
-    language: str = "auto"
-    diarization: bool = False
-    text: str
-    segments: list[dict] = []
-    audio_url: str | None = None
+  block_id: str | None = None
+  source: str | None = None
+  language: str = "auto"
+  diarization: bool = False
+  text: str
+  segments: list[dict] = []
+  audio_url: str | None = None
+
+
+class UpsertDebateStateReq(BaseModel):
+  state_json: dict[str, Any] = {}
+
+
+class DebateWebSearchReq(BaseModel):
+  query: str
+  limit: int = 6
 
 
 def _get_db():
@@ -52,8 +62,19 @@ def _get_db():
 
 
 def _error_mentions_missing_column(exc: Exception, column: str) -> bool:
-    msg = str(exc).lower()
-    return f"'{column}' column" in msg or f"\"{column}\" column" in msg
+  msg = str(exc).lower()
+  return f"'{column}' column" in msg or f"\"{column}\" column" in msg
+
+
+def _error_mentions_missing_relation(exc: Exception, relation: str) -> bool:
+  msg = str(exc).lower()
+  rel = relation.lower()
+  return (
+    f'relation "{rel}" does not exist' in msg
+    or f"relation '{rel}' does not exist" in msg
+    or f"could not find table '{rel}'" in msg
+    or f'could not find table "{rel}"' in msg
+  )
 
 
 def _execute_with_optional_column_fallback(
@@ -191,6 +212,108 @@ async def update_document(doc_id: str, req: UpdateDocReq, user: AuthUser = Depen
     except Exception as e:
         log.error("update_document failed: %s", e)
         raise HTTPException(500, f"Failed to update document: {e}")
+
+
+@router.get("/{doc_id}/debate-state")
+async def get_debate_state(doc_id: str, user: AuthUser = Depends(get_current_user)):
+    db = _get_db()
+    _assert_document_owner(db, doc_id=doc_id, user_id=user.user_id)
+    try:
+        res = (
+            db.table("document_debate_states")
+            .select("state_json")
+            .eq("document_id", doc_id)
+            .eq("user_id", user.user_id)
+            .maybe_single()
+            .execute()
+        )
+        state_json = (res.data or {}).get("state_json") if isinstance(res.data, dict) else {}
+        if not isinstance(state_json, dict):
+            state_json = {}
+        return {"state_json": state_json, "persisted": True}
+    except Exception as e:
+        if _error_mentions_missing_relation(e, "document_debate_states"):
+            return {"state_json": {}, "persisted": False}
+        log.error("get_debate_state failed: %s", e)
+        raise HTTPException(500, f"Failed to load debate state: {e}")
+
+
+@router.put("/{doc_id}/debate-state")
+async def upsert_debate_state(doc_id: str, req: UpsertDebateStateReq, user: AuthUser = Depends(get_current_user)):
+    db = _get_db()
+    _assert_document_owner(db, doc_id=doc_id, user_id=user.user_id)
+    state_json = req.state_json if isinstance(req.state_json, dict) else {}
+    try:
+        db.table("document_debate_states").upsert(
+            {"document_id": doc_id, "user_id": user.user_id, "state_json": state_json},
+            on_conflict="document_id",
+        ).execute()
+        return {"state_json": state_json, "persisted": True}
+    except Exception as e:
+        if _error_mentions_missing_relation(e, "document_debate_states"):
+            return {"state_json": state_json, "persisted": False}
+        log.error("upsert_debate_state failed: %s", e)
+        raise HTTPException(500, f"Failed to save debate state: {e}")
+
+
+@router.post("/{doc_id}/debate/web-search")
+async def debate_web_search(doc_id: str, req: DebateWebSearchReq, user: AuthUser = Depends(get_current_user)):
+    db = _get_db()
+    _assert_document_owner(db, doc_id=doc_id, user_id=user.user_id)
+    query = (req.query or "").strip()
+    if not query:
+        return {"query": "", "results": []}
+    limit = max(1, min(int(req.limit or 6), 10))
+    results: list[dict[str, str]] = []
+
+    def push_result(title: str, url: str, snippet: str):
+        if len(results) >= limit:
+            return
+        t = (title or "").strip()
+        u = (url or "").strip()
+        s = (snippet or "").strip()
+        if not t or not u:
+            return
+        if any(existing["url"] == u for existing in results):
+            return
+        results.append({"title": t[:220], "url": u, "snippet": s[:400], "source": "duckduckgo"})
+
+    def walk_related(items: list[dict[str, Any]]):
+        for item in items:
+            if len(results) >= limit:
+                return
+            nested = item.get("Topics")
+            if isinstance(nested, list):
+                walk_related([x for x in nested if isinstance(x, dict)])
+                continue
+            push_result(
+                str(item.get("Text") or "").strip()[:180] or "Result",
+                str(item.get("FirstURL") or ""),
+                str(item.get("Text") or ""),
+            )
+
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+            res = await client.get(
+                "https://duckduckgo.com/",
+                params={"q": query, "format": "json", "no_redirect": "1", "no_html": "1"},
+            )
+            body = res.json() if res.status_code < 500 else {}
+    except Exception as e:
+        log.warning("debate_web_search failed for query '%s': %s", query, e)
+        return {"query": query, "results": []}
+
+    if isinstance(body, dict):
+        abstract = str(body.get("AbstractText") or "")
+        abstract_url = str(body.get("AbstractURL") or "")
+        abstract_title = str(body.get("Heading") or "") or query
+        if abstract and abstract_url:
+            push_result(abstract_title, abstract_url, abstract)
+        related = body.get("RelatedTopics")
+        if isinstance(related, list):
+            walk_related([x for x in related if isinstance(x, dict)])
+
+    return {"query": query, "results": results[:limit]}
 
 
 @router.get("/{doc_id}/transcriptions")

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSettingsStore, type Theme, type UiLocale } from '../../stores/settings';
 import { useAuthStore } from '../../stores/auth';
+import { useProviderAuthStore } from '../../stores/provider-auth';
 import { electron } from '../../lib/electron';
 import { useT } from '../../lib/i18n';
 import { UsageMeter } from '../UsageMeter';
@@ -54,12 +55,40 @@ export function SettingsModal({ onClose, onOpenPricing }: Props) {
   const { voices: ttsVoices, loading: ttsVoicesLoading } = useTtsVoices();
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [editingHotkey, setEditingHotkey] = useState<string | null>(null);
+  const [claudeCodeInput, setClaudeCodeInput] = useState('');
+
+  const codexState = useProviderAuthStore((s) => s.codexState);
+  const codexEmail = useProviderAuthStore((s) => s.codexEmail);
+  const codexError = useProviderAuthStore((s) => s.codexError);
+  const codexLatency = useProviderAuthStore((s) => s.codexLatency);
+  const connectCodex = useProviderAuthStore((s) => s.connectCodex);
+  const cancelCodex = useProviderAuthStore((s) => s.cancelCodex);
+  const disconnectCodex = useProviderAuthStore((s) => s.disconnectCodex);
+  const testCodex = useProviderAuthStore((s) => s.testCodex);
+  const loadCodexStatus = useProviderAuthStore((s) => s.loadCodexStatus);
+
+  const claudeState = useProviderAuthStore((s) => s.claudeState);
+  const claudeEmail = useProviderAuthStore((s) => s.claudeEmail);
+  const claudeError = useProviderAuthStore((s) => s.claudeError);
+  const claudeLatency = useProviderAuthStore((s) => s.claudeLatency);
+  const claudeAuthMode = useProviderAuthStore((s) => s.claudeAuthMode);
+  const startClaudeAuth = useProviderAuthStore((s) => s.startClaudeAuth);
+  const exchangeClaudeCode = useProviderAuthStore((s) => s.exchangeClaudeCode);
+  const disconnectClaude = useProviderAuthStore((s) => s.disconnectClaude);
+  const testClaudeOAuth = useProviderAuthStore((s) => s.testClaudeOAuth);
+  const testClaudeApiKey = useProviderAuthStore((s) => s.testClaudeApiKey);
+  const loadClaudeStatus = useProviderAuthStore((s) => s.loadClaudeStatus);
 
   useEffect(() => {
     navigator.mediaDevices.enumerateDevices()
       .then((devices) => setAudioDevices(devices.filter((d) => d.kind === 'audioinput')))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    void loadCodexStatus();
+    void loadClaudeStatus();
+  }, [loadClaudeStatus, loadCodexStatus]);
 
   const handleKeyCapture = (action: string, e: React.KeyboardEvent) => {
     e.preventDefault();
@@ -96,6 +125,147 @@ export function SettingsModal({ onClose, onOpenPricing }: Props) {
               </div>
             </section>
           )}
+
+          {/* AI Providers */}
+          <section>
+            <h3 className="text-sm font-semibold text-text-secondary mb-3">{t('settings.aiProviders')}</h3>
+            <div className="flex flex-col gap-3">
+              <div className="rounded-xl border border-edge bg-base/60 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-text">OpenAI (ChatGPT/Codex Auth)</p>
+                  <span className={`text-[11px] uppercase tracking-wide ${
+                    codexState === 'connected' ? 'text-emerald-400' : codexState === 'error' ? 'text-red-400' : 'text-muted'
+                  }`}>{codexState}</span>
+                </div>
+                {codexEmail && <p className="mt-1 text-xs text-muted">{codexEmail}</p>}
+                {codexLatency !== null && <p className="mt-1 text-xs text-muted">{t('settings.latency')}: {codexLatency} ms</p>}
+                {codexError && <p className="mt-1 text-xs text-red-400 whitespace-pre-wrap">{codexError}</p>}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { void connectCodex(); }}
+                    className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors"
+                    data-testid="settings-openai-connect"
+                  >
+                    {t('settings.connectOpenai')}
+                  </button>
+                  {codexState === 'connecting' && (
+                    <button
+                      type="button"
+                      onClick={cancelCodex}
+                      className="px-3 py-1.5 rounded-lg bg-base border border-edge text-xs text-muted hover:text-text transition-colors"
+                      data-testid="settings-openai-cancel"
+                    >
+                      {t('widget.cancel')}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { void testCodex(); }}
+                    className="px-3 py-1.5 rounded-lg bg-base border border-edge text-xs text-muted hover:text-text transition-colors"
+                    data-testid="settings-openai-test"
+                  >
+                    {t('settings.testConnection')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void disconnectCodex(); }}
+                    className="px-3 py-1.5 rounded-lg bg-base border border-edge text-xs text-muted hover:text-text transition-colors"
+                    data-testid="settings-openai-disconnect"
+                  >
+                    {t('settings.disconnect')}
+                  </button>
+                </div>
+                <div className="mt-2">
+                  <input
+                    type="password"
+                    value={settings.codexApiKey}
+                    onChange={(e) => settings.setCodexApiKey(e.target.value)}
+                    placeholder={t('settings.openaiApiKeyOptional')}
+                    className="w-full bg-surface border border-edge rounded-lg px-3 py-2 text-xs text-text placeholder:text-muted/70 outline-none"
+                    data-testid="settings-openai-api-key"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-edge bg-base/60 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-text">Claude (Auth / API key)</p>
+                  <span className={`text-[11px] uppercase tracking-wide ${
+                    claudeState === 'connected' ? 'text-emerald-400' : claudeState === 'error' ? 'text-red-400' : 'text-muted'
+                  }`}>{claudeState}</span>
+                </div>
+                {claudeEmail && <p className="mt-1 text-xs text-muted">{claudeEmail}</p>}
+                <p className="mt-1 text-xs text-muted">{t('settings.mode')}: {claudeAuthMode}</p>
+                {claudeLatency !== null && <p className="mt-1 text-xs text-muted">{t('settings.latency')}: {claudeLatency} ms</p>}
+                {claudeError && <p className="mt-1 text-xs text-red-400 whitespace-pre-wrap">{claudeError}</p>}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { void startClaudeAuth(); }}
+                    className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors"
+                    data-testid="settings-claude-connect"
+                  >
+                    {t('settings.connectClaude')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void testClaudeOAuth(); }}
+                    className="px-3 py-1.5 rounded-lg bg-base border border-edge text-xs text-muted hover:text-text transition-colors"
+                    data-testid="settings-claude-test-auth"
+                  >
+                    {t('settings.testConnection')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void disconnectClaude(); }}
+                    className="px-3 py-1.5 rounded-lg bg-base border border-edge text-xs text-muted hover:text-text transition-colors"
+                    data-testid="settings-claude-disconnect"
+                  >
+                    {t('settings.disconnect')}
+                  </button>
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    type="text"
+                    value={claudeCodeInput}
+                    onChange={(e) => setClaudeCodeInput(e.target.value)}
+                    placeholder={t('settings.claudeCodePlaceholder')}
+                    className="flex-1 bg-surface border border-edge rounded-lg px-3 py-2 text-xs text-text placeholder:text-muted/70 outline-none"
+                    data-testid="settings-claude-code"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { void exchangeClaudeCode(claudeCodeInput.trim()); }}
+                    className="px-3 py-1.5 rounded-lg bg-base border border-edge text-xs text-muted hover:text-text transition-colors"
+                    data-testid="settings-claude-exchange"
+                    disabled={!claudeCodeInput.trim()}
+                  >
+                    {t('settings.finishAuth')}
+                  </button>
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    type="password"
+                    value={settings.claudeApiKey}
+                    onChange={(e) => settings.setClaudeApiKey(e.target.value)}
+                    placeholder={t('settings.claudeApiKeyOptional')}
+                    className="flex-1 bg-surface border border-edge rounded-lg px-3 py-2 text-xs text-text placeholder:text-muted/70 outline-none"
+                    data-testid="settings-claude-api-key"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { void testClaudeApiKey(settings.claudeApiKey); }}
+                    className="px-3 py-1.5 rounded-lg bg-base border border-edge text-xs text-muted hover:text-text transition-colors"
+                    data-testid="settings-claude-test-key"
+                    disabled={!settings.claudeApiKey.trim()}
+                  >
+                    {t('settings.testKey')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
 
           {/* Usage */}
           {user && (
