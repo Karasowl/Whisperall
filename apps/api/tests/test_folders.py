@@ -52,6 +52,20 @@ class TestFoldersCRUD:
         assert res.status_code == 200
         assert res.json()["name"] == "Work"
 
+    def test_create_folder_with_parent(self, client, auth_headers):
+        row = {**FOLDER_ROW, "parent_id": "parent-1"}
+        db = _mock_db(table_data=[row])
+        with patch("app.routers.folders.get_supabase_or_none", return_value=db):
+            res = client.post("/v1/folders", headers=auth_headers, json={"name": "Sub", "parent_id": "parent-1"})
+        assert res.status_code == 200
+
+    def test_update_folder_parent(self, client, auth_headers):
+        updated = {**FOLDER_ROW, "parent_id": "parent-1"}
+        db = _mock_db(table_data=[updated])
+        with patch("app.routers.folders.get_supabase_or_none", return_value=db):
+            res = client.put("/v1/folders/folder-1", headers=auth_headers, json={"parent_id": "parent-1"})
+        assert res.status_code == 200
+
     def test_create_folder_default_name(self, client, auth_headers):
         row = {**FOLDER_ROW, "name": "Untitled"}
         db = _mock_db(table_data=[row])

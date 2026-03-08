@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AppShell } from './components/shell/AppShell';
 import { DictatePage } from './pages/DictatePage';
-import { TranscribePage } from './pages/TranscribePage';
-import { ReaderPage } from './pages/ReaderPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { AuthPage } from './pages/AuthPage';
 import { useAuthStore } from './stores/auth';
@@ -13,8 +11,9 @@ import { playTTS } from './lib/tts';
 import { inferTTSLanguage } from './lib/lang-detect';
 import { useT } from './lib/i18n';
 import { PricingContext } from './lib/pricing-context';
+import { useNotesActionsStore } from './stores/notes-actions';
 
-export type Page = 'dictate' | 'transcribe' | 'reader' | 'history';
+export type Page = 'dictate' | 'history';
 
 export default function App() {
   const [page, setPage] = useState<Page>('dictate');
@@ -56,6 +55,7 @@ export default function App() {
   }, []);
 
   const t = useT();
+  const { triggerNewNote, triggerVoiceNote, requestDeleteFolder } = useNotesActionsStore();
 
   if (authLoading) {
     return (
@@ -73,8 +73,6 @@ export default function App() {
   let content: JSX.Element;
   switch (page) {
     case 'dictate': content = <DictatePage />; break;
-    case 'transcribe': content = <TranscribePage onNavigate={handleNavigate} />; break;
-    case 'reader': content = <ReaderPage />; break;
     case 'history': content = <HistoryPage />; break;
   }
 
@@ -82,7 +80,8 @@ export default function App() {
 
   return (
     <PricingContext.Provider value={openPricing}>
-      <AppShell page={page} onNavigate={handleNavigate} showSettings={showSettings} onToggleSettings={setShowSettings} showPricing={showPricing} onTogglePricing={setShowPricing}>
+      <AppShell page={page} onNavigate={handleNavigate} showSettings={showSettings} onToggleSettings={setShowSettings} showPricing={showPricing} onTogglePricing={setShowPricing}
+        onNewNote={triggerNewNote} onVoiceNote={triggerVoiceNote} onDeleteFolder={requestDeleteFolder}>
         {content}
       </AppShell>
     </PricingContext.Provider>

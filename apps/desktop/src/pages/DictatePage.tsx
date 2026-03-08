@@ -33,7 +33,7 @@ import { CustomPromptDialog, type CustomPrompt } from '../components/editor/Cust
 import { AiBudgetDialog } from '../components/editor/AiBudgetDialog';
 import { DebatePanel } from '../components/notes/DebatePanel';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
-import { FolderChips } from '../components/notes/FolderChips';
+import { useNotesActionsStore } from '../stores/notes-actions';
 import { useT } from '../lib/i18n';
 import { relativeDate, smartTitle } from '../lib/format-date';
 import { projectAiEditBudget } from '../lib/ai-edit-budget';
@@ -290,6 +290,17 @@ export function DictatePage() {
       useDocumentsStore.getState().setPendingOpen(null);
     }
   }, [pendingOpenId, documents]);
+
+  // Sidebar signals: new note / voice note / delete folder
+  const newNoteSignal = useNotesActionsStore((s) => s.newNoteSignal);
+  const voiceNoteSignal = useNotesActionsStore((s) => s.voiceNoteSignal);
+  const signalDeleteFolderId = useNotesActionsStore((s) => s.pendingDeleteFolderId);
+  const clearDeleteFolder = useNotesActionsStore((s) => s.clearDeleteFolder);
+  useEffect(() => { if (newNoteSignal > 0) newNote(); }, [newNoteSignal]);
+  useEffect(() => { if (voiceNoteSignal > 0) newNote(true); }, [voiceNoteSignal]);
+  useEffect(() => {
+    if (signalDeleteFolderId) { setPendingDeleteFolderId(signalDeleteFolderId); clearDeleteFolder(); }
+  }, [signalDeleteFolderId, clearDeleteFolder]);
 
   const loadTranscriptionHistory = useCallback(async (noteId: string) => {
     const reqId = ++historyRequestSeq.current;
@@ -1159,16 +1170,9 @@ export function DictatePage() {
   if (mode === 'list') return (
     <div className="flex-1 min-h-0 relative flex flex-col bg-base" data-testid="dictate-page">
       <div className="px-8 pt-12 pb-4">
-        <div className="flex justify-between items-start mb-5">
-          <div><h2 className="text-3xl font-black tracking-tight mb-2">{t('notes.title')}</h2><p className="text-muted">{t('notes.desc')}</p></div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => newNote(true)} className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-surface border border-edge text-muted text-sm font-medium hover:text-primary hover:border-primary/30 transition-colors" data-testid="voice-note-btn" title={t('notes.voiceNote')}>
-              <span className="material-symbols-outlined text-[18px] fill-1">mic</span>{t('notes.voiceNote')}
-            </button>
-            <button onClick={() => newNote()} className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors" data-testid="new-note-btn">
-              <span className="material-symbols-outlined text-[18px]">add</span>{t('notes.new')}
-            </button>
-          </div>
+        <div className="mb-5">
+          <h2 className="text-3xl font-black tracking-tight mb-2">{t('notes.title')}</h2>
+          <p className="text-muted">{t('notes.desc')}</p>
         </div>
         <div className="mt-1 rounded-2xl border border-edge bg-surface/40 p-3 space-y-2.5">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -1238,7 +1242,6 @@ export function DictatePage() {
               </div>
             </div>
           )}
-          <FolderChips documents={documents} selectedFolderId={selectedFolderId} onSelectFolder={selectFolder} onDeleteFolder={(id) => setPendingDeleteFolderId(id)} />
         </div>
       </div>
       <div className="flex-1 overflow-auto px-8 pb-8">

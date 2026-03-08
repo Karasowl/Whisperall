@@ -90,7 +90,7 @@ export type TTSResponse = {
 };
 
 export type TTSVoice = {
-  provider: "google" | "edge";
+  provider: 'google' | 'edge';
   name: string;
   locale: string;
   gender?: string | null;
@@ -139,7 +139,7 @@ export type AudioChunk = {
   mime_type: string;
 };
 
-export type UserPlan = "free" | "basic" | "pro";
+export type UserPlan = 'free' | 'basic' | 'pro';
 
 export type UserProfile = {
   id: string;
@@ -191,7 +191,7 @@ export type AdminPricingEntry = {
   model: string | null;
   unit: string;
   usd_per_unit: number;
-  effective_from: string; // YYYY-MM-DD
+  effective_from: string;
   updated_at: string | null;
 };
 
@@ -201,12 +201,12 @@ export type AdminPricingUpsertParams = {
   model?: string | null;
   unit: string;
   usd_per_unit: number;
-  effective_from?: string; // YYYY-MM-DD
+  effective_from?: string;
 };
 
 export type AdminInvoiceEntry = {
   provider: string;
-  period: string; // YYYY-MM-DD (month start)
+  period: string;
   amount_usd: number;
   currency: string;
   notes: string | null;
@@ -215,7 +215,7 @@ export type AdminInvoiceEntry = {
 
 export type AdminInvoiceUpsertParams = {
   provider: string;
-  period?: string; // YYYY-MM-DD (month start)
+  period?: string;
   amount_usd: number;
   currency?: string;
   notes?: string | null;
@@ -227,8 +227,8 @@ export type AdminCostBreakdown = {
 };
 
 export type AdminRevenueEntry = {
-  period: string; // YYYY-MM-DD (month start)
-  source: string; // total | stripe | appstore | ...
+  period: string;
+  source: string;
   amount_usd: number;
   currency: string;
   notes: string | null;
@@ -236,7 +236,7 @@ export type AdminRevenueEntry = {
 };
 
 export type AdminRevenueUpsertParams = {
-  period?: string; // YYYY-MM-DD (month start)
+  period?: string;
   source?: string | null;
   amount_usd: number;
   currency?: string;
@@ -271,7 +271,7 @@ export type Folder = {
   id: string;
   user_id: string;
   name: string;
-  parent_id?: string | null;
+  parent_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -321,7 +321,7 @@ export type DocumentTranscriptionEntry = {
   document_id: string;
   user_id: string;
   block_id: string | null;
-  source: "mic" | "system" | "audio" | null;
+  source: 'mic' | 'system' | 'audio' | null;
   language: string;
   diarization: boolean;
   text: string;
@@ -333,7 +333,7 @@ export type DocumentTranscriptionEntry = {
 
 export type CreateDocumentTranscriptionParams = {
   block_id?: string | null;
-  source?: "mic" | "system" | "audio" | null;
+  source?: 'mic' | 'system' | 'audio' | null;
   language?: string;
   diarization?: boolean;
   text: string;
@@ -365,7 +365,7 @@ export type DocumentDebateSearchResponse = {
 // ── Reader ──────────────────────────────────────────
 
 export type ReaderDocument = Document & {
-  source: "reader";
+  source: 'reader';
 };
 
 export type ReaderImportFileParams = {
@@ -388,7 +388,7 @@ export type ReaderImportResponse = {
   blocks: Array<{ page?: number; text: string }>;
   pages: number;
   title: string;
-  source: "file" | "url";
+  source: 'file' | 'url';
   document_id?: string | null;
   rich_html?: string | null;
   toc?: Array<{ id: string; title: string; level: number }>;
@@ -452,8 +452,8 @@ export type ReaderDisplaySettings = {
   font_size: number;
   line_height: number;
   letter_spacing: number;
-  theme: "paper" | "dark" | "high_contrast";
-  highlight_mode: "word" | "sentence" | "paragraph" | "none";
+  theme: 'paper' | 'dark' | 'high_contrast';
+  highlight_mode: 'word' | 'sentence' | 'paragraph' | 'none';
   captions_on: boolean;
 };
 
@@ -473,13 +473,13 @@ export type CreateApiKeyParams = {
 };
 
 export type CreateApiKeyResponse = ApiKey & {
-  key: string; // full key, shown once
+  key: string;
 };
 
 // ── Processes ──────────────────────────────────────────
 
-export type ProcessStatus = "queued" | "running" | "paused" | "failed" | "completed" | "canceled";
-export type ProcessType = "note_import" | "ai_edit" | "tts_read" | "transcribe_file";
+export type ProcessStatus = 'queued' | 'running' | 'paused' | 'failed' | 'completed' | 'canceled';
+export type ProcessType = 'note_import' | 'ai_edit' | 'tts_read' | 'transcribe_file';
 
 export type ProcessRecord = {
   id: string;
