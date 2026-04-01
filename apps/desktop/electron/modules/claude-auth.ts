@@ -10,6 +10,7 @@ const TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
 const SCOPES = 'org:create_api_key user:profile user:inference';
+const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 // --- PKCE helpers ---
 
@@ -34,6 +35,7 @@ let pendingVerifier: string | null = null;
 export type ClaudeAuthResult = { ok: true; email: string } | { ok: false; error: string };
 export type ClaudeAuthStatus = { connected: boolean; email: string };
 export type ClaudeTestResult = { ok: true; latency: number } | { ok: false; error: string };
+type ClaudeCredential = { kind: 'api-key' | 'oauth' | 'claude-code'; token: string };
 
 /** Step 1: Open browser for Claude OAuth. Returns the verifier for step 2. */
 export function startClaudeAuth(): { verifier: string } {
@@ -97,7 +99,6 @@ export async function exchangeClaudeCode(codeWithState: string): Promise<ClaudeA
     const email = data.user?.email || '';
     storage.claude_email = email;
 
-    // Bootstrap: create a permanent API key from the OAuth token
     const keyResult = await createApiKeyFromOAuth(data.access_token);
     if (keyResult.ok) storage.claude_api_key = keyResult.apiKey;
     await writeAuthStorage(storage);
@@ -124,40 +125,24 @@ export async function disconnectClaude(): Promise<void> {
 
 export async function testClaudeConnection(): Promise<ClaudeTestResult> {
   const storage = await readAuthStorage();
+  const apiKey = storage.claude_api_key?.trim();
+  if (apiKey) return testWithCredential({ kind: 'api-key', token: apiKey });
 
-  // Path A: we already have a bootstrapped API key — test with inference
-  if (storage.claude_api_key) {
-    return testWithApiKey(storage.claude_api_key);
+  const oauthToken = await getFreshClaudeOAuthToken();
+  if (oauthToken) {
+    const keyResult = await createApiKeyFromOAuth(oauthToken);
+    if (keyResult.ok) {
+      const latest = await readAuthStorage();
+      latest.claude_api_key = keyResult.apiKey;
+      await writeAuthStorage(latest);
+      return testWithCredential({ kind: 'api-key', token: keyResult.apiKey });
+    }
+    return testWithCredential({ kind: 'oauth', token: oauthToken });
   }
 
-  // Path B: try to bootstrap an API key from the OAuth token
-  const token = storage.claude_access_token;
-  if (!token) return { ok: false, error: 'Not connected' };
-
-  // Refresh OAuth token if expired
-  const expiresAt = Number(storage.claude_expires_at || 0);
-  if (Date.now() > expiresAt - 5 * 60 * 1000) {
-    const refreshed = await refreshClaudeToken();
-    if (!refreshed.ok) return { ok: false, error: refreshed.error };
-  }
-
-  const latest = await readAuthStorage();
-  const keyResult = await createApiKeyFromOAuth(latest.claude_access_token);
-  if (keyResult.ok) {
-    latest.claude_api_key = keyResult.apiKey;
-    await writeAuthStorage(latest);
-    return testWithApiKey(keyResult.apiKey);
-  }
-
-  // Path C: API key creation blocked — validate via token refresh
-  const start = Date.now();
-  const refreshResult = await refreshClaudeToken();
-  const latency = Date.now() - start;
-  if (refreshResult.ok) return { ok: true, latency };
-  // Token exists but can't refresh — check if still within expiry
-  const currentExpiry = Number(latest.claude_expires_at || 0);
-  if (Date.now() < currentExpiry) return { ok: true, latency: 0 };
-  return { ok: false, error: 'Token expired and refresh failed' };
+  const ccToken = await readClaudeCodeToken();
+  if (ccToken) return testWithCredential({ kind: 'claude-code', token: ccToken });
+  return { ok: false, error: 'Not connected' };
 }
 
 /** Read Claude Code's stored OAuth token (authorized for inference via Max subscription). */
@@ -175,12 +160,40 @@ async function readClaudeCodeToken(): Promise<string | null> {
   }
 }
 
-/** Check if any Claude inference method is available (API key or Claude Code token). */
-export async function claudeCanInfer(): Promise<boolean> {
+async function getFreshClaudeOAuthToken(): Promise<string | null> {
   const storage = await readAuthStorage();
-  if (storage.claude_api_key) return true;
+  const token = storage.claude_access_token?.trim();
+  if (!token) return null;
+
+  const expiresAt = Number(storage.claude_expires_at || 0);
+  if (!expiresAt || Date.now() < expiresAt - TOKEN_REFRESH_BUFFER_MS) return token;
+
+  const refreshed = await refreshClaudeToken();
+  if (refreshed.ok) return refreshed.token;
+
+  const latest = await readAuthStorage();
+  const fallbackToken = latest.claude_access_token?.trim() || token;
+  const fallbackExpiry = Number(latest.claude_expires_at || expiresAt);
+  if (fallbackToken && Date.now() < fallbackExpiry) return fallbackToken;
+  return null;
+}
+
+async function resolveClaudeCredential(): Promise<ClaudeCredential | null> {
+  const storage = await readAuthStorage();
+  const apiKey = storage.claude_api_key?.trim();
+  if (apiKey) return { kind: 'api-key', token: apiKey };
+
+  const oauthToken = await getFreshClaudeOAuthToken();
+  if (oauthToken) return { kind: 'oauth', token: oauthToken };
+
   const ccToken = await readClaudeCodeToken();
-  return !!ccToken;
+  if (ccToken) return { kind: 'claude-code', token: ccToken };
+  return null;
+}
+
+/** Check if any Claude inference method is available (API key, Claude OAuth, or Claude Code token). */
+export async function claudeCanInfer(): Promise<boolean> {
+  return !!(await resolveClaudeCredential());
 }
 
 /** Proxy a Claude chat completion from the main process (no CORS restrictions). */
@@ -191,33 +204,15 @@ export async function claudeChat(
   maxTokens = 700,
   temperature = 0.4,
 ): Promise<string> {
-  const storage = await readAuthStorage();
-  const apiKey = storage.claude_api_key;
-
-  // Fallback: use Claude Code's stored token (authorized for inference)
-  const ccToken = !apiKey ? await readClaudeCodeToken() : null;
-  const authKey = apiKey || ccToken;
-  if (!authKey) throw new Error('No Claude API key available. Install Claude Code and sign in, or add an API key from console.anthropic.com.');
-
-  const isOAuthToken = authKey.startsWith('sk-ant-oat');
-  const headers: Record<string, string> = {
-    'anthropic-version': '2023-06-01',
-    'content-type': 'application/json',
-  };
-  if (isOAuthToken) {
-    // OAuth tokens require Bearer auth + beta header (same as Claude Code)
-    headers['Authorization'] = `Bearer ${authKey}`;
-    headers['anthropic-beta'] = 'oauth-2025-04-20';
-  } else {
-    headers['x-api-key'] = authKey;
-  }
+  const credential = await resolveClaudeCredential();
+  if (!credential) throw new Error('No Claude auth available. Connect Claude, install Claude Code and sign in, or add an API key from console.anthropic.com.');
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers,
+      headers: buildClaudeHeaders(credential),
       body: JSON.stringify({ model, max_tokens: maxTokens, temperature, system, messages: [{ role: 'user', content: userPrompt }] }),
       signal: controller.signal,
     });
@@ -233,16 +228,26 @@ export async function claudeChat(
 
 // --- Internal ---
 
-async function testWithApiKey(apiKey: string): Promise<ClaudeTestResult> {
+function buildClaudeHeaders(credential: ClaudeCredential): Record<string, string> {
+  const headers: Record<string, string> = {
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  };
+  if (credential.kind === 'api-key') {
+    headers['x-api-key'] = credential.token;
+    return headers;
+  }
+  headers.Authorization = `Bearer ${credential.token}`;
+  headers['anthropic-beta'] = 'oauth-2025-04-20';
+  return headers;
+}
+
+async function testWithCredential(credential: ClaudeCredential): Promise<ClaudeTestResult> {
   const start = Date.now();
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
+      headers: buildClaudeHeaders(credential),
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 4,

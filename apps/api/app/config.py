@@ -11,11 +11,12 @@ DEFAULT_PROD_CORS_ORIGINS = (
 )
 
 DEFAULT_DEV_CORS_ORIGINS = (
+    "null",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     *DEFAULT_PROD_CORS_ORIGINS,
 )
-DEFAULT_DEV_CORS_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+DEFAULT_DEV_CORS_ORIGIN_REGEX = r"^(null|https?://(localhost|127\.0\.0\.1)(:\d+)?)$"
 
 # Keys that can be loaded from Supabase app_config table
 _REMOTE_KEYS = {

@@ -5,7 +5,7 @@ import { electron } from '../lib/electron';
 import { useDocumentsStore } from '../stores/documents';
 import { useTranscriptionStore } from '../stores/transcription';
 import { useProcessesStore } from '../stores/processes';
-import { mapLocalProcessToProcess, mapTranscriptionJobToProcess, processMatchesFilter, type ProcessFilter, type ProcessStatus } from '../lib/processes';
+import { combineProcessItems, processMatchesFilter, type ProcessFilter, type ProcessStatus } from '../lib/processes';
 import { ProcessFilters } from '../components/processes/ProcessFilters';
 import { ProcessCard } from '../components/processes/ProcessCard';
 
@@ -69,7 +69,7 @@ export function ProcessesPage({ onNavigate }: Props) {
   const [prefs, setPrefs] = useState<NotifyPrefs>(loadPrefs);
   const prevStatus = useRef<Record<string, ProcessStatus>>({});
   const processes = useMemo(
-    () => [...jobs.map(mapTranscriptionJobToProcess), ...localProcesses.map(mapLocalProcessToProcess)],
+    () => combineProcessItems(jobs, localProcesses),
     [jobs, localProcesses],
   );
   const visible = useMemo(() => processes.filter((item) => processMatchesFilter(item, filter)), [filter, processes]);

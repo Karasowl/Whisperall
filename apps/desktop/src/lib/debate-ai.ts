@@ -272,7 +272,7 @@ export async function runDebateCycle(params: DebateCycleParams): Promise<DebateC
     for (let i = 0; i < workingSubagents.length; i += 1) {
       const sub = workingSubagents[i];
       const provider = pickProvider(sub, providers, round + i);
-      const opts: CallOpts = { model: modelFor(provider), claudeProxy: params.claudeProxy };
+      const opts: CallOpts = { model: modelFor(provider), claudeProxy: params.claudeProxy, codexProxy: params.codexProxy };
       const system = [
         `You are ${sub.name}, a writing assistant helping improve a note.`,
         sub.critical
@@ -329,13 +329,15 @@ export async function runDebateCycle(params: DebateCycleParams): Promise<DebateC
 
   const principalTurns: DebateTurn[] = [];
   for (const provider of providers) {
-    const opts: CallOpts = { model: modelFor(provider), claudeProxy: params.claudeProxy };
+    const opts: CallOpts = { model: modelFor(provider), claudeProxy: params.claudeProxy, codexProxy: params.codexProxy };
     const system = [
       `You are ${providerLabel(provider)}, a writing assistant.`,
       'You receive internal review notes. Deliver one concise recommendation to help the author improve their note.',
       'Respect the author\'s voice and intent. Help them say what THEY want to say, better.',
       'Structure output as: 1) Best improvement, 2) Why it strengthens the note, 3) Suggested edit.',
-      'Optional: include one JSON code block with an edit command: {"action":"insert|replace_selection|append","text":"..."}',
+      'Optional: include one JSON code block with an edit command.',
+      'If action is insert or append, include target placement so the UI knows where to apply it.',
+      'Format: {"action":"insert|replace_selection|append","text":"...","target":{"position":"start|end|before_match|after_match","match":"exact short snippet already present in the note when needed"}}',
       'The suggested text MUST preserve the author\'s original meaning and tone.',
       baseRules,
     ].join('\n');
@@ -352,7 +354,7 @@ export async function runDebateCycle(params: DebateCycleParams): Promise<DebateC
   let curated = principalTurns[0]?.text ?? '';
   if (principalTurns.length > 1) {
     try {
-      const system = `You are a curator. Merge both suggestions into one coherent final answer. Preserve the author's voice and intent. ${baseRules}`;
+      const system = `You are a curator. Merge both suggestions into one coherent final answer. Preserve the author's voice and intent. If you include a JSON edit command, keep a single final command and preserve any target placement fields. ${baseRules}`;
       const prompt = [
         'Principal output A:',
         principalTurns[0].text,
@@ -362,7 +364,7 @@ export async function runDebateCycle(params: DebateCycleParams): Promise<DebateC
         '',
         'Return one final answer only.',
       ].join('\n');
-      curated = await callProvider(providers[0], params, system, prompt, { model: modelFor(providers[0]) });
+      curated = await callProvider(providers[0], params, system, prompt, { model: modelFor(providers[0]), claudeProxy: params.claudeProxy, codexProxy: params.codexProxy });
     } catch {
       curated = `${principalTurns[0].text}\n\n${principalTurns[1].text}`;
     }

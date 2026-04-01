@@ -26,6 +26,7 @@ export function TranscribePage({ onNavigate }: Props) {
   );
 
   const [elapsed, setElapsed] = useState(0);
+
   useEffect(() => {
     if (!urlStartedAt) { setElapsed(0); return; }
     setElapsed(Math.floor((Date.now() - urlStartedAt) / 1000));

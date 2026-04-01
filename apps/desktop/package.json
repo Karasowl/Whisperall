@@ -13,7 +13,10 @@
     "test:e2e": "playwright test",
     "lint": "echo lint-not-configured",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
-    "electron:dev": "tsc -p tsconfig.electron.json && node scripts/electron-dev.mjs"
+    "electron:dev": "tsc -p tsconfig.electron.json && node scripts/electron-dev.mjs",
+    "bundle:backend": "node scripts/bundle-backend.mjs",
+    "dist:win": "node scripts/pre-dist.mjs && vite build && tsc -p tsconfig.electron.json && npx electron-builder --config electron-builder.yml --win nsis",
+    "dist:dir": "node scripts/pre-dist.mjs && vite build && tsc -p tsconfig.electron.json && npx electron-builder --config electron-builder.yml --dir"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.95.2",
@@ -40,6 +43,8 @@
     "tailwindcss": "^4.1.18",
     "typescript": "^5.6.2",
     "vite": "^5.4.11",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "electron-builder": "^25.1.8"
   }
 }
+

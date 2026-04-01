@@ -57,6 +57,11 @@ contextBridge.exposeInMainWorld('whisperall', {
   readClipboard: () => ipcRenderer.invoke('clipboard:read') as Promise<string>,
   pasteText: (text: string) => ipcRenderer.send('clipboard:paste', text),
   undoPaste: () => ipcRenderer.send('clipboard:undo'),
+  onPasteText: (cb: (text: string) => void): Unsubscribe => {
+    const handler = (_e: Electron.IpcRendererEvent, text: string) => cb(text);
+    ipcRenderer.on('clipboard:paste-text', handler);
+    return () => ipcRenderer.removeListener('clipboard:paste-text', handler);
+  },
 
   // ── Auth ───────────────────────────────────────────────────
   getAuthStorageItem: (key: string) => ipcRenderer.invoke('auth-storage:get', key) as Promise<string | null>,
@@ -98,3 +103,4 @@ contextBridge.exposeInMainWorld('whisperall', {
   // ── Desktop Capturer ───────────────────────────────────────
   getDesktopSources: () => ipcRenderer.invoke('desktop-sources') as Promise<Array<{ id: string; name: string }>>,
 });
+

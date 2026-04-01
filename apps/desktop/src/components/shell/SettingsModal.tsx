@@ -439,6 +439,10 @@ export function SettingsModal({ onClose, onOpenPricing }: Props) {
               )}
               <ToggleSwitch label={t('settings.minimizeTray')} checked={settings.minimizeToTray} onChange={settings.setMinimizeToTray} />
               <ToggleSwitch label={t('settings.notifications')} checked={settings.showNotifications} onChange={settings.setShowNotifications} />
+              <div className="flex flex-col gap-1">
+                <ToggleSwitch label={t('settings.dictationCueSounds')} checked={settings.dictationCueSounds} onChange={settings.setDictationCueSounds} />
+                <p className="text-xs text-muted">{t('settings.dictationCueSoundsDesc')}</p>
+              </div>
             </div>
           </section>
         </div>
@@ -469,3 +473,4 @@ function ToggleSwitch({ label, checked, onChange }: { label: string; checked: bo
     </div>
   );
 }
+

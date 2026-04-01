@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { api } from '../lib/api';
 import { getSupabase } from '../lib/supabase';
 
-export type LocalProcessType = 'note_import' | 'ai_edit' | 'tts_read' | 'transcribe_file';
+export type LocalProcessType = 'note_import' | 'ai_edit' | 'tts_read' | 'transcribe_file' | 'note_retranscribe';
 export type LocalProcessStatus = 'queued' | 'running' | 'paused' | 'failed' | 'completed' | 'canceled';
 export type LocalProcess = {
   id: string;
@@ -44,7 +44,7 @@ type LocalProcessState = {
 export const LOCAL_PROCESSES_STORAGE_KEY = 'whisperall-local-processes-v1';
 const TERMINAL_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_STORED_PROCESSES = 200;
-const LOCAL_PROCESS_TYPES = new Set<LocalProcessType>(['note_import', 'ai_edit', 'tts_read', 'transcribe_file']);
+const LOCAL_PROCESS_TYPES = new Set<LocalProcessType>(['note_import', 'ai_edit', 'tts_read', 'transcribe_file', 'note_retranscribe']);
 const LOCAL_PROCESS_STATUSES = new Set<LocalProcessStatus>(['queued', 'running', 'paused', 'failed', 'completed', 'canceled']);
 
 let remoteSyncEnabled = false;
@@ -135,8 +135,15 @@ function loadStoredProcesses(): LocalProcess[] {
     if (!Array.isArray(parsed)) return [];
     const normalized = parsed.map(normalizeStoredProcess).filter((p): p is LocalProcess => !!p);
     const pruned = pruneProcesses(normalized);
-    if (pruned.length !== normalized.length) persistProcesses(pruned);
-    return pruned;
+    // Mark any running/queued processes as failed — they were interrupted when the app closed.
+    const recovered = pruned.map((p): LocalProcess => {
+      if (p.status !== 'running' && p.status !== 'queued') return p;
+      return { ...p, status: 'failed', error: p.error ?? 'Process interrupted (app was closed)', updatedAt: nowIso() };
+    });
+    if (recovered.some((p, i) => p !== pruned[i]) || pruned.length !== normalized.length) {
+      persistProcesses(recovered);
+    }
+    return recovered;
   } catch {
     return [];
   }
@@ -173,6 +180,7 @@ function shouldIgnoreRemoteError(err: unknown): boolean {
 
 async function upsertRemoteProcess(process: LocalProcess): Promise<void> {
   if (!remoteSyncEnabled || remoteUnavailable) return;
+  if (process.type === 'note_retranscribe') return;
   try {
     await api.processes.upsert(process.id, {
       process_type: process.type,

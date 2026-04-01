@@ -1,37 +1,44 @@
 appId: com.whisperall.desktop
 productName: Whisperall
-copyright: Copyright 2025 Whisperall
+copyright: Copyright 2026 Whisperall
+artifactName: Whisperall-Setup-${version}.${ext}
 
 directories:
   output: release
-  buildResources: build
+  buildResources: build-resources
 
 files:
   - dist/**/*
-  - electron/**/*.js
-  - electron/**/*.js.map
+  - electron-dist/**/*
   - package.json
 
+extraResources:
+  - from: backend-bundle
+    to: backend
+    filter:
+      - '**/*'
+  - from: build-resources/whisperall-tray.png
+    to: whisperall-tray.png
+
 extraMetadata:
-  main: electron/main.js
+  main: electron-dist/main.js
 
 win:
+  signAndEditExecutable: false
   target:
     - target: nsis
-      arch: [x64]
-  icon: build/icon.ico
+      arch:
+        - x64
+  icon: build-resources/icon.ico
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  installerIcon: build/icon.ico
-  uninstallerIcon: build/icon.ico
-  installerHeaderIcon: build/icon.ico
-
-publish:
-  provider: github
-  owner: whisperall
-  repo: whisperall
+  installerIcon: build-resources/icon.ico
+  uninstallerIcon: build-resources/icon.ico
+  installerHeaderIcon: build-resources/icon.ico
+  guid: com.whisperall.desktop
+  deleteAppDataOnUninstall: true
 
 asar: true
 compression: maximum

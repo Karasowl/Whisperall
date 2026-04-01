@@ -1,5 +1,5 @@
 import { ipcMain, desktopCapturer, Notification, shell } from 'electron';
-import { showMainWindow, getMainWindow } from './windows.js';
+import { showMainWindow, getMainWindow, setMinimizeToTray } from './windows.js';
 import {
   showOverlay, hideOverlay, toggleOverlay, resizeOverlay, setOverlayIgnoreMouse, sendSubtitleText,
   startOverlayDrag, moveOverlayDrag, endOverlayDrag, resetOverlayPosition,
@@ -71,14 +71,22 @@ export function registerIpcHandlers(): void {
   });
 
   // --- Tray ---
-  ipcMain.on('update-tray-settings', (_e, settings) => {
+  ipcMain.on('update-tray-settings', (_e, settings: { minimizeToTray?: boolean; showNotifications?: boolean }) => {
     updateTraySettings(settings);
+    if (typeof settings.minimizeToTray === 'boolean') {
+      setMinimizeToTray(settings.minimizeToTray);
+    }
   });
 
   // --- Clipboard ---
   ipcMain.handle('clipboard:read', () => readClipboard());
 
   ipcMain.on('clipboard:paste', async (_e, text: string) => {
+    const win = getMainWindow();
+    if (win && win.isFocused()) {
+      win.webContents.send('clipboard:paste-text', text);
+      return;
+    }
     await pasteText(text);
   });
 
@@ -171,3 +179,4 @@ export function registerIpcHandlers(): void {
     win.setTitleBarOverlay({ color, symbolColor, height: 40 });
   });
 }
+

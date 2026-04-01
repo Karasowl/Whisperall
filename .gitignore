@@ -88,6 +88,7 @@ electron/dist-msi*/
 apps/desktop/electron-dist/*.js
 apps/desktop/electron-dist/*.js.map
 apps/desktop/electron-dist/modules/
+apps/desktop/release/
 
 # Packaged backend artifacts
 backend-dist/
@@ -114,3 +115,7 @@ test-results/
 playwright-report/
 .playwright/
 .vercel
+
+# Installer backend staging
+apps/desktop/backend-bundle/
+

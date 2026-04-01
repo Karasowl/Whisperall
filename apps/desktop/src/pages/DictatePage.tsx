@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, type MouseEvent as ReactMouseEvent } from 'react';
 import type { Editor } from '@tiptap/react';
+import type { Page } from '../App';
 import { ApiError, type TranscriptSegment } from '@whisperall/api-client';
 import { useDictationStore } from '../stores/dictation';
 import { useLiveStore } from '../stores/live';
@@ -7,6 +8,9 @@ import { useSettingsStore } from '../stores/settings';
 import { useDocumentsStore } from '../stores/documents';
 import { useFoldersStore } from '../stores/folders';
 import { useAuthStore } from '../stores/auth';
+import { useProcessesStore } from '../stores/processes';
+import { useNotificationsStore } from '../stores/notifications';
+import { resolveTranscriptionJobProgress, resolveTranscriptionJobStage, transcriptionStageLabelKey, useTranscriptionStore } from '../stores/transcription';
 import { electron } from '../lib/electron';
 import { api } from '../lib/api';
 import { exportNote, exportNotesBundle, type ExportFormat } from '../lib/export';
@@ -27,8 +31,11 @@ import {
 } from '../lib/tts';
 import { PlanGate } from '../components/PlanGate';
 import { RichEditor } from '../components/editor/RichEditor';
-import { TranscriptView } from '../components/editor/TranscriptView';
-import { AudioPlayer, type AudioSeekRequest } from '../components/editor/AudioPlayer';
+import { type AudioSeekRequest } from '../components/editor/AudioPlayer';
+import { NoteAudioPanel } from '../components/notes/NoteAudioPanel';
+import { NoteRetranscribePanel } from '../components/notes/NoteRetranscribePanel';
+import { NoteTranscriptHistoryPanel } from '../components/notes/NoteTranscriptHistoryPanel';
+import { NoteProcessesPanel } from '../components/notes/NoteProcessesPanel';
 import { CustomPromptDialog, type CustomPrompt } from '../components/editor/CustomPromptDialog';
 import { AiBudgetDialog } from '../components/editor/AiBudgetDialog';
 import { DebatePanel } from '../components/notes/DebatePanel';
@@ -40,12 +47,24 @@ import { projectAiEditBudget } from '../lib/ai-edit-budget';
 import { requestPlanRefresh, usePlanStore } from '../stores/plan';
 
 const SOURCE_ICONS: Record<string, string> = { dictation: 'mic', live: 'groups', transcription: 'description', manual: 'edit_note', reader: 'menu_book' };
+const TRANSCRIBE_LANGUAGES = [
+  { code: 'auto', labelKey: 'transcribe.autoDetect' },
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'fr', label: 'French' },
+  { code: 'pt', label: 'Portuguese' },
+  { code: 'de', label: 'German' },
+  { code: 'it', label: 'Italian' },
+  { code: 'ja', label: 'Japanese' },
+  { code: 'ko', label: 'Korean' },
+  { code: 'zh', label: 'Chinese' },
+] as const;
 const BUILT_IN_MODES = [
   { id: 'casual', icon: 'chat' }, { id: 'clean_fillers', icon: 'cleaning_services' },
   { id: 'formal', icon: 'school' }, { id: 'summarize', icon: 'summarize' },
 ] as const;
 
-// ─── Color tag system ───
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Color tag system Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const NOTE_COLORS = ['blue', 'red', 'orange', 'yellow', 'green', 'purple', 'pink'] as const;
 type NoteColor = typeof NOTE_COLORS[number];
 const COLOR_STYLES: Record<NoteColor, { border: string; bg: string; dot: string }> = {
@@ -63,12 +82,15 @@ function setColorTag(tags: string[], color: NoteColor): string[] { return [...ta
 type ViewMode = 'grid' | 'list';
 type BudgetDialogKind = 'warn' | 'blocked';
 type ContextMenuMode = 'convert' | 'work';
+type NoteUtilityPanel = 'none' | 'history' | 'retranscribe' | 'audio';
 const VIEW_KEY = 'whisperall-notes-view';
 function loadViewMode(): ViewMode { return (localStorage.getItem(VIEW_KEY) as ViewMode) || 'grid'; }
 
 const PROMPTS_KEY = 'whisperall-custom-prompts';
 function loadCustomPrompts(): CustomPrompt[] { try { return JSON.parse(localStorage.getItem(PROMPTS_KEY) ?? '[]'); } catch { return []; } }
 function saveCustomPrompts(p: CustomPrompt[]) { localStorage.setItem(PROMPTS_KEY, JSON.stringify(p)); }
+
+type DictatePageProps = { onNavigate?: (page: Page) => void };
 
 type NoteTranscriptHistoryEntry = {
   id: string;
@@ -138,14 +160,38 @@ function htmlToPlainText(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-export function DictatePage() {
+export function DictatePage({ onNavigate }: DictatePageProps) {
   const t = useT();
   const dictation = useDictationStore();
   const live = useLiveStore();
   const { translateEnabled, setTranslateEnabled, uiLanguage, ttsLanguage, ttsVoice } = useSettingsStore();
-  const { documents, loading, fetchDocuments, createDocument, updateDocument, deleteDocument } = useDocumentsStore();
+  const { documents, loading, error: documentsError, fetchDocuments, createDocument, updateDocument, deleteDocument } = useDocumentsStore();
   const { folders, selectedFolderId, fetchFolders, selectFolder, deleteFolder } = useFoldersStore();
   const user = useAuthStore((s) => s.user);
+  const {
+    diarization: transcribeDiarization,
+    aiSummary: transcribeAiSummary,
+    punctuation: transcribePunctuation,
+    language: transcribeLanguage,
+    loading: transcribeLoading,
+    error: transcribeErrorState,
+    fullText: transcribeFullText,
+    stagedFile: stagedTranscribeFile,
+    stagedUrl: stagedTranscribeUrl,
+    jobs: transcribeJobs,
+    activeJobId: transcribeActiveJobId,
+    savedDocumentId: transcribeSavedDocumentId,
+    sourceAudioUrl: transcribeSourceAudioUrl,
+    setDiarization: setTranscribeDiarization,
+    setAiSummary: setTranscribeAiSummary,
+    setPunctuation: setTranscribePunctuation,
+    setLanguage: setTranscribeLanguage,
+    startTranscription,
+    cancelUrlTranscription,
+    cancelJob: cancelTranscribeJob,
+    urlStartedAt: transcribeUrlStartedAt,
+    setTargetDocumentId,
+  } = useTranscriptionStore();
 
   const [mode, setMode] = useState<'list' | 'edit'>('list');
   const [docId, setDocId] = useState<string | null>(null);
@@ -173,12 +219,14 @@ export function DictatePage() {
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [showBulkExport, setShowBulkExport] = useState(false);
+  const [utilityPanel, setUtilityPanel] = useState<NoteUtilityPanel>('none');
   const [retranscribeLanguage, setRetranscribeLanguage] = useState('auto');
   const [retranscribeDiarization, setRetranscribeDiarization] = useState(true);
   const [retranscribeLoading, setRetranscribeLoading] = useState(false);
   const [retranscribeError, setRetranscribeError] = useState('');
   const [importDocLoading, setImportDocLoading] = useState(false);
   const [importDocForceOcr, setImportDocForceOcr] = useState(false);
+  const [transcribeUrlDraft, setTranscribeUrlDraft] = useState('');
   const [transcriptHistory, setTranscriptHistory] = useState<NoteTranscriptHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoadedDocId, setHistoryLoadedDocId] = useState<string | null>(null);
@@ -199,22 +247,35 @@ export function DictatePage() {
   const prevSegCount = useRef(0);
   const editorRef = useRef<Editor | null>(null);
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
+  const transcribeFileInputRef = useRef<HTMLInputElement | null>(null);
   const actionFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const budgetResolverRef = useRef<((ok: boolean) => void) | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const seekNonceRef = useRef(0);
   const historyRequestSeq = useRef(0);
   const seededHistoryNotes = useRef<Record<string, boolean>>({});
+  const noteTranscribeProcessIdRef = useRef<string | null>(null);
+  const retranscribeAbortRef = useRef<AbortController | null>(null);
 
   const isLive = live.source === 'system';
   const status = isLive ? live.status : dictation.status;
   const hasContent = htmlContent.replace(/<[^>]*>/g, '').trim().length > 0;
   const currentDoc = useMemo(() => documents.find((d) => d.id === docId) ?? null, [documents, docId]);
-  const currentAudioUrl = currentDoc?.audio_url ?? null;
+  const persistedAudioUrl = currentDoc?.audio_url ?? null;
+  const jobAudioUrl = useMemo(() => {
+    if (!docId) return null;
+    const matchingJob = [...transcribeJobs].reverse().find((job) => job.documentId === docId && job.audioUrl);
+    return matchingJob?.audioUrl ?? null;
+  }, [docId, transcribeJobs]);
+  const runtimeAudioUrl = persistedAudioUrl ?? jobAudioUrl ?? (transcribeSavedDocumentId === docId ? transcribeSourceAudioUrl : null);
   const activeHistoryEntry = transcriptHistory.find((h) => h.id === activeHistoryId) ?? null;
   const activeSegments = activeHistoryEntry?.segments ?? [];
-  const showAudioPanel = !!currentAudioUrl;
-  const showTranscriptPanel = showAudioPanel && activeSegments.length > 0;
+  const activePlaybackAudioUrl = activeHistoryEntry?.audio_url ?? runtimeAudioUrl;
+  const retranscribeAudioUrl = activeHistoryEntry?.audio_url ?? persistedAudioUrl;
+  const hasAudioUtilities = !!activePlaybackAudioUrl;
+  const activeHistoryMeta = activeHistoryEntry
+    ? `${new Date(activeHistoryEntry.created_at).toLocaleString(uiLanguage === 'es' ? 'es-ES' : 'en-US')} Ã¢â‚¬Â¢ ${activeHistoryEntry.language} Ã¢â‚¬Â¢ ${activeHistoryEntry.diarization ? t('transcribe.diarization') : t('notes.noDiarization')}`
+    : '';
   const sourceLabel = (source: string) => {
     if (source === 'dictation') return t('dictate.dictation');
     if (source === 'live') return t('dictate.live');
@@ -230,11 +291,34 @@ export function DictatePage() {
     : noteReadProgress.status === 'paused'
       ? t('reader.resume')
       : t('reader.readAloud');
+  const activeTranscribeJob = transcribeActiveJobId ? transcribeJobs.find((job) => job.id === transcribeActiveJobId) ?? null : null;
+  const transcribeHasResumableJob = !!activeTranscribeJob && (
+    activeTranscribeJob.status === 'paused' ||
+    activeTranscribeJob.status === 'processing' ||
+    activeTranscribeJob.status === 'pending'
+  );
+  const transcribeHasInput = !!stagedTranscribeFile || !!stagedTranscribeUrl.trim();
+  const transcribeCanStart = (transcribeHasInput || transcribeHasResumableJob) && !transcribeLoading;
+  const transcribeButtonLabel = transcribeLoading
+    ? t('transcribe.processing')
+    : transcribeHasInput
+      ? t('transcribe.start')
+      : transcribeHasResumableJob
+        ? t('transcribe.resume')
+        : t('transcribe.start');
+  const transcribeStatusText = stagedTranscribeFile?.name || stagedTranscribeUrl || '';
+  const activeTranscribeStage = activeTranscribeJob ? resolveTranscriptionJobStage(activeTranscribeJob) : null;
+  const activeTranscribeProgress = activeTranscribeJob ? resolveTranscriptionJobProgress(activeTranscribeJob) : null;
+  const transcribeStageLabel = activeTranscribeStage ? t(transcriptionStageLabelKey(activeTranscribeStage)) : t('transcribe.processing');
+  const transcribeStageDetail = activeTranscribeProgress && activeTranscribeProgress.total > 0
+    ? `${activeTranscribeProgress.done}/${activeTranscribeProgress.total} · ${activeTranscribeProgress.pct}%`
+    : '';
+  const showInlineTranscribeStatus = transcribeLoading || !!transcribeErrorState || !!transcribeSavedDocumentId || !!activeTranscribeJob;
   const contextMenuStyle = useMemo(() => {
     if (!contextMenuPos) return null;
     if (typeof window === 'undefined') return { left: contextMenuPos.x, top: contextMenuPos.y };
-    const menuWidth = 236;
-    const menuHeight = 540;
+    const menuWidth = 296;
+    const menuHeight = 680;
     const margin = 12;
     const clampedX = Math.max(margin, Math.min(contextMenuPos.x, window.innerWidth - menuWidth - margin));
     const clampedY = Math.max(72, Math.min(contextMenuPos.y, window.innerHeight - menuHeight - margin));
@@ -243,6 +327,9 @@ export function DictatePage() {
 
   const closeContextMenu = useCallback(() => {
     setContextMenuPos(null);
+  }, []);
+  const toggleUtilityPanel = useCallback((panel: NoteUtilityPanel) => {
+    setUtilityPanel((prev) => (prev === panel ? 'none' : panel));
   }, []);
 
   const getSelectedEditorText = useCallback(() => {
@@ -282,7 +369,7 @@ export function DictatePage() {
     };
   }, [contextMenuPos, closeContextMenu]);
 
-  // Handle pending document open (from Transcribe → Open in Notes)
+  // Handle pending document open (from Transcribe Ã¢â€ â€™ Open in Notes)
   const pendingOpenId = useDocumentsStore((s) => s.pendingOpenId);
   useEffect(() => {
     if (pendingOpenId && documents.length > 0) {
@@ -327,7 +414,7 @@ export function DictatePage() {
   }, [t]);
 
   useEffect(() => {
-    if (!docId || !currentDoc?.source_id || !currentAudioUrl) return;
+    if (!docId || !currentDoc?.source_id) return;
     if (historyLoadedDocId !== docId || historyLoading) return;
     if (transcriptHistory.length > 0 || seededHistoryNotes.current[docId]) return;
     seededHistoryNotes.current[docId] = true;
@@ -340,15 +427,96 @@ export function DictatePage() {
           diarization: !!(res.segments && res.segments.length > 0),
           text,
           segments: res.segments ?? [],
-          audio_url: currentAudioUrl,
+          audio_url: persistedAudioUrl,
         });
         const entry = normalizeHistoryEntry(created as NoteTranscriptHistoryEntry);
         setTranscriptHistory([entry]);
         setActiveHistoryId(entry.id);
       })
       .catch(() => {});
-  }, [docId, currentAudioUrl, currentDoc?.source_id, historyLoadedDocId, historyLoading, transcriptHistory.length]);
+  }, [docId, persistedAudioUrl, currentDoc?.source_id, historyLoadedDocId, historyLoading, transcriptHistory.length]);
 
+  useEffect(() => {
+    if (utilityPanel === 'history' && !docId) setUtilityPanel('none');
+    if (utilityPanel === 'retranscribe' && !retranscribeAudioUrl) setUtilityPanel('none');
+    if (utilityPanel === 'audio' && !hasAudioUtilities) setUtilityPanel('none');
+  }, [docId, retranscribeAudioUrl, hasAudioUtilities, utilityPanel]);
+
+  useEffect(() => {
+    const processId = noteTranscribeProcessIdRef.current;
+    if (!processId) return;
+    const processStore = useProcessesStore.getState();
+
+    if (activeTranscribeJob && activeTranscribeJob.documentId === docId) {
+      processStore.remove(processId);
+      noteTranscribeProcessIdRef.current = null;
+      return;
+    }
+
+    if (activeTranscribeStage === 'paused') {
+      processStore.setStatus(processId, 'paused', 'transcribe.paused');
+      return;
+    }
+
+    if (activeTranscribeStage === 'canceled') {
+      processStore.setStatus(processId, 'canceled', 'processes.filter.canceled');
+      noteTranscribeProcessIdRef.current = null;
+      return;
+    }
+
+    if (activeTranscribeStage === 'failed') {
+      processStore.fail(processId, transcribeErrorState || t('transcribe.failed'), 'transcribe.failed');
+      noteTranscribeProcessIdRef.current = null;
+      return;
+    }
+
+    if (transcribeLoading) {
+      if (activeTranscribeProgress) {
+        processStore.setProgress(
+          processId,
+          activeTranscribeProgress.done,
+          activeTranscribeProgress.total,
+          activeTranscribeStage ? transcriptionStageLabelKey(activeTranscribeStage) : 'transcribe.processing',
+        );
+      } else {
+        processStore.setStatus(processId, 'running', activeTranscribeStage ? transcriptionStageLabelKey(activeTranscribeStage) : 'transcribe.processing');
+      }
+      return;
+    }
+
+    if (transcribeErrorState) {
+      processStore.fail(processId, transcribeErrorState, 'transcribe.failed');
+      noteTranscribeProcessIdRef.current = null;
+      return;
+    }
+
+    if (!activeTranscribeJob && (transcribeSavedDocumentId === docId || transcribeFullText.trim())) {
+      processStore.complete(processId, 'transcribe.completed');
+      noteTranscribeProcessIdRef.current = null;
+    }
+  }, [
+    activeTranscribeJob,
+    activeTranscribeProgress,
+    activeTranscribeStage,
+    docId,
+    t,
+    transcribeErrorState,
+    transcribeFullText,
+    transcribeLoading,
+    transcribeSavedDocumentId,
+  ]);
+
+  useEffect(() => {
+    if (!docId || transcribeSavedDocumentId !== docId || !currentDoc) return;
+    if (currentDoc.content !== htmlContent) {
+      setHtmlContent(currentDoc.content);
+      setPlainText(htmlToPlainText(currentDoc.content));
+    }
+    setSaved(true);
+    if (utilityPanel === 'none') {
+      setUtilityPanel(hasAudioUtilities ? 'audio' : 'history');
+    }
+  }, [currentDoc, docId, hasAudioUtilities, htmlContent, transcribeSavedDocumentId, utilityPanel]);
   // Filter documents
   const filteredDocs = useMemo(() => {
     let docs = documents;
@@ -395,6 +563,7 @@ export function DictatePage() {
     setActiveSegmentText('');
     setSeekRequest(null);
     setRetranscribeError('');
+    setUtilityPanel('none');
     setMode('edit'); setSaved(true);
     prevDictText.current = ''; prevSegCount.current = 0;
   };
@@ -416,6 +585,7 @@ export function DictatePage() {
     setActiveSegmentText('');
     setSeekRequest(null);
     setRetranscribeError('');
+    setUtilityPanel('none');
     setMode('edit'); setSaved(false);
     prevDictText.current = ''; prevSegCount.current = 0;
     if (autoRecord) {
@@ -430,6 +600,7 @@ export function DictatePage() {
     stopTTS();
     setNoteReadProgress(NOTE_READER_IDLE);
     historyRequestSeq.current += 1;
+    setUtilityPanel('none');
     setMode('list');
     setDocId(null);
     setSaved(false);
@@ -451,22 +622,31 @@ export function DictatePage() {
     fetchDocuments(selectedFolderId ?? undefined);
   };
 
-  const handleSave = async () => {
+  const persistCurrentNote = useCallback(async () => {
     const finalTitle = title.trim() || htmlContent.replace(/<[^>]*>/g, '').split(/[.\n]/)[0]?.slice(0, 60) || smartTitle(uiLanguage);
     const tags = setColorTag(noteTags, noteColor);
     setSaveError('');
     try {
       if (docId) {
         await updateDocument(docId, { title: finalTitle, content: htmlContent, tags });
-      } else {
-        const doc = await createDocument({ title: finalTitle, content: htmlContent, source: 'dictation', tags });
-        setDocId(doc.id);
+        setNoteTags(tags); setTitle(finalTitle); setSaved(true);
+        return docId;
       }
+      const doc = await createDocument({ title: finalTitle, content: htmlContent, source: 'dictation', tags });
+      setDocId(doc.id);
       setNoteTags(tags); setTitle(finalTitle); setSaved(true);
-    } catch (err) { setSaveError((err as Error).message); }
+      return doc.id;
+    } catch (err) {
+      setSaveError((err as Error).message);
+      return null;
+    }
+  }, [createDocument, docId, htmlContent, noteColor, noteTags, title, uiLanguage, updateDocument]);
+
+  const handleSave = async () => {
+    await persistCurrentNote();
   };
 
-  // Dictation text → insert at cursor (auto-flush every 30s + on stop)
+  // Dictation text Ã¢â€ â€™ insert at cursor (auto-flush every 30s + on stop)
   useEffect(() => {
     if (mode !== 'edit' || !editorRef.current) return;
     if (dictation.text && dictation.text !== prevDictText.current) {
@@ -479,7 +659,7 @@ export function DictatePage() {
     }
   }, [dictation.text, mode]);
 
-  // Live segments → append to editor
+  // Live segments Ã¢â€ â€™ append to editor
   useEffect(() => {
     if (mode !== 'edit' || !isLive || live.segments.length <= prevSegCount.current) return;
     const append = live.segments.slice(prevSegCount.current).map((s) =>
@@ -529,6 +709,13 @@ export function DictatePage() {
     setActiveSegmentIndex(null);
     setActiveSegmentText('');
     setSeekRequest(null);
+    showActionFeedback(t('notes.transcriptionApplied'), 'success');
+  };
+  const handleSelectHistoryEntry = (entryId: string) => {
+    setActiveHistoryId(entryId);
+    setActiveSegmentIndex(null);
+    setActiveSegmentText('');
+    setSeekRequest(null);
   };
   const handleDeleteHistoryEntry = async (entryId: string) => {
     if (!docId) return;
@@ -567,7 +754,7 @@ export function DictatePage() {
   };
   const handlePlayerTimeUpdate = useCallback((seconds: number) => {
     if (activeSegments.length === 0) return;
-    const idx = activeSegments.findIndex((seg) => seconds >= (seg.start ?? 0) && seconds <= (seg.end ?? seg.start ?? 0));
+    const idx = activeSegments.findIndex((seg) => seconds >= (seg.start ?? 0) && seconds <= (seg.end ?? seg.start ?? Number.MAX_SAFE_INTEGER));
     if (idx < 0) return;
     setActiveSegmentIndex((prev) => {
       if (prev === idx) return prev;
@@ -576,38 +763,60 @@ export function DictatePage() {
     });
   }, [activeSegments]);
   const handleRetranscribeFromNote = async () => {
-    if (!docId || !currentAudioUrl || retranscribeLoading) return;
+    if (!docId || !retranscribeAudioUrl || retranscribeLoading) return;
+    const processStore = useProcessesStore.getState();
+    const processId = processStore.start({
+      type: 'note_retranscribe',
+      title: [t('notes.retranscribeShort'), (title || t('notes.voiceNote')).trim()].join(' - '),
+      stageLabelKey: 'transcribe.detailProcessing',
+      documentId: docId,
+      total: 2,
+    });
+    retranscribeAbortRef.current?.abort();
+    const controller = new AbortController();
+    retranscribeAbortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 180_000);
     setRetranscribeLoading(true);
     setRetranscribeError('');
     try {
       const result = await api.transcribe.fromUrl({
-        url: currentAudioUrl,
+        url: retranscribeAudioUrl,
         language: retranscribeLanguage === 'auto' ? undefined : retranscribeLanguage,
         enable_diarization: retranscribeDiarization,
-      });
+      }, { signal: controller.signal });
+      processStore.setProgress(processId, 1, 2, 'transcribe.detailSaving');
       const created = await api.documents.createTranscription(docId, {
         language: retranscribeLanguage,
         diarization: retranscribeDiarization,
         text: result.text,
         segments: result.segments ?? [],
-        audio_url: currentAudioUrl,
+        audio_url: retranscribeAudioUrl,
       });
       const entry = normalizeHistoryEntry(created as NoteTranscriptHistoryEntry);
-      const nextHistory = [entry, ...transcriptHistory];
-      setTranscriptHistory(nextHistory);
+      setTranscriptHistory((prev) => [entry, ...prev]);
       setActiveHistoryId(entry.id);
-      setHtmlContent(safeHtmlParagraphs(result.text));
-      setPlainText(result.text);
-      setSaved(false);
       setActiveSegmentIndex(null);
       setActiveSegmentText('');
       setSeekRequest(null);
+      setUtilityPanel('history');
+      processStore.complete(processId, 'processes.noteRetranscribeDone');
+      showActionFeedback(t('notes.transcriptionVersionAdded'), 'success');
     } catch (err) {
+      if ((err as Error)?.name === 'AbortError') {
+        processStore.fail(processId, 'Cancelled', 'processes.noteRetranscribeFailed');
+        return;
+      }
       const msg = err instanceof ApiError ? err.message.replace(/^API error \d+:\s*/i, '') : (err as Error)?.message;
       setRetranscribeError(msg || 'Retranscription failed');
+      processStore.fail(processId, msg || 'Retranscription failed', 'processes.noteRetranscribeFailed');
     } finally {
+      clearTimeout(timeoutId);
+      if (retranscribeAbortRef.current === controller) retranscribeAbortRef.current = null;
       setRetranscribeLoading(false);
     }
+  };
+  const handleCancelRetranscribe = () => {
+    retranscribeAbortRef.current?.abort();
   };
   const handleToggle = () => {
     if (isLive) { live.status === 'recording' ? live.stop() : live.start(); }
@@ -618,11 +827,39 @@ export function DictatePage() {
     if (subtitlesActive) { electron?.hideOverlay(); setSubtitlesActive(false); }
     else { electron?.showOverlay('subtitles'); setSubtitlesActive(true); }
   };
-  const showActionFeedback = (message: string, tone: 'success' | 'error' | 'info') => {
+  const showActionFeedback = useCallback((message: string, tone: 'success' | 'error' | 'info') => {
     if (actionFeedbackTimer.current) clearTimeout(actionFeedbackTimer.current);
     setActionFeedback({ tone, message });
+    if (useSettingsStore.getState().showNotifications) {
+      useNotificationsStore.getState().push(message, tone);
+    }
     actionFeedbackTimer.current = setTimeout(() => { setActionFeedback(null); }, 2200);
-  };
+  }, []);
+  useEffect(() => {
+    const handlePasteIntent = (rawEvent: Event) => {
+      const event = rawEvent as CustomEvent<string>;
+      const text = typeof event.detail === 'string' ? event.detail : '';
+      if (!text || mode !== 'edit') return;
+      const activeElement = document.activeElement;
+      if (
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement ||
+        activeElement instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.chain().focus().insertContent(safeHtmlParagraphs(text)).run();
+      setSaved(false);
+      showActionFeedback(t('notes.pasteSuccess'), 'success');
+      event.preventDefault();
+    };
+    window.addEventListener('whisperall:paste-text', handlePasteIntent as EventListener);
+    return () => {
+      window.removeEventListener('whisperall:paste-text', handlePasteIntent as EventListener);
+    };
+  }, [mode, showActionFeedback, t]);
   const startNoteReader = (textOverride?: string) => {
     const textToRead = (textOverride?.trim() || noteReaderText).trim();
     if (!textToRead) {
@@ -670,6 +907,37 @@ export function DictatePage() {
     a.click();
     URL.revokeObjectURL(url);
   };
+  const handleTranscribeFile = (file?: File | null) => {
+    if (!file) return;
+    useTranscriptionStore.getState().stageFile(file);
+    setTranscribeUrlDraft('');
+  };
+  const handleStageTranscribeUrl = () => {
+    const next = transcribeUrlDraft.trim();
+    if (!next) return;
+    useTranscriptionStore.getState().stageUrl(next);
+  };
+  const handleStartInlineTranscription = async () => {
+    if (!transcribeCanStart) return;
+    const targetId = await persistCurrentNote();
+    if (!targetId) {
+      showActionFeedback(saveError || t('notes.processNeedsSave'), 'error');
+      return;
+    }
+    setTargetDocumentId(targetId);
+    if (!noteTranscribeProcessIdRef.current) {
+      noteTranscribeProcessIdRef.current = useProcessesStore.getState().start({
+        type: 'transcribe_file',
+        title: stagedTranscribeFile?.name || stagedTranscribeUrl || title.trim() || t('transcribe.title'),
+        stageLabelKey: activeTranscribeStage ? transcriptionStageLabelKey(activeTranscribeStage) : 'transcribe.stagePreparing',
+        documentId: targetId,
+        total: activeTranscribeProgress?.total || 1,
+      });
+    }
+    closeContextMenu();
+    void startTranscription();
+  };
+
   const handleImportDocument = async (file?: File | null) => {
     if (!file || importDocLoading) return;
     setImportDocLoading(true);
@@ -943,7 +1211,7 @@ export function DictatePage() {
     <div
       ref={contextMenuRef}
       style={{ left: contextMenuStyle.left, top: contextMenuStyle.top }}
-      className="fixed z-[90] w-[236px] rounded-lg border border-white/[0.08] bg-[#161e29]/[0.98] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.5),0_0_0_0.5px_rgba(255,255,255,0.04)] backdrop-blur-xl"
+      className="fixed z-[90] w-[296px] rounded-lg border border-white/[0.08] bg-[#161e29]/[0.98] py-1 shadow-[0_8px_30px_rgba(0,0,0,0.5),0_0_0_0.5px_rgba(255,255,255,0.04)] backdrop-blur-xl"
       data-testid="note-context-menu"
     >
       <div className="max-h-[60vh] overflow-y-auto">
@@ -993,7 +1261,7 @@ export function DictatePage() {
                 })}
                 {renderDockAction({
                   icon: live.source === 'mic' ? 'mic' : 'desktop_windows',
-                  label: live.source === 'mic' ? `${t('dictate.mic')} → ${t('dictate.system')}` : `${t('dictate.system')} → ${t('dictate.mic')}`,
+                  label: live.source === 'mic' ? `${t('dictate.mic')} Ã¢â€ â€™ ${t('dictate.system')}` : `${t('dictate.system')} Ã¢â€ â€™ ${t('dictate.mic')}`,
                   onClick: handleToggleSource,
                   disabled: status === 'recording',
                   kind: 'setting',
@@ -1019,41 +1287,198 @@ export function DictatePage() {
                 })}
 
                 {renderDockDivider()}
-                <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.groupImport')}</p>
-                {renderDockAction({
-                  icon: 'upload_file',
-                  label: importDocLoading ? t('history.loading') : t('notes.importDocument'),
-                  onClick: () => importFileInputRef.current?.click(),
-                  disabled: importDocLoading,
-                  testId: 'note-import-file-btn',
-                })}
-                {renderDockAction({
-                  icon: importDocForceOcr ? 'check_box' : 'check_box_outline_blank',
-                  label: t('notes.importForceOcr'),
-                  onClick: () => setImportDocForceOcr((prev) => !prev),
-                  tone: importDocForceOcr ? 'primary' : 'neutral',
-                  kind: 'setting',
-                  testId: 'note-import-force-ocr',
-                })}
-
-                {renderDockDivider()}
                 <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.groupTranscribe')}</p>
                 {renderDockAction({
-                  icon: 'graphic_eq',
-                  label: retranscribeLoading ? t('transcribe.processing') : t('notes.retranscribeNow'),
-                  onClick: () => { void handleRetranscribeFromNote(); },
-                  disabled: retranscribeLoading || !docId || !currentAudioUrl,
-                  tone: 'primary',
+                  icon: 'upload_file',
+                  label: t('transcribe.upload'),
+                  onClick: () => {
+                    transcribeFileInputRef.current?.click();
+                  },
+                  kind: 'setting',
+                  tone: stagedTranscribeFile ? 'primary' : 'neutral',
                   testId: 'note-transcribe-file-btn',
                 })}
-                {renderDockAction({
-                  icon: retranscribeDiarization ? 'check_box' : 'check_box_outline_blank',
-                  label: t('transcribe.diarization'),
-                  onClick: () => setRetranscribeDiarization((v) => !v),
-                  tone: retranscribeDiarization ? 'primary' : 'neutral',
-                  kind: 'setting',
-                  testId: 'note-transcribe-diarize',
-                })}
+                <div className="px-3 pt-2" data-testid="note-transcribe-url-row">
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('transcribe.pasteLink')}</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="url"
+                      value={transcribeUrlDraft}
+                      onChange={(e) => setTranscribeUrlDraft(e.target.value)}
+                      placeholder={t('transcribe.urlPlaceholder')}
+                      className="min-w-0 flex-1 rounded-md border border-edge bg-base px-2.5 py-2 text-[12px] text-text outline-none transition-colors placeholder:text-muted/40 focus:border-primary"
+                      data-testid="note-transcribe-url-input"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleStageTranscribeUrl}
+                      className="rounded-md border border-edge bg-surface px-2.5 py-2 text-[11px] font-medium text-text/90 transition-colors hover:border-primary hover:text-primary"
+                      data-testid="note-transcribe-url-btn"
+                    >
+                      {t('transcribe.loadUrl')}
+                    </button>
+                  </div>
+                </div>
+                {transcribeStatusText && (
+                  <p className="px-3 pt-2 text-[11px] leading-5 text-primary/85 break-all" data-testid="note-transcribe-staged-source">
+                    {transcribeStatusText}
+                  </p>
+                )}
+                <div className="px-3 pt-3">
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('transcribe.spokenLang')}</label>
+                  <select
+                    value={transcribeLanguage}
+                    onChange={(e) => setTranscribeLanguage(e.target.value)}
+                    className="w-full rounded-md border border-edge bg-base px-2.5 py-2 text-[12px] text-text outline-none transition-colors focus:border-primary"
+                    data-testid="note-transcribe-language"
+                  >
+                    {TRANSCRIBE_LANGUAGES.map((option) => (
+                      <option key={option.code} value={option.code}>{option.labelKey ? t(option.labelKey) : option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mt-2 space-y-1.5 px-3">
+                  <label className="flex items-center justify-between gap-3 rounded-md border border-edge/70 bg-white/[0.02] px-2.5 py-2 text-[12px] text-text/90" data-testid="note-transcribe-diarization-row">
+                    <span className="font-medium">{t('transcribe.diarization')}</span>
+                    <input type="checkbox" checked={transcribeDiarization} onChange={(e) => setTranscribeDiarization(e.target.checked)} className="accent-primary" />
+                  </label>
+                  <label className="flex items-center justify-between gap-3 rounded-md border border-edge/70 bg-white/[0.02] px-2.5 py-2 text-[12px] text-text/90" data-testid="note-transcribe-summary-row">
+                    <span className="font-medium">{t('transcribe.aiSummary')}</span>
+                    <input type="checkbox" checked={transcribeAiSummary} onChange={(e) => setTranscribeAiSummary(e.target.checked)} className="accent-primary" />
+                  </label>
+                  <label className="flex items-center justify-between gap-3 rounded-md border border-edge/70 bg-white/[0.02] px-2.5 py-2 text-[12px] text-text/90" data-testid="note-transcribe-punctuation-row">
+                    <span className="font-medium">{t('transcribe.punctuation')}</span>
+                    <input type="checkbox" checked={transcribePunctuation} onChange={(e) => setTranscribePunctuation(e.target.checked)} className="accent-primary" />
+                  </label>
+                </div>
+                <div className="px-3 pt-3">
+                  <button
+                    type="button"
+                    onClick={handleStartInlineTranscription}
+                    disabled={!transcribeCanStart}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                    data-testid="note-start-transcribe-btn"
+                  >
+                    <span>{transcribeButtonLabel}</span>
+                    {transcribeLoading && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
+                  </button>
+                </div>
+                {showInlineTranscribeStatus && (
+                  <div
+                    className={`mx-3 mt-3 rounded-lg border px-3 py-2.5 ${
+                      transcribeErrorState
+                        ? 'border-red-500/25 bg-red-500/8'
+                        : transcribeSavedDocumentId
+                          ? 'border-emerald-500/25 bg-emerald-500/8'
+                          : 'border-primary/20 bg-primary/8'
+                    }`}
+                    data-testid="note-transcribe-status-card"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className={`text-[12px] font-semibold ${
+                          transcribeErrorState ? 'text-red-200' : transcribeSavedDocumentId ? 'text-emerald-200' : 'text-text'
+                        }`}>
+                          {transcribeErrorState ? t('transcribe.failed') : transcribeSavedDocumentId ? t('transcribe.savedToNotes') : transcribeStageLabel}
+                        </p>
+                        {!transcribeErrorState && transcribeStageDetail && (
+                          <p className="pt-0.5 text-[11px] text-muted/70">{transcribeStageDetail}</p>
+                        )}
+                        {transcribeStatusText && (
+                          <p className="pt-1 text-[11px] leading-5 text-muted/65 break-all">{transcribeStatusText}</p>
+                        )}
+                        {transcribeErrorState && (
+                          <p className="pt-1 text-[11px] leading-5 text-red-200/90">{transcribeErrorState}</p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {transcribeLoading && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (transcribeUrlStartedAt != null) cancelUrlTranscription();
+                              else if (transcribeActiveJobId) cancelTranscribeJob(transcribeActiveJobId);
+                            }}
+                            className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-300 transition-colors hover:bg-red-500/15"
+                            data-testid="note-cancel-transcribe-btn"
+                          >
+                            {t('reader.stop')}
+                          </button>
+                        )}
+                        {onNavigate && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              closeContextMenu();
+                              onNavigate('processes');
+                            }}
+                            className="rounded-md border border-edge px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:border-primary hover:text-primary"
+                            data-testid="note-open-processes-hub-btn"
+                          >
+                            {t('processes.openHub')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {!transcribeErrorState && activeTranscribeProgress && activeTranscribeProgress.total > 0 && (
+                      <div className="mt-2">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all duration-300"
+                            style={{ width: `${activeTranscribeProgress.pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {docId && (
+                  <>
+                    {renderDockDivider()}
+                    <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.linkedAudio')}</p>
+                    {renderDockAction({
+                      icon: 'history',
+                      label: t('notes.historyShort'),
+                      onClick: () => {
+                        toggleUtilityPanel('history');
+                        closeContextMenu();
+                      },
+                      disabled: false,
+                      tone: utilityPanel === 'history' ? 'primary' : 'neutral',
+                      testId: 'note-open-history-panel-btn',
+                    })}
+                    {hasAudioUtilities ? (
+                      <>
+                        {renderDockAction({
+                          icon: 'audio_file',
+                          label: t('notes.audioShort'),
+                          onClick: () => {
+                            toggleUtilityPanel('audio');
+                            closeContextMenu();
+                          },
+                          disabled: false,
+                          tone: utilityPanel === 'audio' ? 'primary' : 'neutral',
+                          testId: 'note-open-audio-panel-btn',
+                        })}
+                        {renderDockAction({
+                          icon: 'graphic_eq',
+                          label: t('notes.retranscribeShort'),
+                          onClick: () => {
+                            toggleUtilityPanel('retranscribe');
+                            closeContextMenu();
+                          },
+                          disabled: false,
+                          tone: utilityPanel === 'retranscribe' ? 'primary' : 'neutral',
+                          testId: 'note-open-retranscribe-panel-btn',
+                        })}
+                      </>
+                    ) : (
+                      <p className="px-3 py-2 text-[11px] leading-5 text-muted/60" data-testid="note-transcribe-needs-audio">
+                        {t('notes.audioMissing')}
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             </PlanGate>
           </div>
@@ -1149,8 +1574,6 @@ export function DictatePage() {
           </div>
         )}
 
-        {renderDockDivider()}
-        <p className="px-3 pb-1 text-[10px] leading-tight text-muted/40">{t('notes.processNeedsSave')}</p>
       </div>
     </div>
   ) : null;
@@ -1166,7 +1589,7 @@ export function DictatePage() {
     };
   }, []);
 
-  // ─── LIST MODE ───
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ LIST MODE Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   if (mode === 'list') return (
     <div className="flex-1 min-h-0 relative flex flex-col bg-base" data-testid="dictate-page">
       <div className="px-8 pt-12 pb-4">
@@ -1265,7 +1688,23 @@ export function DictatePage() {
             </div>
           )
         )}
-        {!loading && filteredDocs.length === 0 && (
+        {!loading && documentsError && filteredDocs.length === 0 && (
+          <div className="rounded-2xl border border-red-500/25 bg-red-500/8 px-5 py-4 mb-4 flex flex-wrap items-center justify-between gap-3" data-testid="notes-load-error">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-red-300">{t('notes.loadFailed')}</p>
+              <p className="text-xs text-red-200/80 break-words">{documentsError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { void fetchDocuments(selectedFolderId ?? undefined); }}
+              className="h-10 px-3 rounded-xl bg-surface border border-edge text-sm text-text hover:border-primary hover:text-primary transition-colors"
+              data-testid="notes-retry-load-btn"
+            >
+              {t('history.retry')}
+            </button>
+          </div>
+        )}
+        {!loading && !documentsError && filteredDocs.length === 0 && (
           <div className="text-center py-16 text-muted">
             <span className="material-symbols-outlined text-[48px] mb-4 block">note_stack</span>
             <p>{searchQuery || colorFilter ? t('notes.noResults') : t('notes.empty')}</p>
@@ -1404,7 +1843,7 @@ export function DictatePage() {
     </div>
   );
 
-  // ─── EDIT MODE ───
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ EDIT MODE Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   return (
     <div className="flex-1 min-h-0 relative flex flex-col bg-base" data-testid="dictate-page">
       <header className="shrink-0 px-8 pt-8 pb-4 flex flex-col gap-3">
@@ -1424,6 +1863,40 @@ export function DictatePage() {
                 <span className="material-symbols-outlined text-[14px]">{actionFeedback.tone === 'success' ? 'check_circle' : actionFeedback.tone === 'error' ? 'error' : 'info'}</span>
                 {actionFeedback.message}
               </span>
+            )}
+            {docId && (
+              <button
+                type="button"
+                onClick={() => toggleUtilityPanel('history')}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityPanel === 'history' ? 'border-primary/50 bg-primary/10 text-primary' : 'border-edge text-muted hover:text-text hover:bg-surface'}`}
+                data-testid="note-history-toggle"
+              >
+                <span className="material-symbols-outlined text-[16px]">history</span>
+                {t('notes.historyShort')}
+                {transcriptHistory.length > 0 && <span className="rounded-full bg-base/70 px-1.5 py-0.5 text-[10px] text-muted">{transcriptHistory.length}</span>}
+              </button>
+            )}
+            {hasAudioUtilities && (
+              <button
+                type="button"
+                onClick={() => toggleUtilityPanel('audio')}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityPanel === 'audio' ? 'border-primary/50 bg-primary/10 text-primary' : 'border-edge text-muted hover:text-text hover:bg-surface'}`}
+                data-testid="note-audio-toggle"
+              >
+                <span className="material-symbols-outlined text-[16px]">audio_file</span>
+                {t('notes.audioShort')}
+              </button>
+            )}
+            {retranscribeAudioUrl && (
+              <button
+                type="button"
+                onClick={() => toggleUtilityPanel('retranscribe')}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityPanel === 'retranscribe' ? 'border-primary/50 bg-primary/10 text-primary' : 'border-edge text-muted hover:text-text hover:bg-surface'}`}
+                data-testid="note-retranscribe-toggle"
+              >
+                <span className="material-symbols-outlined text-[16px]">graphic_eq</span>
+                {t('notes.retranscribeShort')}
+              </button>
             )}
             <button onClick={handleCopy} disabled={!hasContent} title={t('dictate.copy')}
               className="p-2 rounded-lg text-muted hover:text-primary hover:bg-surface transition-colors disabled:opacity-30" data-testid="copy-btn">
@@ -1471,46 +1944,15 @@ export function DictatePage() {
           onChange={(e) => { void handleImportDocument(e.target.files?.[0]); e.currentTarget.value = ''; }}
           data-testid="note-import-file-input"
         />
-        {docId && currentAudioUrl && (
-          <div className="mt-2 rounded-xl border border-edge bg-surface/50 px-3 py-2 flex flex-wrap items-center gap-2" data-testid="note-retranscribe-controls">
-            <span className="text-xs text-muted">{t('notes.retranscribe')}</span>
-            <select
-              value={retranscribeLanguage}
-              onChange={(e) => setRetranscribeLanguage(e.target.value)}
-              className="styled-select text-xs bg-surface border border-edge rounded px-2 py-1 text-text cursor-pointer outline-none"
-              data-testid="note-retranscribe-language"
-            >
-              <option value="auto">{t('transcribe.autoDetect')}</option>
-              <option value="es">Español</option>
-              <option value="en">English</option>
-              <option value="pt">Português</option>
-              <option value="fr">Français</option>
-              <option value="de">Deutsch</option>
-              <option value="it">Italiano</option>
-            </select>
-            <label className="inline-flex items-center gap-1.5 text-xs text-muted select-none">
-              <input
-                type="checkbox"
-                checked={retranscribeDiarization}
-                onChange={(e) => setRetranscribeDiarization(e.target.checked)}
-                className="accent-primary"
-                data-testid="note-retranscribe-diarization"
-              />
-              {t('transcribe.diarization')}
-            </label>
-            <button
-              type="button"
-              onClick={() => { void handleRetranscribeFromNote(); }}
-              disabled={retranscribeLoading}
-              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
-              data-testid="note-retranscribe-btn"
-            >
-              <span className="material-symbols-outlined text-[14px]">refresh</span>
-              {retranscribeLoading ? t('transcribe.processing') : t('notes.retranscribeNow')}
-            </button>
-            {retranscribeError && <span className="w-full text-xs text-red-400 mt-1">{retranscribeError}</span>}
-          </div>
-        )}
+        <input
+          ref={transcribeFileInputRef}
+          type="file"
+          accept="audio/*,video/*"
+          className="hidden"
+          onChange={(e) => { handleTranscribeFile(e.target.files?.[0]); e.currentTarget.value = ''; }}
+          data-testid="note-transcribe-file-input"
+        />
+
       </header>
 
       <div className="flex-1 min-h-0 flex">
@@ -1532,50 +1974,48 @@ export function DictatePage() {
                 <span className="inline-block w-0.5 h-5 bg-primary ml-1 animate-pulse align-middle" />
               </div>
             )}
-            {docId && (historyLoading || !!historyError || transcriptHistory.length > 0) && (
-              <div className="mb-4 rounded-xl border border-edge bg-surface/50 p-3" data-testid="note-transcript-history">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-text">{t('notes.transcriptionHistory')}</p>
-                  <span className="text-[11px] text-muted">{transcriptHistory.length}</span>
-                </div>
-                {historyLoading && <p className="text-xs text-muted">{t('history.loading')}</p>}
-                {historyError && !historyLoading && <p className="text-xs text-red-400">{historyError}</p>}
-                <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
-                  {transcriptHistory.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className={`rounded-lg border px-2 py-2 ${activeHistoryId === entry.id ? 'border-primary/50 bg-primary/10' : 'border-edge bg-surface'}`}
-                      data-testid={`history-entry-${entry.id}`}
-                    >
-                      <div className="flex items-center gap-2 text-[11px] text-muted">
-                        <span>{new Date(entry.created_at).toLocaleString(uiLanguage === 'es' ? 'es-ES' : 'en-US')}</span>
-                        <span>•</span>
-                        <span>{entry.language}</span>
-                        <span>•</span>
-                        <span>{entry.diarization ? t('transcribe.diarization') : t('notes.noDiarization')}</span>
-                      </div>
-                      <p className="text-xs text-text mt-1 line-clamp-2">{entry.text || '...'}</p>
-                      <div className="mt-2 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleApplyHistoryEntry(entry.id)}
-                          className="text-[11px] px-2 py-1 rounded bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
-                          data-testid={`history-apply-${entry.id}`}
-                        >
-                          {t('notes.applyTranscription')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { void handleDeleteHistoryEntry(entry.id); }}
-                          className="text-[11px] px-2 py-1 rounded bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
-                          data-testid={`history-delete-${entry.id}`}
-                        >
-                          {t('notes.deleteTranscription')}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            {docId && <NoteProcessesPanel documentId={docId} onOpenProcesses={onNavigate ? () => onNavigate('processes') : undefined} />}
+            {utilityPanel !== 'none' && (
+              <div className="mb-4" data-testid={`note-utility-panel-${utilityPanel}`}>
+                {utilityPanel === 'history' && docId && (
+                  <NoteTranscriptHistoryPanel
+                    entries={transcriptHistory}
+                    activeId={activeHistoryId}
+                    loading={historyLoading}
+                    error={historyError}
+                    locale={uiLanguage}
+                    onSelect={handleSelectHistoryEntry}
+                    onApply={handleApplyHistoryEntry}
+                    onDelete={(entryId) => { void handleDeleteHistoryEntry(entryId); }}
+                  />
+                )}
+                {utilityPanel === 'retranscribe' && retranscribeAudioUrl && (
+                  <NoteRetranscribePanel
+                    language={retranscribeLanguage}
+                    diarization={retranscribeDiarization}
+                    loading={retranscribeLoading}
+                    error={retranscribeError}
+                    onChangeLanguage={setRetranscribeLanguage}
+                    onChangeDiarization={setRetranscribeDiarization}
+                    onRun={() => { void handleRetranscribeFromNote(); }}
+                    onCancel={retranscribeLoading ? handleCancelRetranscribe : undefined}
+                  />
+                )}
+                {utilityPanel === 'audio' && (
+                  <NoteAudioPanel
+                    audioUrl={activePlaybackAudioUrl}
+                    title={title || t('notes.voiceNote')}
+                    metaText={activeHistoryMeta}
+                    activeSegmentText={activeSegmentText}
+                    seekRequest={seekRequest}
+                    onTimeUpdate={handlePlayerTimeUpdate}
+                    segments={activeSegments}
+                    activeIndex={activeSegmentIndex}
+                    speakerAliases={speakerAliases}
+                    onSelectSegment={handleSelectSegment}
+                    onRenameSpeaker={handleRenameSpeaker}
+                  />
+                )}
               </div>
             )}
             <div className="relative" onContextMenu={handleEditorContextMenu} data-testid="note-editor-interaction-zone">
@@ -1588,32 +2028,7 @@ export function DictatePage() {
                 onAiSelection={handleAiSelection}
               />
             </div>
-            {showAudioPanel && (
-              <div className="mt-6 rounded-xl border border-edge bg-surface/40 p-4">
-                {showTranscriptPanel ? (
-                  <TranscriptView
-                    segments={activeSegments}
-                    activeIndex={activeSegmentIndex}
-                    speakerAliases={speakerAliases}
-                    onSelectSegment={handleSelectSegment}
-                    onRenameSpeaker={handleRenameSpeaker}
-                  />
-                ) : (
-                  <p className="text-xs text-muted mb-2">{t('notes.audioNoTranscript')}</p>
-                )}
-                {currentAudioUrl && (
-                  <div className="mt-4">
-                    <AudioPlayer
-                      audioUrl={currentAudioUrl}
-                      title={title || t('notes.voiceNote')}
-                      activeSegmentText={activeSegmentText}
-                      seekRequest={seekRequest}
-                      onTimeUpdate={handlePlayerTimeUpdate}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+
             {dictation.translatedText && (
               <div className="pt-2 mt-4 border-t border-edge text-base text-muted italic whitespace-pre-wrap" data-testid="translated-text">{dictation.translatedText}</div>
             )}

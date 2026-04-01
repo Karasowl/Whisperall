@@ -132,9 +132,11 @@ async def list_documents(user: AuthUser = Depends(get_current_user), folder_id: 
         res = q.order("updated_at", desc=True).execute()
         return res.data or []
     except Exception as e:
-        log.warning("documents list failed (table may not exist): %s", e)
-        return []
-
+        if _error_mentions_missing_relation(e, "documents"):
+            log.warning("documents list failed (table may not exist): %s", e)
+            return []
+        log.error("documents list failed: %s", e)
+        raise HTTPException(500, f"Failed to list documents: {e}")
 
 @router.get("/{doc_id}")
 async def get_document(doc_id: str, user: AuthUser = Depends(get_current_user)):

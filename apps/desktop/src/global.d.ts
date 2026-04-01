@@ -59,6 +59,7 @@ declare global {
       readClipboard: () => Promise<string>;
       pasteText: (text: string) => void;
       undoPaste: () => void;
+      onPasteText: (cb: (text: string) => void) => Unsubscribe;
 
       // Shell
       showMainWindow: () => void;
@@ -71,3 +72,4 @@ declare global {
     };
   }
 }
+

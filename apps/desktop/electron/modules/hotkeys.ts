@@ -50,6 +50,20 @@ const BACKGROUND_ACTIONS = new Set([
   'dictate-toggle', 'dictate-start', 'dictate-stop', 'stt-paste', 'read-clipboard',
 ]);
 
+function sameHotkeys(next: HotkeyConfig): boolean {
+  const keys = new Set([...Object.keys(currentHotkeys), ...Object.keys(next)]);
+  for (const key of keys) {
+    if ((currentHotkeys as Record<string, string | undefined>)[key] !== (next as Record<string, string | undefined>)[key]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sameSttSettings(next: SttSettings): boolean {
+  return next.hotkey_mode === sttSettings.hotkey_mode && next.overlay_enabled === sttSettings.overlay_enabled;
+}
+
 function sendToMain(action: string, focus: boolean): void {
   const win = getMainWindow();
   if (!win) return;
@@ -97,6 +111,11 @@ export function registerHotkeys(): void {
         }
 
         if (action === 'stt-paste') {
+          const win = getMainWindow();
+          if (win && win.isFocused()) {
+            win.webContents.send('clipboard:paste-text', lastDictationText);
+            return;
+          }
           pasteText(lastDictationText);
           return;
         }
@@ -133,12 +152,16 @@ export function registerHotkeys(): void {
 }
 
 export function updateHotkeys(hotkeys: Partial<HotkeyConfig>): void {
-  currentHotkeys = { ...currentHotkeys, ...hotkeys };
+  const nextHotkeys = { ...currentHotkeys, ...hotkeys };
+  if (sameHotkeys(nextHotkeys)) return;
+  currentHotkeys = nextHotkeys;
   registerHotkeys();
 }
 
 export function updateSttSettings(settings: Partial<SttSettings>): void {
-  sttSettings = { ...sttSettings, ...settings };
+  const nextSettings = { ...sttSettings, ...settings };
+  if (sameSttSettings(nextSettings)) return;
+  sttSettings = nextSettings;
 }
 
 export function setLastDictationText(text: string): void {
@@ -152,3 +175,5 @@ export function getLastDictationText(): string {
 export function unregisterAll(): void {
   globalShortcut.unregisterAll();
 }
+
+

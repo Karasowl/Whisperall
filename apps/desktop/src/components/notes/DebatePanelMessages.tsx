@@ -3,16 +3,25 @@ import { useT } from '../../lib/i18n';
 import { providerLabel } from '../../lib/debate-ai';
 import type { DebateMessage } from '../../lib/debate-storage';
 import { DebatePanelCuratedCard } from './DebatePanelCuratedCard';
+import { DebatePanelTrace } from './DebatePanelTrace';
 import { MiniMarkdown } from './MiniMarkdown';
 
 type ApplyMode = 'insert' | 'replace' | 'append';
+type SuggestedTargetPosition = 'start' | 'end' | 'before_match' | 'after_match';
+type SuggestedTarget = { position: SuggestedTargetPosition; match?: string };
 
 type Props = {
   messages: DebateMessage[];
+  traceMessages: DebateMessage[];
+  traceParticipants: string[];
+  tracePrincipalCount: number;
+  traceSubagentCount: number;
+  traceToolCount: number;
   running: boolean;
   providerInfo: string;
   lastSuggestion: string;
   suggestedMode: ApplyMode;
+  suggestedTarget?: SuggestedTarget | null;
   hasSelection: boolean;
   noSuggestion: boolean;
   onApply: (mode: ApplyMode) => void;
@@ -35,9 +44,32 @@ function speakerName(msg: DebateMessage): string {
   return msg.speaker;
 }
 
+function cleanDisplayText(text: string): string {
+  return text
+    .replace(/```(?:json)?\s*[\s\S]*?```/gi, '')
+    .replace(/`json\s*[\s\S]*?`/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function DebatePanelMessages({
-  messages, running, providerInfo, lastSuggestion, suggestedMode,
-  hasSelection, noSuggestion, onApply, onUndo, onDeleteMessage, onClearChat,
+  messages,
+  traceMessages,
+  traceParticipants,
+  tracePrincipalCount,
+  traceSubagentCount,
+  traceToolCount,
+  running,
+  providerInfo,
+  lastSuggestion,
+  suggestedMode,
+  suggestedTarget,
+  hasSelection,
+  noSuggestion,
+  onApply,
+  onUndo,
+  onDeleteMessage,
+  onClearChat,
 }: Props) {
   const t = useT();
   const endRef = useRef<HTMLDivElement>(null);
@@ -61,27 +93,38 @@ export function DebatePanelMessages({
         </div>
       )}
 
-      {messages.map((msg) => (
-        <div key={msg.id} className={`group relative rounded-lg border-l-[3px] px-3 py-2.5 ${msgBorder(msg.provider, msg.role)}`}>
-          <button
-            type="button"
-            onClick={() => onDeleteMessage(msg.id)}
-            className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-muted/50 hover:text-red-400 hover:bg-red-400/10 transition-all"
-            title={t('notes.debateDeleteMessage')}
-            data-testid="debate-delete-msg"
-          >
-            <span className="material-symbols-outlined text-[14px]">close</span>
-          </button>
-          <p className="text-[11px] text-muted mb-0.5">
-            {speakerName(msg)}
-            {msg.model && <span className="ml-1.5 text-muted/50">{msg.model}</span>}
-          </p>
-          {msg.role === 'user'
-            ? <p className="text-[13px] text-text whitespace-pre-wrap leading-relaxed">{msg.text}</p>
-            : <MiniMarkdown text={msg.text} />
-          }
-        </div>
-      ))}
+      <DebatePanelTrace
+        items={traceMessages}
+        participants={traceParticipants}
+        principalCount={tracePrincipalCount}
+        subagentCount={traceSubagentCount}
+        toolCount={traceToolCount}
+      />
+
+      {messages.map((msg) => {
+        const bodyText = msg.role === 'user' ? msg.text : cleanDisplayText(msg.text);
+        if (!bodyText.trim()) return null;
+        return (
+          <div key={msg.id} className={`group relative rounded-lg border-l-[3px] px-3 py-2.5 ${msgBorder(msg.provider, msg.role)}`}>
+            <button
+              type="button"
+              onClick={() => onDeleteMessage(msg.id)}
+              className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 h-5 w-5 flex items-center justify-center rounded text-muted/50 hover:text-red-400 hover:bg-red-400/10 transition-all"
+              title={t('notes.debateDeleteMessage')}
+              data-testid="debate-delete-msg"
+            >
+              <span className="material-symbols-outlined text-[14px]">close</span>
+            </button>
+            <p className="text-[11px] text-muted mb-0.5">
+              {speakerName(msg)}
+              {msg.model && <span className="ml-1.5 text-muted/50">· {msg.model}</span>}
+            </p>
+            {msg.role === 'user'
+              ? <p className="text-[13px] text-text whitespace-pre-wrap leading-relaxed">{bodyText}</p>
+              : <MiniMarkdown text={bodyText} />}
+          </div>
+        );
+      })}
 
       {running && (
         <div className="rounded-lg border-l-[3px] border-l-edge bg-base/30 px-3 py-3 space-y-2">
@@ -97,6 +140,7 @@ export function DebatePanelMessages({
       <DebatePanelCuratedCard
         text={lastSuggestion}
         suggestedMode={suggestedMode}
+        suggestedTarget={suggestedTarget}
         hasSelection={hasSelection}
         noSuggestion={noSuggestion}
         onApply={onApply}

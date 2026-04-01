@@ -79,14 +79,19 @@ export function configureMediaPermissions(): void {
   const defaultSession = session.defaultSession;
   if (!defaultSession) return;
 
-  // Grant all media + screen capture permissions (mic, system audio, desktop capture)
-  const ALLOWED_PERMISSIONS = new Set(['media', 'display-capture', 'screen']);
+  // permissionRequestHandler: grant mic access when getUserMedia is actually called.
+  // permissionCheckHandler: do NOT report 'media' as pre-granted — this prevents
+  // Chromium from keeping the mic "reserved" at the OS level, which would force
+  // Bluetooth headphones into low-quality HFP/SCO mode even when idle.
+  const CHECK_ALLOWED = new Set(['display-capture', 'screen']);
+  const REQUEST_ALLOWED = new Set(['media', 'display-capture', 'screen']);
+
   defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(ALLOWED_PERMISSIONS.has(permission as string));
+    callback(REQUEST_ALLOWED.has(permission as string));
   });
 
   defaultSession.setPermissionCheckHandler((_wc, permission) => {
-    return ALLOWED_PERMISSIONS.has(permission as string);
+    return CHECK_ALLOWED.has(permission as string);
   });
 
   // Electron 33+: auto-grant getDisplayMedia requests with system audio loopback

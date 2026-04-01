@@ -1,5 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNotificationsStore, type NotifTone } from '../../stores/notifications';
+import { useProcessesStore } from '../../stores/processes';
+import { useTranscriptionStore } from '../../stores/transcription';
+import { combineProcessItems } from '../../lib/processes';
 import { useT } from '../../lib/i18n';
 
 const TONE_ICON: Record<NotifTone, string> = { success: 'check_circle', error: 'error', info: 'info' };
@@ -20,12 +23,15 @@ function timeAgo(ts: number): string {
 export function NotificationBell({ onOpenProcesses }: NotificationBellProps = {}) {
   const t = useT();
   const items = useNotificationsStore((s) => s.items);
+  const jobs = useTranscriptionStore((s) => s.jobs);
+  const localProcesses = useProcessesStore((s) => s.localProcesses);
   const markAllRead = useNotificationsStore((s) => s.markAllRead);
   const dismiss = useNotificationsStore((s) => s.dismiss);
   const clear = useNotificationsStore((s) => s.clear);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const unread = items.filter((n) => !n.read).length;
+  const processItems = useMemo(() => combineProcessItems(jobs, localProcesses), [jobs, localProcesses]);
 
   useEffect(() => {
     if (!open) return;
@@ -76,7 +82,30 @@ export function NotificationBell({ onOpenProcesses }: NotificationBellProps = {}
               </button>
             </div>
           )}
-          {items.length === 0 ? (
+          {processItems.length > 0 && (
+            <div className="border-b border-edge/70 px-3 py-2">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted/50">{t('nav.processes')}</div>
+              <div className="space-y-1.5">
+                {processItems.slice(0, 6).map((process) => (
+                  <button
+                    key={process.id}
+                    type="button"
+                    onClick={() => { onOpenProcesses?.(); setOpen(false); }}
+                    className="w-full rounded-lg border border-edge/70 bg-surface/50 px-2.5 py-2 text-left hover:border-primary/40"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="min-w-0 truncate text-[12px] text-text/90">{process.title}</span>
+                      <span className="shrink-0 text-[11px] text-muted">{t(`processes.filter.${process.status}`)} · {process.pct}%</span>
+                    </div>
+                    {process.error && (
+                      <div className="mt-1 line-clamp-2 text-[11px] text-red-300">{process.error}</div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {items.length === 0 && processItems.length === 0 ? (
             <p className="px-3 py-6 text-center text-xs text-muted/40">No notifications</p>
           ) : (
             items.map((n) => (
@@ -98,7 +127,6 @@ export function NotificationBell({ onOpenProcesses }: NotificationBellProps = {}
   );
 }
 
-/** Floating toast for the latest notification — auto-dismisses for success/info, persists for errors. */
 export function NotificationToast() {
   const items = useNotificationsStore((s) => s.items);
   const dismiss = useNotificationsStore((s) => s.dismiss);

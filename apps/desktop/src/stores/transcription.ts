@@ -27,6 +27,7 @@ export type TranscriptionJob = TranscribeJobResponse & {
   uploadedChunks?: number;
   uploadTotalChunks?: number;
   documentId?: string | null;
+  error?: string | null;
 };
 
 type TranscriptionErrorKind = 'plan_limit' | 'storage' | 'diarization_config' | 'generic';
@@ -150,11 +151,13 @@ export type TranscriptionState = {
   savedDocumentId: string | null;
   sourceAudioUrl: string | null;
   urlStartedAt: number | null;
+  targetDocumentId: string | null;
 
   setDiarization: (v: boolean) => void;
   setAiSummary: (v: boolean) => void;
   setPunctuation: (v: boolean) => void;
   setLanguage: (lang: string) => void;
+  setTargetDocumentId: (documentId: string | null) => void;
   stageFile: (file: File) => void;
   stageUrl: (url: string) => void;
   clearStaged: () => void;
@@ -172,7 +175,31 @@ export type TranscriptionState = {
 };
 
 const URL_TIMEOUT_MS = 180_000; // 3 minutes
+const FILE_TIMEOUT_MS = 10 * 60_000; // 10 minutes
 let urlAbortController: AbortController | null = null;
+let fileAbortController: AbortController | null = null;
+let stagedFileObjectUrl: string | null = null;
+
+function revokeOwnedObjectUrl(url: string | null | undefined): void {
+  if (!url || url !== stagedFileObjectUrl) return;
+  try {
+    URL.revokeObjectURL(url);
+  } catch {
+    // ignore cleanup failures
+  }
+  stagedFileObjectUrl = null;
+}
+
+function replaceStagedFileObjectUrl(file: File): string {
+  revokeOwnedObjectUrl(stagedFileObjectUrl);
+  stagedFileObjectUrl = URL.createObjectURL(file);
+  return stagedFileObjectUrl;
+}
+
+function persistableAudioUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return /^https?:\/\//i.test(url) ? url : null;
+}
 
 function stageFromServerStatus(status: string): TranscriptionJobStage {
   if (status === 'completed') return 'completed';
@@ -261,29 +288,40 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
   savedDocumentId: null,
   sourceAudioUrl: null,
   urlStartedAt: null,
+  targetDocumentId: null,
 
   setDiarization: (v) => set({ diarization: v }),
   setAiSummary: (v) => set({ aiSummary: v }),
   setPunctuation: (v) => set({ punctuation: v }),
   setLanguage: (lang) => set({ language: lang }),
+  setTargetDocumentId: (documentId) => set({ targetDocumentId: documentId }),
 
-  stageFile: (file) => set({
-    stagedFile: file,
-    stagedUrl: '',
-    error: null,
-    savedDocumentId: null,
-    sourceAudioUrl: null,
-    fullText: '',
-  }),
-  stageUrl: (url) => set({
-    stagedUrl: url,
-    stagedFile: null,
-    error: null,
-    savedDocumentId: null,
-    sourceAudioUrl: url.trim() || null,
-    fullText: '',
-  }),
-  clearStaged: () => set({ stagedFile: null, stagedUrl: '', sourceAudioUrl: null }),
+  stageFile: (file) => {
+    const nextObjectUrl = replaceStagedFileObjectUrl(file);
+    set({
+      stagedFile: file,
+      stagedUrl: '',
+      error: null,
+      savedDocumentId: null,
+      sourceAudioUrl: nextObjectUrl,
+      fullText: '',
+    });
+  },
+  stageUrl: (url) => {
+    revokeOwnedObjectUrl(get().sourceAudioUrl);
+    set({
+      stagedUrl: url,
+      stagedFile: null,
+      error: null,
+      savedDocumentId: null,
+      sourceAudioUrl: url.trim() || null,
+      fullText: '',
+    });
+  },
+  clearStaged: () => {
+    revokeOwnedObjectUrl(get().sourceAudioUrl);
+    set({ stagedFile: null, stagedUrl: '', sourceAudioUrl: null });
+  },
 
   cancelUrlTranscription: () => {
     urlAbortController?.abort();
@@ -301,7 +339,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
       const controller = new AbortController();
       urlAbortController = controller;
       const timeoutId = setTimeout(() => controller.abort(), URL_TIMEOUT_MS);
-      set({ loading: true, error: null, savedDocumentId: null, urlStartedAt: Date.now() });
+      set({ loading: true, error: null, savedDocumentId: null, fullText: '', segments: [], activeJobId: null, urlStartedAt: Date.now() });
       try {
         const lang = language === 'auto' ? undefined : language;
         const result = await api.transcribe.fromUrl({
@@ -312,6 +350,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         clearTimeout(timeoutId);
         urlAbortController = null;
         const directAudioUrl = stagedUrl.trim() || null;
+        const targetDocumentId = get().targetDocumentId;
         set({
           fullText: result.text,
           segments: result.segments ?? [],
@@ -322,11 +361,25 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         });
         requestPlanRefresh();
         if (result.text.trim()) {
-          const sourceHost = new URL(stagedUrl).hostname;
-          const docId = await saveAsNote(sourceHost, result.text, {
-            audioUrl: directAudioUrl ?? undefined,
-          });
-          set({ savedDocumentId: docId });
+          if (targetDocumentId) {
+            const transcriptHtml = safeHtmlParagraphs(result.text);
+            const existingDoc = useDocumentsStore.getState().documents.find((doc) => doc.id === targetDocumentId) ?? null;
+            const hasExistingContent = !!existingDoc?.content.replace(/<[^>]*>/g, ' ').trim();
+            const mergedContent = hasExistingContent ? `${existingDoc?.content}<p></p>${transcriptHtml}` : transcriptHtml;
+            await useDocumentsStore.getState().updateDocument(targetDocumentId, {
+              content: mergedContent,
+              audio_url: directAudioUrl,
+            });
+            set({ savedDocumentId: targetDocumentId, targetDocumentId: null });
+          } else {
+            const sourceHost = new URL(stagedUrl).hostname;
+            const docId = await saveAsNote(sourceHost, result.text, {
+              audioUrl: directAudioUrl ?? undefined,
+            });
+            set({ savedDocumentId: docId, targetDocumentId: null });
+          }
+        } else {
+          set({ targetDocumentId: null });
         }
       } catch (err) {
         clearTimeout(timeoutId);
@@ -353,10 +406,10 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         return;
       }
 
-      set({ loading: true, error: null, savedDocumentId: null });
+      set({ loading: true, error: null, savedDocumentId: null, fullText: '', segments: [], activeJobId: null });
       try {
         set((s) => ({
-          jobs: s.jobs.map((j) => (j.id === resumableJob.id ? { ...j, stage: 'processing' } : j)),
+          jobs: s.jobs.map((j) => (j.id === resumableJob.id ? { ...j, stage: 'processing', error: null } : j)),
         }));
         let jobStatus = 'processing';
         while (jobStatus === 'processing') {
@@ -364,7 +417,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
           set((s) => ({
             jobs: s.jobs.map((j) => (
               j.id === resumableJob.id
-                ? { ...j, ...result, stage: result.status === 'completed' ? 'finalizing' : stageFromServerStatus(result.status) }
+                ? { ...j, ...result, stage: result.status === 'completed' ? 'finalizing' : stageFromServerStatus(result.status), error: null }
                 : j
             )),
           }));
@@ -382,7 +435,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
           error: normalized.message,
           jobs: s.jobs.map((j) => (
             j.id === resumableJob.id
-              ? { ...j, status: normalized.kind === 'plan_limit' ? 'paused' : 'failed', stage: normalized.kind === 'plan_limit' ? 'paused' : 'failed' }
+              ? { ...j, status: normalized.kind === 'plan_limit' ? 'paused' : 'failed', stage: normalized.kind === 'plan_limit' ? 'paused' : 'failed', error: normalized.message }
               : j
           )),
         }));
@@ -391,7 +444,11 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
   },
 
   createJob: async (file, language) => {
-    set({ loading: true, error: null, savedDocumentId: null, sourceAudioUrl: null });
+    fileAbortController?.abort();
+    const fileController = new AbortController();
+    fileAbortController = fileController;
+    const fileTimeoutId = setTimeout(() => fileController.abort(), FILE_TIMEOUT_MS);
+    set({ loading: true, error: null, savedDocumentId: null, fullText: '', segments: [], activeJobId: null });
     let currentJobId: string | null = null;
     try {
       const diarization = get().diarization;
@@ -412,6 +469,9 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
           stage: 'uploading',
           uploadedChunks: 0,
           uploadTotalChunks: chunkParts.length,
+          audioUrl: get().sourceAudioUrl ?? null,
+          documentId: get().targetDocumentId,
+          error: null,
         }],
         activeJobId: job.id,
       }));
@@ -431,6 +491,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
         if (!uploadedOriginal.error) {
           const { data } = sb.storage.from('audio').getPublicUrl(originalPath);
           originalAudioUrl = data.publicUrl;
+          revokeOwnedObjectUrl(get().sourceAudioUrl);
           set((s) => ({
             sourceAudioUrl: originalAudioUrl ?? null,
             jobs: s.jobs.map((j) => (j.id === job.id ? { ...j, audioUrl: originalAudioUrl } : j)),
@@ -473,11 +534,21 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
       // Process in batches — supports long files without HTTP timeout.
       let jobStatus = 'processing';
       while (jobStatus === 'processing') {
+        if (fileController.signal.aborted) {
+          set((s) => ({
+            loading: false,
+            jobs: currentJobId
+              ? s.jobs.map((j) => j.id === currentJobId ? { ...j, status: 'canceled', stage: 'canceled' } : j)
+              : s.jobs,
+            activeJobId: s.activeJobId === currentJobId ? null : s.activeJobId,
+          }));
+          return;
+        }
         const result = await api.transcribe.run(job.id, { max_chunks: TRANSCRIBE_BATCH_SIZE });
         set((s) => ({
           jobs: s.jobs.map((j) => (
             j.id === job.id
-              ? { ...j, ...result, stage: result.status === 'completed' ? 'finalizing' : stageFromServerStatus(result.status) }
+              ? { ...j, ...result, stage: result.status === 'completed' ? 'finalizing' : stageFromServerStatus(result.status), error: null }
               : j
           )),
         }));
@@ -496,11 +567,14 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
           jobs: currentJobId
             ? s.jobs.map((j) => (
               j.id === currentJobId
-                ? { ...j, status: normalized.kind === 'plan_limit' ? 'paused' : 'failed', stage: normalized.kind === 'plan_limit' ? 'paused' : 'failed' }
+                ? { ...j, status: normalized.kind === 'plan_limit' ? 'paused' : 'failed', stage: normalized.kind === 'plan_limit' ? 'paused' : 'failed', error: normalized.message }
                 : j
             ))
             : s.jobs,
       }));
+    } finally {
+      clearTimeout(fileTimeoutId);
+      if (fileAbortController === fileController) fileAbortController = null;
     }
   },
 
@@ -510,7 +584,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
       set((s) => ({
         jobs: s.jobs.map((j) => (
           j.id === jobId
-            ? { ...j, ...job, stage: (j.stage === 'uploading' || j.stage === 'finalizing' || j.stage === 'saving') ? j.stage : stageFromServerStatus(job.status) }
+            ? { ...j, ...job, error: job.status === 'failed' ? j.error : null, stage: (j.stage === 'uploading' || j.stage === 'finalizing' || j.stage === 'saving') ? j.stage : stageFromServerStatus(job.status) }
             : j
         )),
       }));
@@ -535,31 +609,54 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
           jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'saving' } : j)),
         }));
         const job = get().jobs.find((j) => j.id === jobId);
-        const docId = await saveAsNote(job?.filename ?? 'Transcription', result.text, {
-          sourceId: jobId,
-          audioUrl: job?.audioUrl ?? get().sourceAudioUrl ?? undefined,
-        });
-        set((s) => ({
-          savedDocumentId: docId,
-          jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'completed', status: 'completed', documentId: docId } : j)),
-        }));
+        const targetDocumentId = job?.documentId ?? get().targetDocumentId;
+        const transcriptHtml = safeHtmlParagraphs(result.text);
+        const audioUrl = job?.audioUrl ?? get().sourceAudioUrl ?? null;
+        const storedAudioUrl = persistableAudioUrl(audioUrl);
+        if (targetDocumentId) {
+          const existingDoc = useDocumentsStore.getState().documents.find((doc) => doc.id === targetDocumentId) ?? null;
+          const hasExistingContent = !!existingDoc?.content.replace(/<[^>]*>/g, ' ').trim();
+          const mergedContent = hasExistingContent ? `${existingDoc?.content}<p></p>${transcriptHtml}` : transcriptHtml;
+          await useDocumentsStore.getState().updateDocument(targetDocumentId, {
+            content: mergedContent,
+            source_id: jobId,
+            audio_url: storedAudioUrl,
+          });
+          set((s) => ({
+            savedDocumentId: targetDocumentId,
+            targetDocumentId: null,
+            jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'completed', status: 'completed', documentId: targetDocumentId, error: null, audioUrl: audioUrl ?? j.audioUrl } : j)),
+          }));
+        } else {
+          const docId = await saveAsNote(job?.filename ?? 'Transcription', result.text, {
+            sourceId: jobId,
+            audioUrl: storedAudioUrl ?? undefined,
+          });
+          set((s) => ({
+            savedDocumentId: docId,
+            targetDocumentId: null,
+            jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'completed', status: 'completed', documentId: docId, error: null, audioUrl: audioUrl ?? j.audioUrl } : j)),
+          }));
+        }
       } else {
         set((s) => ({
-          jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'completed', status: 'completed' } : j)),
+          targetDocumentId: null,
+          jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'completed', status: 'completed', error: null } : j)),
         }));
       }
     } catch (err) {
       const normalized = normalizeTranscriptionError(err);
       set((s) => ({
         error: normalized.message,
-        jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'failed' } : j)),
+        jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, stage: 'failed', status: 'failed', error: normalized.message } : j)),
       }));
     }
   },
-
   setActiveJob: (jobId) => set({ activeJobId: jobId }),
 
   pauseJob: (jobId) => {
+    fileAbortController?.abort();
+    fileAbortController = null;
     set((s) => ({
       jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: 'paused', stage: 'paused' } : j)),
       activeJobId: jobId,
@@ -567,7 +664,10 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
   },
 
   cancelJob: (jobId) => {
+    fileAbortController?.abort();
+    fileAbortController = null;
     set((s) => ({
+      loading: s.activeJobId === jobId ? false : s.loading,
       jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: 'canceled', stage: 'canceled' } : j)),
       activeJobId: s.activeJobId === jobId ? null : s.activeJobId,
     }));
@@ -576,7 +676,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
   resumeJob: async (jobId) => {
     set((s) => ({
       activeJobId: jobId,
-      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: 'processing', stage: 'processing' } : j)),
+      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: 'processing', stage: 'processing', error: null } : j)),
     }));
     await get().startTranscription();
   },
@@ -611,6 +711,9 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
   reset: () => {
     urlAbortController?.abort();
     urlAbortController = null;
+    fileAbortController?.abort();
+    fileAbortController = null;
+    revokeOwnedObjectUrl(get().sourceAudioUrl);
     set({
       jobs: [],
       activeJobId: null,
@@ -627,6 +730,7 @@ export const useTranscriptionStore = create<TranscriptionState>((set, get) => ({
       savedDocumentId: null,
       sourceAudioUrl: null,
       urlStartedAt: null,
+      targetDocumentId: null,
     });
   },
 }));

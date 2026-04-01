@@ -28,6 +28,7 @@ export type SettingsState = {
   overlayEnabled: boolean;
   minimizeToTray: boolean;
   showNotifications: boolean;
+  dictationCueSounds: boolean;
   hotkeys: Record<string, string>;
   translateEnabled: boolean;
   translateTo: string;
@@ -46,6 +47,7 @@ export type SettingsState = {
   resetOverlayPosition: () => void;
   setMinimizeToTray: (enabled: boolean) => void;
   setShowNotifications: (enabled: boolean) => void;
+  setDictationCueSounds: (enabled: boolean) => void;
   setHotkey: (action: string, accelerator: string) => void;
   setTranslateEnabled: (enabled: boolean) => void;
   setTranslateTo: (lang: string) => void;
@@ -56,6 +58,7 @@ export type SettingsState = {
 };
 
 const STORAGE_KEY = 'whisperall-settings';
+let lastElectronSyncSignature: string | null = null;
 
 function persist(state: Partial<SettingsState>): void {
   try {
@@ -113,6 +116,24 @@ function normalizeReaderDisplay(input: unknown): ReaderDisplaySettings {
   };
 }
 
+function isOverlayRenderer(): boolean {
+  try {
+    return typeof window !== 'undefined' && String(window.location?.href ?? '').includes('overlay.html');
+  } catch {
+    return false;
+  }
+}
+
+function buildElectronSyncSignature(saved: Partial<SettingsState>): string {
+  return JSON.stringify({
+    hotkeys: saved.hotkeys ?? null,
+    minimizeToTray: saved.minimizeToTray ?? null,
+    showNotifications: saved.showNotifications ?? null,
+    hotkeyMode: saved.hotkeyMode ?? null,
+    overlayEnabled: saved.overlayEnabled ?? null,
+  });
+}
+
 export function applyTheme(theme: Theme): void {
   const resolved = theme === 'system'
     ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
@@ -158,6 +179,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   overlayEnabled: true,
   minimizeToTray: true,
   showNotifications: true,
+  dictationCueSounds: true,
   hotkeys: {
     dictate: 'Alt+X',
     read_clipboard: 'Ctrl+Shift+R',
@@ -244,6 +266,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     electron?.updateTraySettings({ showNotifications });
   },
 
+  setDictationCueSounds: (dictationCueSounds) => {
+    set({ dictationCueSounds });
+    persist({ dictationCueSounds });
+  },
+
   setTranslateEnabled: (translateEnabled) => {
     set({ translateEnabled });
     persist({ translateEnabled });
@@ -287,9 +314,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const theme = (saved.theme as Theme) || 'dark';
     applyTheme(theme);
     setupSystemListener(theme);
-    // Sync to Electron main process
+    if (isOverlayRenderer()) return;
+
+    const syncSignature = buildElectronSyncSignature(saved);
+    if (syncSignature === lastElectronSyncSignature) return;
+    lastElectronSyncSignature = syncSignature;
+
+    // Sync to Electron main process once per unique settings snapshot.
     if (saved.hotkeys) electron?.updateHotkeys(saved.hotkeys as Record<string, string>);
     if (saved.minimizeToTray !== undefined) electron?.updateTraySettings({ minimizeToTray: saved.minimizeToTray as boolean });
+    if (saved.showNotifications !== undefined) electron?.updateTraySettings({ showNotifications: saved.showNotifications as boolean });
     if (saved.hotkeyMode) electron?.updateSttSettings({ hotkey_mode: saved.hotkeyMode as string });
     if (saved.overlayEnabled !== undefined) {
       const enabled = saved.overlayEnabled as boolean;
@@ -299,3 +333,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 }));
+
+
+

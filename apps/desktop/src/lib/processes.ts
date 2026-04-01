@@ -4,7 +4,7 @@ import { resolveTranscriptionJobProgress, resolveTranscriptionJobStage, transcri
 
 export type ProcessStatus = 'queued' | 'running' | 'paused' | 'failed' | 'completed' | 'canceled';
 export type ProcessFilter = 'all' | ProcessStatus;
-export type ProcessType = 'transcribe_file' | 'note_import' | 'ai_edit' | 'tts_read';
+export type ProcessType = 'transcribe_file' | 'note_import' | 'ai_edit' | 'tts_read' | 'note_retranscribe';
 export type ProcessItem = {
   id: string;
   type: ProcessType;
@@ -15,7 +15,12 @@ export type ProcessItem = {
   total: number;
   pct: number;
   documentId: string | null;
+  error: string | null;
 };
+
+function processDedupeKey(item: Pick<ProcessItem, 'type' | 'title' | 'documentId'>): string {
+  return `${item.type}::${item.documentId ?? ''}::${item.title.trim().toLowerCase()}`;
+}
 
 export function processStatusFromTranscriptionJob(job: TranscriptionJob): ProcessStatus {
   const stage = resolveTranscriptionJobStage(job);
@@ -40,6 +45,7 @@ export function mapTranscriptionJobToProcess(job: TranscriptionJob): ProcessItem
     total: progress.total,
     pct: progress.pct,
     documentId: job.documentId ?? null,
+    error: job.error ?? null,
   };
 }
 
@@ -54,7 +60,29 @@ export function mapLocalProcessToProcess(process: LocalProcess): ProcessItem {
     total: process.total,
     pct: process.pct,
     documentId: process.documentId,
+    error: process.error,
   };
+}
+
+export function combineProcessItems(jobs: TranscriptionJob[], localProcesses: LocalProcess[]): ProcessItem[] {
+  const transcriptionItems = jobs.map(mapTranscriptionJobToProcess);
+  const activeTranscriptionKeys = new Set(
+    transcriptionItems
+      .filter((item) => item.type === 'transcribe_file' && item.status !== 'completed' && item.status !== 'failed' && item.status !== 'canceled')
+      .map(processDedupeKey),
+  );
+  const localItems = localProcesses
+    .map(mapLocalProcessToProcess)
+    .filter((item) => !(item.type === 'transcribe_file' && activeTranscriptionKeys.has(processDedupeKey(item))));
+  return [...transcriptionItems, ...localItems];
+}
+
+export function combineProcessesForDocument(
+  documentId: string,
+  jobs: TranscriptionJob[],
+  localProcesses: LocalProcess[],
+): ProcessItem[] {
+  return combineProcessItems(jobs, localProcesses).filter((item) => item.documentId === documentId);
 }
 
 export function processMatchesFilter(item: ProcessItem, filter: ProcessFilter): boolean {

@@ -4,6 +4,8 @@ import { SettingsModal } from './SettingsModal';
 import { PricingModal } from './PricingModal';
 import { isElectron } from '../../lib/electron';
 import type { Page } from '../../App';
+import { NotificationBell, NotificationToast } from '../ui/NotificationsPanel';
+import { useSettingsStore } from '../../stores/settings';
 
 type Props = {
   page: Page;
@@ -20,6 +22,7 @@ type Props = {
 
 export function AppShell({ page, onNavigate, showSettings, onToggleSettings, showPricing, onTogglePricing, onNewNote, onVoiceNote, onDeleteFolder, children }: Props) {
   const openPricing = () => { onToggleSettings(false); onTogglePricing(true); };
+  const showNotifications = useSettingsStore((s) => s.showNotifications);
 
   return (
     <div className="flex h-screen overflow-hidden bg-base text-text font-display">
@@ -27,13 +30,19 @@ export function AppShell({ page, onNavigate, showSettings, onToggleSettings, sho
         onNewNote={onNewNote} onVoiceNote={onVoiceNote} onDeleteFolder={onDeleteFolder} />
       <main className="flex-1 relative flex flex-col overflow-hidden">
         <div className="drag-region absolute top-0 left-0 right-0 h-10 z-10" />
+        {showNotifications && (
+          <div className="absolute top-10 right-4 z-30 no-drag">
+            <NotificationBell onOpenProcesses={() => onNavigate('processes')} />
+          </div>
+        )}
         {!isElectron() && (
           <div className="bg-amber-900/60 border-b border-amber-700/50 px-4 py-2 text-xs text-amber-200 text-center mt-10 z-20">
-            Browser mode — hotkeys, widget &amp; clipboard require the Electron window. Use the desktop window, not this tab.
+            Browser mode - hotkeys, widget &amp; clipboard require the Electron window. Use the desktop window, not this tab.
           </div>
         )}
         {children}
       </main>
+      {showNotifications && <NotificationToast />}
       {showSettings && <SettingsModal onClose={() => onToggleSettings(false)} onOpenPricing={openPricing} />}
       {showPricing && <PricingModal onClose={() => onTogglePricing(false)} />}
     </div>

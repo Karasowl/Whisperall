@@ -1,7 +1,7 @@
 import { app, Tray, Menu, nativeImage } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { showMainWindow } from './windows.js';
+import { showMainWindow, setMinimizeToTray } from './windows.js';
 import { showOverlay } from './overlay.js';
 
 let tray: Tray | null = null;
@@ -19,14 +19,20 @@ let settings: TraySettings = {
 function getIconPath(): string | null {
   const isDev = !app.isPackaged;
   const base = isDev ? path.join(__dirname, '..', '..') : process.resourcesPath;
-  const candidates = ['whisperall-tray.png', 'icon.png'].map((f) => path.join(base, f));
+  const buildRes = isDev ? path.join(__dirname, '..', '..', 'build-resources') : process.resourcesPath;
+  const candidates = [
+    path.join(base, 'whisperall-tray.png'),
+    path.join(base, 'icon.png'),
+    path.join(buildRes, 'icon.ico'),
+    path.join(base, 'icon.ico'),
+  ];
   return candidates.find((p) => fs.existsSync(p)) ?? null;
 }
 
-function createTray(): void {
-  if (tray) return;
+function createTray(): boolean {
+  if (tray) return true;
   const iconPath = getIconPath();
-  if (!iconPath) return;
+  if (!iconPath) return false;
 
   tray = new Tray(nativeImage.createFromPath(iconPath));
   tray.setToolTip('Whisperall');
@@ -40,11 +46,17 @@ function createTray(): void {
       { label: 'Quit', click: () => app.quit() },
     ]),
   );
+  return true;
 }
 
 export function syncTray(): void {
   if (settings.minimizeToTray) {
-    createTray();
+    if (!createTray()) {
+      // No tray icon available — disable minimize-to-tray so closing actually quits
+      console.warn('[tray] No icon found, disabling minimize-to-tray');
+      settings.minimizeToTray = false;
+      setMinimizeToTray(false);
+    }
   } else if (tray) {
     tray.destroy();
     tray = null;

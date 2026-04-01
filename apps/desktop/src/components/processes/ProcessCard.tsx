@@ -53,6 +53,11 @@ export function ProcessCard({
           <p className="mt-1 text-xs text-muted">{process.pct}%</p>
         </div>
       )}
+      {process.error && (
+        <div className="mb-3 rounded-lg border border-red-500/25 bg-red-500/8 px-3 py-2 text-xs leading-relaxed text-red-200">
+          {process.error}
+        </div>
+      )}
       <div className="flex flex-wrap gap-2">
         {onNotifyModeChange && notifyMode && (
           <label className="inline-flex items-center gap-1.5 rounded-lg border border-edge bg-base px-2 py-1 text-[11px] text-muted">
