@@ -53,7 +53,7 @@ export function TranscribePage({ onNavigate }: Props) {
   const activeStageDetail = activeStageDetailKey ? t(activeStageDetailKey) : null;
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden p-8 pt-12" data-testid="transcribe-page">
+    <div className="flex-1 flex flex-col overflow-hidden p-8 pt-6" data-testid="transcribe-page">
       <div className="mb-8">
         <h2 className="text-3xl font-black tracking-tight mb-2">{t('transcribe.title')}</h2>
         <p className="text-muted text-lg max-w-2xl">{t('transcribe.desc')}</p>
@@ -101,7 +101,7 @@ export function TranscribePage({ onNavigate }: Props) {
               {urlStartedAt != null && (
                 <>
                   <span className="text-xs text-muted font-mono">{Math.floor(elapsed / 60)}:{(elapsed % 60).toString().padStart(2, '0')}</span>
-                  <button type="button" onClick={cancelUrlTranscription} data-testid="transcribe-cancel-btn"
+                  <button type="button" onClick={() => cancelUrlTranscription()} data-testid="transcribe-cancel-btn"
                     className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors">
                     <span className="material-symbols-outlined text-[14px]">close</span>
                     {t('reader.stop') || 'Cancel'}

@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNotificationsStore, type NotifTone } from '../../stores/notifications';
 import { useProcessesStore } from '../../stores/processes';
 import { useTranscriptionStore } from '../../stores/transcription';
 import { combineProcessItems } from '../../lib/processes';
 import { useT } from '../../lib/i18n';
 
-const TONE_ICON: Record<NotifTone, string> = { success: 'check_circle', error: 'error', info: 'info' };
-const TONE_COLOR: Record<NotifTone, string> = { success: 'text-emerald-400', error: 'text-red-400', info: 'text-primary' };
-const TONE_BG: Record<NotifTone, string> = { success: 'bg-emerald-500/10 border-emerald-500/30', error: 'bg-red-500/10 border-red-500/30', info: 'bg-primary/10 border-primary/30' };
+const TONE_ICON: Record<NotifTone, string> = { success: 'check_circle', error: 'error', info: 'info', warning: 'warning', debug: 'bug_report' };
+const TONE_COLOR: Record<NotifTone, string> = { success: 'text-emerald-400', error: 'text-red-400', info: 'text-primary', warning: 'text-amber-400', debug: 'text-muted' };
+const TONE_BG: Record<NotifTone, string> = { success: 'bg-emerald-500/10 border-emerald-500/30', error: 'bg-red-500/10 border-red-500/30', info: 'bg-primary/10 border-primary/30', warning: 'bg-amber-500/10 border-amber-500/30', debug: 'bg-muted/10 border-edge' };
 
 type NotificationBellProps = {
   onOpenProcesses?: () => void;
@@ -29,13 +30,77 @@ export function NotificationBell({ onOpenProcesses }: NotificationBellProps = {}
   const dismiss = useNotificationsStore((s) => s.dismiss);
   const clear = useNotificationsStore((s) => s.clear);
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const unread = items.filter((n) => !n.read).length;
   const processItems = useMemo(() => combineProcessItems(jobs, localProcesses), [jobs, localProcesses]);
+  // "Active" = anything not in a terminal state. Drives the persistent dot
+  // next to the bell so multi-process work is visible at a glance, even when
+  // there are no unread notifications.
+  const activeCount = useMemo(
+    () => processItems.filter((p) => p.status === 'running' || p.status === 'queued' || p.status === 'paused').length,
+    [processItems],
+  );
+
+  // Compute panel position in viewport coords. Smart flip: prefer
+  // opening DOWNWARD from the bell (standard convention, matches the
+  // TopBar placement), but flip UPWARD when the bell is near the bottom
+  // of the viewport and the panel wouldn't fit below. Horizontally the
+  // panel aligns its right edge to the bell's right edge, clamped so it
+  // never goes offscreen on either side.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const recompute = () => {
+      const btn = buttonRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const PANEL_W = 320;
+      // Keep in sync with the panel's `max-h-80` Tailwind class (20 rem = 320 px).
+      const PANEL_MAX_H = 320;
+      const MARGIN = 8;
+      const measured = panelRef.current?.getBoundingClientRect().height;
+      const panelH = measured && measured > 0 ? measured : PANEL_MAX_H;
+
+      // Horizontal — right-align with the bell, clamp to viewport.
+      let left = rect.right - PANEL_W;
+      const maxLeft = window.innerWidth - PANEL_W - MARGIN;
+      if (left > maxLeft) left = maxLeft;
+      if (left < MARGIN) left = MARGIN;
+
+      // Vertical — prefer below the bell. Flip above if there isn't room.
+      const spaceBelow = window.innerHeight - rect.bottom - MARGIN;
+      const spaceAbove = rect.top - MARGIN;
+      let top: number;
+      if (spaceBelow >= panelH || spaceBelow >= spaceAbove) {
+        top = rect.bottom + 6;
+      } else {
+        top = rect.top - panelH - 6;
+      }
+      if (top < MARGIN) top = MARGIN;
+      setPanelPos({ top, left });
+    };
+    recompute();
+    // Second pass once the panel has mounted and we know its real height.
+    const raf = requestAnimationFrame(recompute);
+    window.addEventListener('resize', recompute);
+    window.addEventListener('scroll', recompute, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', recompute);
+      window.removeEventListener('scroll', recompute, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
+    };
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
   }, [open]);
@@ -46,23 +111,43 @@ export function NotificationBell({ onOpenProcesses }: NotificationBellProps = {}
   };
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={wrapRef}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={toggle}
-        className="p-2 rounded-lg text-muted hover:text-primary hover:bg-surface transition-colors relative"
+        className={`p-2 rounded-lg hover:bg-surface transition-colors relative ${activeCount > 0 ? 'text-primary' : 'text-muted hover:text-primary'}`}
         data-testid="notifications-bell"
-        title={t('settings.notifications')}
+        title={activeCount > 0 ? `${activeCount} ${t('nav.processes').toLowerCase()}` : t('settings.notifications')}
       >
-        <span className="material-symbols-outlined text-[18px]">notifications</span>
+        <span className={`material-symbols-outlined text-[18px] ${activeCount > 0 ? 'wa-pulse' : ''}`}>
+          {activeCount > 0 ? 'notifications_active' : 'notifications'}
+        </span>
+        {/* Unread-count badge (top-right) takes precedence visually. */}
         {unread > 0 && (
           <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
+        {/* Active-processes dot (bottom-right) — persists as long as work is
+            in flight, so the bell surfaces "something is happening" even when
+            the user has already seen/dismissed the toast. */}
+        {unread === 0 && activeCount > 0 && (
+          <span
+            className="absolute -bottom-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-white ring-2 ring-[var(--color-base)]"
+            data-testid="notifications-active-dot"
+          >
+            {activeCount > 9 ? '9+' : activeCount}
+          </span>
+        )}
       </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-80 max-h-80 overflow-y-auto rounded-xl border border-edge bg-[#1a2230] shadow-2xl" data-testid="notifications-panel">
+      {open && panelPos && createPortal(
+        <div
+          ref={panelRef}
+          className="fixed z-[300] w-80 max-h-80 overflow-y-auto rounded-xl border border-edge bg-[#1a2230] shadow-2xl"
+          style={{ top: panelPos.top, left: panelPos.left }}
+          data-testid="notifications-panel"
+        >
           <div className="flex items-center justify-between px-3 py-2 border-b border-edge">
             <span className="text-xs font-semibold text-muted/70 uppercase tracking-wider">{t('settings.notifications')}</span>
             {items.length > 0 && (
@@ -121,7 +206,8 @@ export function NotificationBell({ onOpenProcesses }: NotificationBellProps = {}
               </div>
             ))
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

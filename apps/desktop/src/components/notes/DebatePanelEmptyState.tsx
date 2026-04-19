@@ -32,19 +32,16 @@ export function DebatePanelEmptyState({ hasCredentials, claudeOAuthOnly, onRun, 
     );
   }
 
+  // Short empty state — no CTA button up here. The input area at the
+  // bottom already owns the "Run now" action; showing a second CTA in
+  // the middle of the panel created two primary buttons competing for
+  // attention.
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-3">
-      <span className="material-symbols-outlined text-[40px] text-muted/40">auto_awesome</span>
-      <p className="text-sm font-semibold text-text">{t('notes.debateEmptyTitle')}</p>
-      <p className="text-xs text-muted">{t('notes.debateEmptyDesc')}</p>
-      <button
-        type="button"
-        onClick={onRun}
-        className="mt-1 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors"
-        data-testid="debate-first-run"
-      >
-        {t('notes.debateFirstRun')}
-      </button>
+    <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-2" data-testid="debate-empty-state">
+      <span className="material-symbols-outlined text-[32px] text-muted/40">auto_awesome</span>
+      <p className="text-xs text-muted max-w-[220px] leading-relaxed">{t('notes.debateEmptyDesc')}</p>
+      {/* Kept prop for API compatibility — no longer rendered. */}
+      <span aria-hidden="true" className="hidden" data-unused-onrun={String(!!onRun)} />
     </div>
   );
 }

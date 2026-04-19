@@ -116,6 +116,17 @@ class TranscribeJobResponse(BaseModel):
     status: str
     processed_chunks: int
     total_chunks: int
+    # Optional — only populated by the from-url-job endpoint when yt-dlp
+    # extracted a video title from the source. Clients use it as the
+    # process-row label and as a default note title so users can tell
+    # multiple YouTube transcriptions apart without opening each one.
+    title: str | None = None
+    # Public Supabase Storage URL of the playable mp3 produced alongside
+    # the chunks. The client stores this as the note's `audio_url` so the
+    # in-note audio player can load + scrub the source material. `None`
+    # for direct-media URLs (the original link is already playable) and
+    # when the side-upload fails.
+    audio_url: str | None = None
 
 
 class TTSResponse(BaseModel):

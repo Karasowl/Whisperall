@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, session } from 'electron';
+import { app, BrowserWindow, desktopCapturer, nativeImage, session } from 'electron';
 import path from 'path';
 
 let mainWindow: BrowserWindow | null = null;
@@ -28,12 +28,34 @@ export function showMainWindow(): void {
 }
 
 export function createMainWindow(): BrowserWindow {
+  // Resolve the app icon from multiple candidate paths (dev vs packaged).
+  const candidates = [
+    path.join(__dirname, '..', '..', 'build-resources', 'icon.png'),
+    path.join(app.getAppPath(), 'build-resources', 'icon.png'),
+    path.join(app.getAppPath(), 'apps', 'desktop', 'build-resources', 'icon.png'),
+    path.join(process.cwd(), 'build-resources', 'icon.png'),
+    path.join(process.cwd(), 'apps', 'desktop', 'build-resources', 'icon.png'),
+  ];
+  let appIcon: Electron.NativeImage | undefined;
+  for (const candidate of candidates) {
+    try {
+      const img = nativeImage.createFromPath(candidate);
+      if (!img.isEmpty()) {
+        appIcon = img;
+        console.log('[windows] icon loaded from:', candidate, `(${img.getSize().width}x${img.getSize().height})`);
+        break;
+      }
+    } catch { /* try next */ }
+  }
+  if (!appIcon) console.warn('[windows] no icon found, tried:', candidates);
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     show: false,
+    icon: appIcon,
     backgroundColor: '#101922',
     title: 'Whisperall',
     autoHideMenuBar: true,

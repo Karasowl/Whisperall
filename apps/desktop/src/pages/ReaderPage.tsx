@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PlanGate } from '../components/PlanGate';
 import { useT } from '../lib/i18n';
+import { promptText } from '../lib/prompt';
 import { useSettingsStore, type ReaderHighlightMode } from '../stores/settings';
 import { ReaderPlayerBar } from '../components/reader/ReaderPlayerBar';
 import { ReaderLibrary } from '../components/reader/ReaderLibrary';
@@ -182,12 +183,15 @@ export function ReaderPage() {
     const start = Math.min(el.selectionStart ?? 0, el.selectionEnd ?? 0);
     const end = Math.max(el.selectionStart ?? 0, el.selectionEnd ?? 0);
     if (end <= start) return;
-    const note = window.prompt(t('reader.annotationPrompt')) ?? '';
+    const note = (await promptText({ message: t('reader.annotationPrompt') })) ?? '';
     await addAnnotation(start, end, note, '#137fec');
   };
 
   const onEditAnnotation = async (id: string, currentNote: string) => {
-    const next = window.prompt(t('reader.annotationEditPrompt'), currentNote ?? '');
+    const next = await promptText({
+      message: t('reader.annotationEditPrompt'),
+      defaultValue: currentNote ?? '',
+    });
     if (next === null) return;
     await updateAnnotation(id, { note: next });
   };
@@ -208,7 +212,7 @@ export function ReaderPage() {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-base" data-testid="reader-page">
-      <div className="px-8 pt-12 pb-6">
+      <div className="px-8 pt-6 pb-6">
         <h2 className="text-3xl font-black tracking-tight mb-2 text-text">{t('reader.title')}</h2>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-muted">{t('reader.desc')}</p>

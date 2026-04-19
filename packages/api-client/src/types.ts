@@ -78,6 +78,14 @@ export type TranscribeJobResponse = {
   status: string;
   processed_chunks: number;
   total_chunks: number;
+  /** Extractor-resolved title (YouTube video title, etc.). Only populated
+   *  by `POST /v1/transcribe/from-url-job` when yt-dlp returned a title.
+   *  Clients use it to label the process row and as a default note title. */
+  title?: string | null;
+  /** Public URL of the playable mp3 produced alongside the chunks by the
+   *  URL-job pipeline. Stored on the note as `audio_url` so the in-note
+   *  audio player can scrub the source. `null` for direct-media URLs. */
+  audio_url?: string | null;
 };
 
 export type TranscribeResultResponse = {

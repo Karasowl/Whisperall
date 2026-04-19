@@ -39,9 +39,20 @@ type LocalProcessState = {
   complete: (id: string, stageLabelKey?: string) => void;
   fail: (id: string, error?: string, stageLabelKey?: string) => void;
   remove: (id: string) => void;
+  clearFinished: () => void;
 };
 
 export const LOCAL_PROCESSES_STORAGE_KEY = 'whisperall-local-processes-v1';
+/**
+ * Sentinel used for the error field when a `running`/`queued` LocalProcess is
+ * recovered from storage (it was left alive when the app closed). The UI
+ * resolves this to a localized string via `processes.interruptedOnClose`.
+ * Legacy entries persisted as the raw English string ("Process interrupted
+ * (app was closed)") are migrated to this sentinel at load time so the UI can
+ * translate them too.
+ */
+export const PROCESS_INTERRUPTED_SENTINEL = '@@processes.interruptedOnClose';
+const LEGACY_INTERRUPTED_STRING = 'Process interrupted (app was closed)';
 const TERMINAL_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_STORED_PROCESSES = 200;
 const LOCAL_PROCESS_TYPES = new Set<LocalProcessType>(['note_import', 'ai_edit', 'tts_read', 'transcribe_file', 'note_retranscribe']);
@@ -135,10 +146,26 @@ function loadStoredProcesses(): LocalProcess[] {
     if (!Array.isArray(parsed)) return [];
     const normalized = parsed.map(normalizeStoredProcess).filter((p): p is LocalProcess => !!p);
     const pruned = pruneProcesses(normalized);
-    // Mark any running/queued processes as failed — they were interrupted when the app closed.
+    // Reconcile stale running/queued entries left behind when the previous
+    // session closed mid-flight, and migrate legacy English error strings to
+    // the i18n sentinel so the UI can localize them.
     const recovered = pruned.map((p): LocalProcess => {
-      if (p.status !== 'running' && p.status !== 'queued') return p;
-      return { ...p, status: 'failed', error: p.error ?? 'Process interrupted (app was closed)', updatedAt: nowIso() };
+      const migratedError = p.error === LEGACY_INTERRUPTED_STRING ? PROCESS_INTERRUPTED_SENTINEL : p.error;
+      if (p.status !== 'running' && p.status !== 'queued') {
+        return migratedError !== p.error ? { ...p, error: migratedError } : p;
+      }
+      // Promote to `completed` when progress was already at 100% — the prior
+      // session just didn't land the final status flip. Otherwise mark failed
+      // with the interrupted sentinel.
+      if (p.total > 0 && p.done >= p.total) {
+        return { ...p, status: 'completed', pct: 100, error: null, updatedAt: nowIso() };
+      }
+      return {
+        ...p,
+        status: 'failed',
+        error: migratedError ?? PROCESS_INTERRUPTED_SENTINEL,
+        updatedAt: nowIso(),
+      };
     });
     if (recovered.some((p, i) => p !== pruned[i]) || pruned.length !== normalized.length) {
       persistProcesses(recovered);
@@ -410,5 +437,20 @@ export const useProcessesStore = create<LocalProcessState>((set, get) => ({
       return { localProcesses };
     });
     void deleteRemoteProcess(id);
+  },
+
+  clearFinished: () => {
+    const terminal = new Set<LocalProcessStatus>(['completed', 'failed', 'canceled']);
+    const toRemove: string[] = [];
+    set((s) => {
+      const localProcesses = s.localProcesses.filter((p) => {
+        if (terminal.has(p.status)) { toRemove.push(p.id); return false; }
+        return true;
+      });
+      persistProcesses(localProcesses);
+      return { localProcesses };
+    });
+    // Fire remote deletes in parallel; failures are logged inside deleteRemoteProcess.
+    for (const id of toRemove) void deleteRemoteProcess(id);
   },
 }));

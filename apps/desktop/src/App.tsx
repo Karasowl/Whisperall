@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { AppShell } from './components/shell/AppShell';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { DictatePage } from './pages/DictatePage';
 import { TranscribePage } from './pages/TranscribePage';
 import { HistoryPage } from './pages/HistoryPage';
 import { ProcessesPage } from './pages/ProcessesPage';
+import { LogsPage } from './pages/LogsPage';
 import { AuthPage } from './pages/AuthPage';
+import { reportError, useNotificationsStore } from './stores/notifications';
 import { useAuthStore } from './stores/auth';
 import { requestPlanRefresh, usePlanStore } from './stores/plan';
 import { useSettingsStore } from './stores/settings';
@@ -18,7 +21,7 @@ import { useT } from './lib/i18n';
 import { PricingContext } from './lib/pricing-context';
 import { useNotesActionsStore } from './stores/notes-actions';
 
-export type Page = 'dictate' | 'transcribe' | 'history' | 'processes';
+export type Page = 'dictate' | 'transcribe' | 'history' | 'processes' | 'logs';
 
 const PASTE_EVENT_NAME = 'whisperall:paste-text';
 
@@ -71,6 +74,44 @@ export default function App() {
   const prevLiveError = useRef<string | null>(liveError);
 
   useEffect(() => { initAuth(); loadSettings(); }, [initAuth, loadSettings]);
+
+  // Global error capture — never let an error die silently.
+  useEffect(() => {
+    const onError = (e: ErrorEvent) => reportError('window.error', e.error ?? e.message);
+    const onRejection = (e: PromiseRejectionEvent) => reportError('unhandledRejection', e.reason);
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    // Safety net: if the window unloads/hides with the mic still open, force
+    // release so Windows can switch Bluetooth back to A2DP (fixes the "audio
+    // extremely loud on Bluetooth" bug when the app closes mid-dictation).
+    const onBeforeUnload = () => { void import('./lib/audio').then((m) => m.forceReleaseMic()); };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, []);
+
+  // Bridge backend stderr / exit events into the logs store.
+  useEffect(() => {
+    // Backend lifecycle events are session-scoped — a notification about the
+    // previous session's shutdown has no actionable value for the user once
+    // a new session is running. Drop any persisted `backend.*` entries at
+    // boot so the panel starts clean and only reflects *this* session.
+    useNotificationsStore.setState((s) => ({
+      items: s.items.filter((n) => !n.context?.startsWith('backend.')),
+    }));
+    const api = (window as Window).whisperall?.backend;
+    if (!api?.onEvent) return;
+    return api.onEvent((evt) => {
+      const tone = evt.kind === 'start' ? 'info' : 'error';
+      useNotificationsStore.getState().push(
+        { message: `[backend.${evt.kind}] ${evt.message.split('\n')[0]}`, detail: evt.message, context: `backend.${evt.kind}`, source: 'backend' },
+        tone
+      );
+    });
+  }, []);
   useEffect(() => {
     if (user) {
       void fetchPlan();
@@ -83,11 +124,12 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!electron?.onHotkey) return;
-    return electron.onHotkey(async (action: string) => {
+    if (!electron?.onHotkey || !electron.readClipboard) return;
+    const el = electron;
+    return el.onHotkey(async (action: string) => {
       if (action === 'open-settings') setShowSettings(true);
       else if (action === 'read-clipboard') {
-        const text = await electron.readClipboard();
+        const text = await el.readClipboard();
         if (text) {
           const s = useSettingsStore.getState();
           const voice = s.ttsVoice && s.ttsVoice !== 'auto' ? s.ttsVoice : undefined;
@@ -171,16 +213,19 @@ export default function App() {
     case 'transcribe': content = <TranscribePage onNavigate={handleNavigate} />; break;
     case 'history': content = <HistoryPage />; break;
     case 'processes': content = <ProcessesPage onNavigate={handleNavigate} />; break;
+    case 'logs': content = <LogsPage />; break;
   }
 
   const openPricing = () => setShowPricing(true);
 
   return (
-    <PricingContext.Provider value={openPricing}>
-      <AppShell page={page} onNavigate={handleNavigate} showSettings={showSettings} onToggleSettings={setShowSettings} showPricing={showPricing} onTogglePricing={setShowPricing}
-        onNewNote={triggerNewNote} onVoiceNote={triggerVoiceNote} onDeleteFolder={requestDeleteFolder}>
-        {content}
-      </AppShell>
-    </PricingContext.Provider>
+    <ErrorBoundary>
+      <PricingContext.Provider value={openPricing}>
+        <AppShell page={page} onNavigate={handleNavigate} showSettings={showSettings} onToggleSettings={setShowSettings} showPricing={showPricing} onTogglePricing={setShowPricing}
+          onNewNote={triggerNewNote} onVoiceNote={triggerVoiceNote} onDeleteFolder={requestDeleteFolder}>
+          {content}
+        </AppShell>
+      </PricingContext.Provider>
+    </ErrorBoundary>
   );
 }

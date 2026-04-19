@@ -23,11 +23,20 @@ export type WidgetState = {
   setError: (error: string) => void;
   resetDictation: () => void;
   setDragging: (dragging: boolean) => void;
+  /** When true, Widget renders inline inside the Notes page instead of the overlay window. */
+  docked: boolean;
+  toggleDock: () => void;
+  setDocked: (v: boolean) => void;
 };
 
-export const OVERLAY_BAR_SIZE = { width: 360, height: 64 };
-export const OVERLAY_DICTATING_SIZE = { width: 360, height: 120 };
-export const SUBTITLE_SIZE = { width: 760, height: 84 };
+// E5b — window sizes include a transparent padding ring around the widget
+// body so the ElevenLabs multi-layered shadow can blur out into the alpha
+// zone instead of being clipped at the (rectangular) Electron window
+// bounds. The widget body keeps the original inner size via CSS.
+export const OVERLAY_PAD = 14;
+export const OVERLAY_BAR_SIZE = { width: 360 + OVERLAY_PAD * 2, height: 64 + OVERLAY_PAD * 2 };
+export const OVERLAY_DICTATING_SIZE = { width: 360 + OVERLAY_PAD * 2, height: 120 + OVERLAY_PAD * 2 };
+export const SUBTITLE_SIZE = { width: 760 + OVERLAY_PAD * 2, height: 84 + OVERLAY_PAD * 2 };
 
 export const useWidgetStore = create<WidgetState>((set, get) => ({
   mode: 'bar',
@@ -37,6 +46,9 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   translatedText: '',
   error: null,
   dragging: false,
+  docked: false,
+  toggleDock: () => set((s) => ({ docked: !s.docked })),
+  setDocked: (v) => set({ docked: v }),
 
   collapse: () => set({ mode: 'bar', dictateStatus: 'idle' }),
   switchModule: (module) => {

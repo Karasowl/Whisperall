@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('whisperall', {
 
   // ── Clipboard ──────────────────────────────────────────────
   readClipboard: () => ipcRenderer.invoke('clipboard:read') as Promise<string>,
+  writeClipboard: (text: string) => ipcRenderer.invoke('clipboard:write', text) as Promise<void>,
   pasteText: (text: string) => ipcRenderer.send('clipboard:paste', text),
   undoPaste: () => ipcRenderer.send('clipboard:undo'),
   onPasteText: (cb: (text: string) => void): Unsubscribe => {
@@ -100,7 +101,46 @@ contextBridge.exposeInMainWorld('whisperall', {
     ipcRenderer.send('update-title-bar', colors);
   },
 
+  // ── Widget dock zone (magnetic snap) ─────────────────────────
+  setDockZone: (bounds: { x: number; y: number; width: number; height: number } | null) => {
+    ipcRenderer.send('widget:set-dock-zone', bounds);
+  },
+  /** Show the overlay centered at (screenX, screenY) and begin drag. */
+  undockToPosition: (screenX: number, screenY: number) => {
+    ipcRenderer.send('widget:undock-to-position', screenX, screenY);
+  },
+  onSnapDock: (cb: () => void): Unsubscribe => {
+    const handler = () => cb();
+    ipcRenderer.on('widget:snap-dock', handler);
+    return () => ipcRenderer.removeListener('widget:snap-dock', handler);
+  },
+
   // ── Desktop Capturer ───────────────────────────────────────
   getDesktopSources: () => ipcRenderer.invoke('desktop-sources') as Promise<Array<{ id: string; name: string }>>,
+
+  // ── Backend diagnostics ─────────────────────────────────────
+  backend: {
+    getLogTail: (lines: number = 500) => ipcRenderer.invoke('backend:log-tail', lines) as Promise<string>,
+    onEvent: (cb: (evt: { kind: 'error' | 'exit' | 'start'; message: string; code?: number | null }) => void): Unsubscribe => {
+      const handler = (_e: Electron.IpcRendererEvent, evt: { kind: 'error' | 'exit' | 'start'; message: string; code?: number | null }) => cb(evt);
+      ipcRenderer.on('backend:event', handler);
+      return () => ipcRenderer.removeListener('backend:event', handler);
+    },
+    /**
+     * Live-tail the backend log. `cb` fires with arrays of new lines
+     * (batched per ~500 ms tick in main). Returns an unsubscribe that
+     * detaches the listener AND tells main to stop the watcher for this
+     * renderer — avoids leaking timers when the modal closes.
+     */
+    startLogStream: (cb: (lines: string[]) => void): Unsubscribe => {
+      const handler = (_e: Electron.IpcRendererEvent, lines: string[]) => cb(lines);
+      ipcRenderer.on('backend:log-line', handler);
+      void ipcRenderer.invoke('backend:log-stream-start');
+      return () => {
+        ipcRenderer.removeListener('backend:log-line', handler);
+        void ipcRenderer.invoke('backend:log-stream-stop');
+      };
+    },
+  },
 });
 

@@ -3,7 +3,7 @@ import type { PointerEvent } from 'react';
 import { useWidgetStore, OVERLAY_BAR_SIZE, OVERLAY_DICTATING_SIZE, SUBTITLE_SIZE } from './widget-store';
 import type { WidgetModule } from './widget-store';
 import { electron } from '../lib/electron';
-import { getMicStream, stopMicStream, createRecorder } from '../lib/audio';
+import { getMicStream, stopMicStream, createRecorder, isMicActive, forceReleaseMic } from '../lib/audio';
 import { api } from '../lib/api';
 import { useSettingsStore } from '../stores/settings';
 import { requestPlanRefresh } from '../stores/plan';
@@ -12,7 +12,21 @@ import { inferTTSLanguage } from '../lib/lang-detect';
 import type { TTSProgress } from '../lib/tts';
 import { pauseTTS, resumeTTS, setTTSPlaybackRate, startReading, stopTTS } from '../lib/tts';
 
+export type WidgetProps = {
+  /** When true, renders inline (no drag, no resize, no overlay hide). */
+  docked?: boolean;
+  /** Callback for dictation results when docked (replaces electron?.pasteText). */
+  onResult?: (text: string) => void;
+  /** Called when the user drags the grip handle past a threshold while docked.
+   *  The parent should undock and hand off to the overlay at (screenX, screenY). */
+  onDragOut?: (screenX: number, screenY: number) => void;
+};
+
 let recorder: MediaRecorder | null = null;
+// Guards against rapid hotkey toggle races where a second press arrives
+// before the first `getMicStream` resolves, leaving the mic orphaned.
+let startInFlight = false;
+let pendingAbort = false;
 let audioChunks: Blob[] = [];
 const CUSTOM_PROMPTS_KEY = 'whisperall-custom-prompts';
 
@@ -32,7 +46,7 @@ function Waveform({ processing }: { processing?: boolean }): JSX.Element {
   );
 }
 
-export function Widget() {
+export function Widget({ docked = false, onResult, onDragOut }: WidgetProps = {}) {
   const t = useWT();
   const {
     mode, dictateStatus, translatedText, dragging,
@@ -55,12 +69,13 @@ export function Widget() {
   const draggingRef = useRef(dragging);
 
   useEffect(() => {
+    if (docked) return; // Docked widget doesn't resize the Electron window.
     const size =
       mode === 'subtitles' ? SUBTITLE_SIZE :
       mode === 'dictating' ? OVERLAY_DICTATING_SIZE :
       OVERLAY_BAR_SIZE;
     electron?.resizeOverlay(size);
-  }, [mode]);
+  }, [mode, docked]);
 
   useEffect(() => {
     if (mode !== 'bar' && quickOpen) setQuickOpen(false);
@@ -110,11 +125,11 @@ export function Widget() {
   }, [dragging, setDragging]);
 
   const startDrag = useCallback((e: PointerEvent<HTMLElement>) => {
-    if (e.button !== 0) return;
+    if (docked || e.button !== 0) return; // No OS-level drag when docked.
     setDragging(true);
     electron?.overlayDragStart({ screenX: e.screenX, screenY: e.screenY });
     e.currentTarget.setPointerCapture(e.pointerId);
-  }, [setDragging]);
+  }, [docked, setDragging]);
 
   const moveDrag = useCallback((e: PointerEvent<HTMLElement>) => {
     if (!dragging) return;
@@ -228,19 +243,49 @@ export function Widget() {
   }, [cancelQuickClose]);
 
   const handleStart = useCallback(async () => {
+    // If a start is already in flight, a second press acts as a cancel-pending.
+    if (startInFlight) { pendingAbort = true; return; }
+    if (recorder && recorder.state !== 'inactive') return;
+    startInFlight = true;
+    pendingAbort = false;
     startDictation();
     try {
       audioChunks = [];
       const stream = await getMicStream(audioDevice);
+      if (pendingAbort) {
+        // User toggled off while getUserMedia was resolving — release immediately.
+        stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } });
+        forceReleaseMic();
+        resetDictation();
+        return;
+      }
       recorder = createRecorder(stream, (chunk) => audioChunks.push(chunk), 30_000);
-    } catch (err) { setError((err as Error).message); }
-  }, [startDictation, setError, audioDevice]);
+    } catch (err) {
+      // Any failure: ensure the mic is released before surfacing the error.
+      forceReleaseMic();
+      setError((err as Error).message);
+    } finally {
+      startInFlight = false;
+      pendingAbort = false;
+    }
+  }, [startDictation, resetDictation, setError, audioDevice]);
 
   const handleStop = useCallback(() => {
-    if (!recorder || recorder.state === 'inactive') return;
+    // If a start is still in flight, flag it for abort — the start path will
+    // release the mic as soon as getUserMedia resolves.
+    if (startInFlight) { pendingAbort = true; return; }
+    if (!recorder || recorder.state === 'inactive') {
+      // Safety net: even with no active recorder, make sure the mic isn't
+      // lingering (orphan from an errored start).
+      if (isMicActive()) forceReleaseMic();
+      return;
+    }
     stopDictation();
-    recorder.onstop = async () => {
-      stopMicStream();
+    const activeRecorder = recorder;
+    recorder = null;
+    activeRecorder.onstop = async () => {
+      // Release the mic FIRST so Windows can switch Bluetooth back to A2DP.
+      forceReleaseMic();
       const blob = new Blob(audioChunks, { type: 'audio/webm' });
       try {
         const res = await api.dictate.send({
@@ -249,21 +294,25 @@ export function Widget() {
         });
         requestPlanRefresh();
         setDone(res.text);
-        electron?.setDictationText(res.text);
-        electron?.pasteText(res.text);
+        if (docked && onResult) {
+          onResult(res.text);
+        } else {
+          electron?.setDictationText(res.text);
+          electron?.pasteText(res.text);
+        }
       } catch (err) { setError((err as Error).message); }
     };
-    recorder.stop();
-    recorder = null;
-  }, [selectedPrompt.id, selectedPrompt.prompt, setDone, setError, stopDictation]);
+    activeRecorder.stop();
+  }, [selectedPrompt.id, selectedPrompt.prompt, setDone, setError, stopDictation, docked, onResult]);
 
   const handleCancel = useCallback(() => {
+    pendingAbort = true;
     if (recorder && recorder.state !== 'inactive') {
       recorder.onstop = null;
-      recorder.stop();
+      try { recorder.stop(); } catch { /* ignore */ }
       recorder = null;
     }
-    stopMicStream();
+    forceReleaseMic();
     resetDictation();
     collapse();
   }, [resetDictation, collapse]);
@@ -344,9 +393,42 @@ export function Widget() {
     );
   }
 
+  // Docked drag-out state — tracked separately from the overlay drag.
+  const dockedDragOrigin = useRef<{ x: number; y: number } | null>(null);
+  const DRAG_OUT_PX = 20;
+  const onGripPointerDown = useCallback((e: PointerEvent<HTMLElement>) => {
+    if (docked) {
+      // Track for potential drag-out.
+      dockedDragOrigin.current = { x: e.screenX, y: e.screenY };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+    startDrag(e);
+  }, [docked, startDrag]);
+  const onGripPointerMove = useCallback((e: PointerEvent<HTMLElement>) => {
+    if (docked && dockedDragOrigin.current) {
+      const dx = e.screenX - dockedDragOrigin.current.x;
+      const dy = e.screenY - dockedDragOrigin.current.y;
+      if (Math.hypot(dx, dy) > DRAG_OUT_PX) {
+        dockedDragOrigin.current = null;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        onDragOut?.(e.screenX, e.screenY);
+      }
+      return;
+    }
+    moveDrag(e);
+  }, [docked, moveDrag, onDragOut]);
+  const onGripPointerUp = useCallback((e: PointerEvent<HTMLElement>) => {
+    dockedDragOrigin.current = null;
+    if (!docked) endDrag();
+  }, [docked, endDrag]);
+
+  // When docked: always show the expanded pill (skip the idle notch).
+  const showPill = docked || quickOpen;
+
   return (
-    <div className="widget-base widget-base-idle">
-      {!quickOpen ? (
+    <div className={`widget-base ${docked ? 'widget-base-idle' : 'widget-base-idle'}`}>
+      {!showPill ? (
         <div
           className="notch-idle"
           onMouseEnter={openQuickPill}
@@ -356,13 +438,14 @@ export function Widget() {
           onPointerCancel={endDrag}
         />
       ) : (
-        <div className="notch-pill open" onMouseEnter={cancelQuickClose} onMouseLeave={queueQuickClose}>
+        <div className="notch-pill open" onMouseEnter={docked ? undefined : cancelQuickClose} onMouseLeave={docked ? undefined : queueQuickClose}>
           <div
             className="notch-grip"
-            onPointerDown={startDrag}
-            onPointerMove={moveDrag}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            style={{ cursor: docked ? 'grab' : undefined }}
+            onPointerDown={onGripPointerDown}
+            onPointerMove={onGripPointerMove}
+            onPointerUp={onGripPointerUp}
+            onPointerCancel={onGripPointerUp}
           >
             <span className="material-symbols-outlined">drag_indicator</span>
           </div>

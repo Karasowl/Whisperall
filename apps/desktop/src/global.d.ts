@@ -2,6 +2,16 @@ export {};
 
 type Unsubscribe = () => void;
 
+// Vite raw imports (e.g. `import md from './foo.md?raw'`).
+declare module '*?raw' {
+  const content: string;
+  export default content;
+}
+declare module '*.md' {
+  const content: string;
+  export default content;
+}
+
 declare global {
   interface Window {
     whisperall?: {
@@ -57,6 +67,7 @@ declare global {
 
       // Clipboard
       readClipboard: () => Promise<string>;
+      writeClipboard: (text: string) => Promise<void>;
       pasteText: (text: string) => void;
       undoPaste: () => void;
       onPasteText: (cb: (text: string) => void) => Unsubscribe;
@@ -67,8 +78,20 @@ declare global {
       openExternal: (url: string) => Promise<void>;
       updateTitleBar: (colors: { color: string; symbolColor: string }) => void;
 
+      // Widget dock zone (magnetic snap)
+      setDockZone: (bounds: { x: number; y: number; width: number; height: number } | null) => void;
+      onSnapDock: (cb: () => void) => Unsubscribe;
+      undockToPosition: (screenX: number, screenY: number) => void;
+
       // Desktop Capturer
       getDesktopSources: () => Promise<Array<{ id: string; name: string }>>;
+
+      // Backend diagnostics
+      backend: {
+        getLogTail: (lines?: number) => Promise<string>;
+        onEvent: (cb: (evt: { kind: 'error' | 'exit' | 'start'; message: string; code?: number | null }) => void) => Unsubscribe;
+        startLogStream: (cb: (lines: string[]) => void) => Unsubscribe;
+      };
     };
   }
 }

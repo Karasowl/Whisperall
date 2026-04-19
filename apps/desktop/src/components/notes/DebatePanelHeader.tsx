@@ -38,17 +38,22 @@ export function DebatePanelHeader({
           {running ? (
             <span className="material-symbols-outlined text-[16px] text-primary animate-spin">progress_activity</span>
           ) : (
-            <span className="text-[11px] text-muted truncate max-w-[80px]" title={providerInfo}>{providerInfo}</span>
+            // Provider chip is now clearly interactive: dashed border +
+            // a small dropdown caret + the settings tooltip. Clicking
+            // opens the debate settings where the model/provider is
+            // picked. Same behaviour as the dedicated gear button, but
+            // the chip itself tells the user it's clickable.
+            <button
+              type="button"
+              onClick={onShowSettings}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-dashed border-edge text-[11px] text-muted hover:text-text hover:border-primary/40 transition-colors max-w-[140px]"
+              title={`${providerInfo} — ${t('notes.debateSettingsTitle')}`}
+              data-testid="debate-provider-chip"
+            >
+              <span className="truncate">{providerInfo}</span>
+              <span className="material-symbols-outlined text-[13px] shrink-0">arrow_drop_down</span>
+            </button>
           )}
-          <button
-            type="button"
-            onClick={onShowSettings}
-            className="h-7 w-7 grid place-items-center rounded-lg text-muted hover:text-text hover:bg-base/60 transition-colors"
-            data-testid="debate-settings-btn"
-            title={t('notes.debateSettingsTitle')}
-          >
-            <span className="material-symbols-outlined text-[16px]">settings</span>
-          </button>
           <div className="flex items-center gap-1">
             <select
               value={activeSessionId}

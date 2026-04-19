@@ -169,7 +169,7 @@ function setupSystemListener(theme: Theme): void {
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  theme: 'dark',
+  theme: 'light',
   uiLanguage: 'en',
   codexApiKey: '',
   claudeApiKey: '',

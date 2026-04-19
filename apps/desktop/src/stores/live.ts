@@ -13,6 +13,10 @@ import { useDocumentsStore } from './documents';
 import { formatDocDate } from '../lib/format-date';
 import { requestPlanRefresh } from './plan';
 import { useAuthStore } from './auth';
+import { reportError } from './notifications';
+import { useActionsStore, endAction } from './actions';
+
+const LIVE_ACTION_ID = 'live.meeting';
 
 export type LiveStatus = 'idle' | 'recording' | 'error';
 
@@ -56,6 +60,16 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     if (get().status === 'recording') return;
     try {
       set({ status: 'recording', error: null, autoSaveError: null, segments: [], interimText: '' });
+      useActionsStore.getState().register({
+        id: LIVE_ACTION_ID,
+        kind: 'live',
+        status: 'running',
+        label: 'Live meeting',
+        sublabel: get().source,
+        canPause: false, canResume: false, canStop: true, canCancel: true,
+        stop: () => { useLiveStore.getState().stop(); },
+        cancel: () => { useLiveStore.getState().reset(); endAction(LIVE_ACTION_ID, 'canceled'); },
+      });
       console.log('[live] starting, source =', get().source);
       const settings = useSettingsStore.getState();
       let stream: MediaStream;
@@ -142,6 +156,8 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       if (usageRefreshTimer) { clearInterval(usageRefreshTimer); usageRefreshTimer = null; }
       console.error('[live] start failed:', err);
       set({ status: 'error', error: (err as Error).message });
+      reportError('live.start', err);
+      endAction(LIVE_ACTION_ID, 'failed', (err as Error).message);
     }
   },
 
@@ -170,6 +186,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       stopMicStream();
     }
     set({ status: 'idle' });
+    endAction(LIVE_ACTION_ID, 'completed');
     requestPlanRefresh();
     // Auto-save as document (non-blocking)
     const allSegments = get().segments;
@@ -186,5 +203,6 @@ export const useLiveStore = create<LiveState>((set, get) => ({
   reset: () => {
     get().stop();
     set({ segments: [], interimText: '', error: null, autoSaveError: null });
+    useActionsStore.getState().remove(LIVE_ACTION_ID);
   },
 }));

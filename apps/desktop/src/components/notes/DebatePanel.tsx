@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Editor } from '@tiptap/react';
+import type { EditorHandle } from '../editor/milkdown/api/EditorHandle';
 import { useT } from '../../lib/i18n';
 import { api } from '../../lib/api';
 import { electron } from '../../lib/electron';
 import { safeHtmlParagraphs } from '../../lib/editor-utils';
 import { useSettingsStore } from '../../stores/settings';
 import { useProviderAuthStore } from '../../stores/provider-auth';
+import { useUiStore } from '../../stores/ui';
 import { extractDebateContext } from '../../lib/debate-context';
 import { runDebateCycle } from '../../lib/debate-ai';
 import {
@@ -23,8 +24,12 @@ type Props = {
   noteId: string | null;
   noteTitle: string;
   noteText: string;
-  getEditor: () => Editor | null;
+  getEditor: () => EditorHandle | null;
   onNotify: (message: string, tone: 'success' | 'error' | 'info') => void;
+  /** G1 — silent autosave hook. When provided, the panel persists the
+   *  current draft on first interaction so LLM features unlock without an
+   *  explicit "Save" gate. */
+  ensureNoteId?: () => Promise<string | null>;
 };
 
 type ApplyMode = 'insert' | 'replace' | 'append';
@@ -98,7 +103,7 @@ function extractLabeledSuggestion(raw: string): string | null {
     const line = lines[i].trim();
     const match = line.match(/^(?:[-*]\s*)?(?:\d+[.)]\s*)?(?:suggested edit|edici[oÃ³]n sugerida)\s*:\s*(.*)$/i);
     if (!match) continue;
-    const inline = match[1].trim().replace(/^["â€œâ€]+|["â€œâ€]+$/g, '').trim();
+    const inline = match[1].trim().replace(/^["“”]+|["“”]+$/g, '').trim();
     if (inline) return inline;
     const collected: string[] = [];
     for (let j = i + 1; j < lines.length; j += 1) {
@@ -108,7 +113,7 @@ function extractLabeledSuggestion(raw: string): string | null {
         continue;
       }
       if (stop.test(next)) break;
-      collected.push(next.replace(/^["â€œâ€]+|["â€œâ€]+$/g, '').trim());
+      collected.push(next.replace(/^["“”]+|["“”]+$/g, '').trim());
     }
     if (collected.length > 0) return collected.join(' ').trim();
   }
@@ -127,11 +132,11 @@ function normalizeSearch(text: string): string {
   return text.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-function findBlockAnchor(editor: Editor, match: string): { before: number; after: number } | null {
+function findBlockAnchor(editor: EditorHandle, match: string): { before: number; after: number } | null {
   const needle = normalizeSearch(match);
   if (!needle) return null;
   let found: { before: number; after: number } | null = null;
-  editor.state.doc.descendants((node, pos) => {
+  editor.view.state.doc.descendants((node, pos) => {
     if (found) return false;
     if (!node.isTextblock) return;
     const hay = normalizeSearch(node.textContent || '');
@@ -151,7 +156,7 @@ function insertionPayload(text: string, placement: 'standalone' | 'before' | 'af
   return html;
 }
 
-export function DebatePanel({ noteId, noteTitle, noteText, getEditor, onNotify }: Props) {
+export function DebatePanel({ noteId, noteTitle, noteText, getEditor, onNotify, ensureNoteId }: Props) {
   const t = useT();
   const codexApiKey = useSettingsStore((s) => s.codexApiKey);
   const claudeApiKey = useSettingsStore((s) => s.claudeApiKey);
@@ -160,6 +165,8 @@ export function DebatePanel({ noteId, noteTitle, noteText, getEditor, onNotify }
   const claudeAuthMode = useProviderAuthStore((s) => s.claudeAuthMode);
 
   const [debate, setDebate] = useState<NoteDebateState | null>(null);
+  // G1 — open intent that survives the silent-autosave round trip.
+  const pendingOpenRef = useRef(false);
   const [running, setRunning] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [lastSuggestion, setLastSuggestion] = useState('');
@@ -188,6 +195,15 @@ export function DebatePanel({ noteId, noteTitle, noteText, getEditor, onNotify }
 
   useEffect(() => { promptRef.current = prompt; }, [prompt]);
   useEffect(() => { debateRef.current = debate; }, [debate]);
+
+  // G1 — when the silent autosave finishes and `debate` becomes available,
+  // honor the pending open intent without forcing the user to click again.
+  useEffect(() => {
+    if (debate && pendingOpenRef.current) {
+      pendingOpenRef.current = false;
+      setDebate((prev) => (prev ? { ...prev, open: true } : prev));
+    }
+  }, [debate]);
 
   useEffect(() => {
     if (!noteId) { setDebate(null); persistedHashRef.current = ''; syncErrorShownRef.current = false; return; }
@@ -394,20 +410,23 @@ export function DebatePanel({ noteId, noteTitle, noteText, getEditor, onNotify }
     const suggested = lastSuggestedCommand && lastSuggestedCommand.mode === mode ? lastSuggestedCommand : null;
 
     if (mode === 'replace') {
-      if (editor.state.selection.empty) { onNotify(t('notes.debateNeedSelection'), 'info'); return; }
-      editor.chain().focus().insertContent(html).run();
+      if (editor.isSelectionEmpty()) { onNotify(t('notes.debateNeedSelection'), 'info'); return; }
+      editor.focus();
+      editor.insertHtmlAtCursor(html);
       onNotify(t('notes.debateApplied'), 'success');
       return;
     }
 
     if (suggested?.target?.position === 'start') {
-      editor.chain().focus().insertContentAt(0, insertionPayload(text, 'before')).run();
+      editor.focus();
+      editor.insertHtmlAt(0, insertionPayload(text, 'before'));
       onNotify(t('notes.debateApplied'), 'success');
       return;
     }
     if (suggested?.target?.position === 'end') {
-      const end = editor.state.doc.content.size;
-      editor.chain().focus().insertContentAt(end, insertionPayload(text, end > 0 ? 'after' : 'standalone')).run();
+      const end = editor.view.state.doc.content.size;
+      editor.focus();
+      editor.insertHtmlAt(end, insertionPayload(text, end > 0 ? 'after' : 'standalone'));
       onNotify(t('notes.debateApplied'), 'success');
       return;
     }
@@ -419,16 +438,19 @@ export function DebatePanel({ noteId, noteTitle, noteText, getEditor, onNotify }
       }
       const at = suggested.target.position === 'before_match' ? anchor.before : anchor.after;
       const placement = suggested.target.position === 'before_match' ? 'before' : 'after';
-      editor.chain().focus().insertContentAt(at, insertionPayload(text, placement)).run();
+      editor.focus();
+      editor.insertHtmlAt(at, insertionPayload(text, placement));
       onNotify(t('notes.debateApplied'), 'success');
       return;
     }
 
     if (mode === 'append') {
-      const end = editor.state.doc.content.size;
-      editor.chain().focus().insertContentAt(end, insertionPayload(text, end > 0 ? 'after' : 'standalone')).run();
+      const end = editor.view.state.doc.content.size;
+      editor.focus();
+      editor.insertHtmlAt(end, insertionPayload(text, end > 0 ? 'after' : 'standalone'));
     } else {
-      editor.chain().focus().insertContent(html).run();
+      editor.focus();
+      editor.insertHtmlAtCursor(html);
     }
     onNotify(t('notes.debateApplied'), 'success');
   }, [getEditor, lastSuggestion, lastSuggestedCommand, onNotify, t]);
@@ -436,23 +458,66 @@ export function DebatePanel({ noteId, noteTitle, noteText, getEditor, onNotify }
   const undoApply = useCallback(() => {
     const editor = getEditor();
     if (!editor) return;
-    editor.chain().focus().undo().run();
+    editor.focus();
+    editor.undo();
     onNotify(t('notes.debateUndo'), 'info');
   }, [getEditor, onNotify, t]);
 
   const isOpen = debate?.open ?? false;
   const providerInfo = debate ? (debate.providerMode === 'both' ? 'OpenAI + Claude' : debate.providerMode === 'openai' ? 'OpenAI' : 'Claude') : '';
-  const hasSelection = !!(getEditor()?.state.selection && !getEditor()?.state.selection.empty);
+  const hasSelection = !!(getEditor() && !getEditor()?.isSelectionEmpty());
   const claudeCanInfer = !!(claudeApiKey.trim() || (claudeState === 'connected' && claudeAuthMode === 'apikey') || claudeProxyAvailable);
   const hasCredentials = !!(codexApiKey.trim() || codexState === 'connected' || codexProxyAvailable || claudeCanInfer);
   const claudeOAuthOnly = claudeState === 'connected' && !claudeCanInfer;
   const contextChars = lastFocusChars || noteText.length;
 
+  const panelWidth = useUiStore((s) => s.debatePanelWidth);
+  const setPanelWidth = useUiStore((s) => s.setDebatePanelWidth);
+  const [dragging, setDragging] = useState(false);
+
+  // Drag-to-resize: the left edge of the panel is a grab handle. Width
+  // is persisted via `useUiStore` so the user's preference sticks across
+  // sessions. Clamping (280–720 px) lives in the setter.
+  const onResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isOpen) return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    setDragging(true);
+    const startX = e.clientX;
+    const startW = panelWidth;
+    const onMove = (ev: PointerEvent) => {
+      const next = startW + (startX - ev.clientX);
+      setPanelWidth(next);
+    };
+    const onUp = () => {
+      setDragging(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [isOpen, panelWidth, setPanelWidth]);
+
   return (
     <aside
-      className={`${isOpen ? 'w-[360px]' : 'w-11'} shrink-0 border-l border-edge bg-surface/55 backdrop-blur-sm transition-[width] duration-200`}
+      // Width only transitions on open/close toggle; during a drag the
+      // `dragging` flag kills the transition so resize feels immediate.
+      style={{ width: isOpen ? panelWidth : 44 }}
+      className={`shrink-0 border-l border-edge bg-surface/55 backdrop-blur-sm ${dragging ? '' : 'transition-[width] duration-200'} relative`}
       data-testid="debate-panel"
     >
+      {isOpen && (
+        <div
+          onPointerDown={onResizeStart}
+          className="absolute left-0 top-0 bottom-0 w-1.5 -translate-x-1/2 cursor-col-resize group z-10"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize debate panel"
+          data-testid="debate-panel-resize"
+        >
+          <span className="absolute inset-y-0 left-1/2 w-px bg-edge group-hover:bg-primary/60 transition-colors" />
+        </div>
+      )}
       <div className="h-full flex flex-col relative overflow-hidden">
         <DebatePanelHeader
           open={isOpen}
@@ -462,7 +527,19 @@ export function DebatePanel({ noteId, noteTitle, noteText, getEditor, onNotify }
           sessions={debate?.sessions ?? []}
           activeSessionId={debate?.activeSessionId ?? ''}
           onToggle={() => {
-            if (!debate) { onNotify(t('notes.processNeedsSave'), 'info'); return; }
+            // G1 — silent autosave so the LLM panel works on unsaved drafts.
+            if (!debate) {
+              if (ensureNoteId) {
+                pendingOpenRef.current = true;
+                void ensureNoteId().catch(() => {
+                  pendingOpenRef.current = false;
+                  onNotify(t('notes.processNeedsSave'), 'info');
+                });
+                return;
+              }
+              onNotify(t('notes.processNeedsSave'), 'info');
+              return;
+            }
             patch((s) => ({ ...s, open: !s.open }));
           }}
           onShowSettings={() => setShowSettings(true)}

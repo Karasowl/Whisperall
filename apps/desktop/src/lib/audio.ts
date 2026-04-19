@@ -6,7 +6,15 @@ let meetingMicStream: MediaStream | null = null;
 let meetingCtx: AudioContext | null = null;
 
 export async function getMicStream(deviceId?: string | null): Promise<MediaStream> {
-  if (micStream && micStream.active) return micStream;
+  // Reuse cached stream only if ALL tracks are live (not just the stream itself).
+  if (micStream && micStream.active && micStream.getTracks().every((t) => t.readyState === 'live')) {
+    return micStream;
+  }
+  // Stale cache — drop it before requesting a new one.
+  if (micStream) {
+    micStream.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } });
+    micStream = null;
+  }
   micStream = await navigator.mediaDevices.getUserMedia({
     audio: {
       ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
@@ -18,9 +26,21 @@ export async function getMicStream(deviceId?: string | null): Promise<MediaStrea
 
 export function stopMicStream(): void {
   if (micStream) {
-    micStream.getTracks().forEach((t) => t.stop());
+    // Stop every track explicitly; Windows Bluetooth HFP/A2DP switch only
+    // happens once every track is released.
+    micStream.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } });
     micStream = null;
   }
+}
+
+/** Emergency release: stops the mic even when called from unexpected contexts
+ *  (error paths, rapid toggle races). Safe to call multiple times. */
+export function forceReleaseMic(): void {
+  stopMicStream();
+}
+
+export function isMicActive(): boolean {
+  return !!(micStream && micStream.active && micStream.getTracks().some((t) => t.readyState === 'live'));
 }
 
 export function createRecorder(

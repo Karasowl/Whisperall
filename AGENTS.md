@@ -163,3 +163,17 @@ cd apps/api && python -m pytest tests/ -x -q # API tests
 ### Configuration
 
 See `.agent-config.json` for the full coordination config: registered agents, test commands, and file paths.
+
+## Local Build Rule
+
+After any repo change that affects the runnable product, rebuild/regenerate:
+
+`C:\Users\adven\OneDrive\Documentos\dev-projects\Whisperall\apps\desktop\release\win-unpacked`
+
+Reason:
+We use `release/win-unpacked` as the live local app to inspect and test the newest state while development continues. Do not stop at code changes only; refresh the runnable build so the user can verify the result in action.
+
+Expectation:
+- Treat regenerating `apps/desktop/release/win-unpacked` as part of the normal completion flow.
+- Mention clearly if the environment blocks the rebuild.
+- Do not claim the change is fully validated unless the refreshed build was actually produced and checked.

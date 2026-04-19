@@ -261,6 +261,23 @@ export function startOverlayDrag(screenX: number, screenY: number): void {
   };
 }
 
+// Dock zone bounds (set by the renderer via IPC when the slot mounts).
+let dockZone: { x: number; y: number; width: number; height: number } | null = null;
+const SNAP_DISTANCE = 60; // px — how close the overlay center must be to snap.
+
+export function setDockZone(bounds: { x: number; y: number; width: number; height: number } | null): void {
+  dockZone = bounds;
+}
+
+function overlayCenter(bounds: Electron.Rectangle): { cx: number; cy: number } {
+  return { cx: bounds.x + bounds.width / 2, cy: bounds.y + bounds.height / 2 };
+}
+
+function dockZoneCenter(): { cx: number; cy: number } | null {
+  if (!dockZone) return null;
+  return { cx: dockZone.x + dockZone.width / 2, cy: dockZone.y + dockZone.height / 2 };
+}
+
 export function moveOverlayDrag(screenX: number, screenY: number): void {
   const win = getOverlayWindow();
   if (!win || !dragState) return;
@@ -272,10 +289,50 @@ export function moveOverlayDrag(screenX: number, screenY: number): void {
     height: bounds.height,
   };
   win.setBounds(next);
+
+  // Magnetic snap: if the overlay center is near the dock zone, signal the renderer.
+  const dzc = dockZoneCenter();
+  if (dzc) {
+    const oc = overlayCenter(next);
+    const dist = Math.hypot(oc.cx - dzc.cx, oc.cy - dzc.cy);
+    if (dist < SNAP_DISTANCE) {
+      // Tell the main window to dock the widget.
+      const { getMainWindow } = require('./windows.js');
+      const main = getMainWindow();
+      if (main && !main.isDestroyed()) {
+        main.webContents.send('widget:snap-dock');
+      }
+      // Hide the overlay immediately.
+      hideOverlay();
+      dragState = null;
+      return;
+    }
+  }
 }
 
 export function endOverlayDrag(): void {
   dragState = null;
+  scheduleSave();
+}
+
+/**
+ * Undock-to-position: show the overlay centered on (screenX, screenY) and
+ * immediately begin an OS-level drag so the user can keep moving it without
+ * releasing the mouse. Called by the renderer when the user drags the docked
+ * widget out of the dock slot.
+ */
+export function undockToPosition(screenX: number, screenY: number): void {
+  const win = ensureWindow();
+  const bounds = win.getBounds();
+  const x = Math.round(screenX - bounds.width / 2);
+  const y = Math.round(screenY - bounds.height / 2);
+  win.setBounds({ x, y, width: bounds.width, height: bounds.height });
+  if (!win.isVisible()) win.show();
+  // Start drag immediately so the cursor "owns" the overlay.
+  dragState = {
+    offsetX: Math.round(bounds.width / 2),
+    offsetY: Math.round(bounds.height / 2),
+  };
   scheduleSave();
 }
 
