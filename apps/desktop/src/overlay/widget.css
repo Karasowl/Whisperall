@@ -1,12 +1,60 @@
+/* E5 — Widget tokens aligned with docs/design-system/elevenlabs.md.
+ * Dual-theme: default light (near-white + warm-stone, sub-0.1 opacity
+ * multi-layered shadows), dark preserved via html.dark.
+ */
 :root {
-  --w-bg: rgba(16, 25, 34, 0.74);
-  --w-bg-strong: rgba(16, 25, 34, 0.9);
-  --w-border: rgba(40, 48, 57, 0.9);
-  --w-border-soft: rgba(157, 171, 185, 0.24);
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
+
+/* E5b — transparent padding ring around the widget body so the drop shadow
+ * has room to blur out instead of being clipped at the rectangular window
+ * frame. Applied ONLY on #root (box-sizing: border-box is set via `*`) so
+ * the three 100%-sized containers don't triple-pad and clip the widget.
+ * OVERLAY_PAD (widget-store.ts) must match this value. */
+#root {
+  padding: 14px;
+}
+
+:root {
+  /* E5c — bump opacity close to solid. ElevenLabs surfaces are near-opaque
+   * with sub-0.1 opacity shadows, not glass panels. 88 % was too see-through
+   * and made the drop shadow "bleed" through the widget body. */
+  --w-bg: rgba(255, 255, 255, 0.98);
+  --w-bg-strong: #ffffff;
+  --w-warm: rgba(245, 242, 239, 0.98);
+  --w-border: rgba(0, 0, 0, 0.08);
+  --w-border-soft: rgba(0, 0, 0, 0.06);
+  --w-text: rgba(10, 10, 10, 0.94);
+  --w-muted: rgba(78, 78, 78, 0.82);
+  --w-primary: #137fec;
+  --w-danger: #dc2626;
+  --w-shadow-inset: inset 0 0 0 0.5px rgba(0, 0, 0, 0.075);
+  --w-shadow-outline: 0 0 0 1px rgba(0, 0, 0, 0.05);
+  --w-shadow-card: 0 0 1px rgba(0, 0, 0, 0.25), 0 2px 3px rgba(0, 0, 0, 0.04);
+  --w-shadow-warm: 0 3px 10px rgba(78, 50, 23, 0.05);
+  /* Very tight float shadow so it reads like an ElevenLabs "barely there"
+   * surface and still fits inside the 14 px transparent padding ring. */
+  --w-shadow-float: 0 3px 8px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+html.dark {
+  --w-bg: rgba(16, 25, 34, 0.96);
+  --w-bg-strong: rgba(16, 25, 34, 1);
+  --w-warm: rgba(31, 39, 48, 0.96);
+  --w-border: rgba(255, 255, 255, 0.08);
+  --w-border-soft: rgba(255, 255, 255, 0.05);
   --w-text: rgba(237, 243, 251, 0.96);
   --w-muted: rgba(157, 171, 185, 0.9);
   --w-primary: #137fec;
   --w-danger: #f87171;
+  --w-shadow-inset: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --w-shadow-outline: 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --w-shadow-card: 0 0 1px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.12);
+  --w-shadow-warm: 0 3px 10px rgba(0, 0, 0, 0.18);
+  --w-shadow-float: 0 3px 8px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 * {
@@ -37,8 +85,8 @@
   width: 40px;
   height: 8px;
   border-radius: 999px;
-  border: 1px solid rgba(157, 171, 185, 0.25);
-  background: rgba(8, 12, 18, 0.7);
+  background: var(--w-bg-strong);
+  box-shadow: var(--w-shadow-inset), var(--w-shadow-soft, 0 2px 6px rgba(0, 0, 0, 0.04));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -54,16 +102,16 @@
   width: 2px;
   height: 2px;
   border-radius: 999px;
-  background: rgba(157, 171, 185, 0.74);
+  background: var(--w-muted);
+  opacity: 0.65;
 }
 
 .notch-idle {
   width: 34px;
   height: 5px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: linear-gradient(90deg, rgba(220, 230, 242, 0.16), rgba(220, 230, 242, 0.3), rgba(220, 230, 242, 0.16));
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+  background: var(--w-warm);
+  box-shadow: var(--w-shadow-inset), var(--w-shadow-warm);
   cursor: grab;
   transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -77,11 +125,8 @@
   min-height: 56px;
   width: 360px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(24, 24, 27, 0.6);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  box-shadow: 0 0 44px -12px rgba(19, 127, 236, 0.34), inset 0 0 12px rgba(255, 255, 255, 0.05);
+  background: var(--w-bg);
+  box-shadow: var(--w-shadow-inset), var(--w-shadow-outline), var(--w-shadow-float);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -110,7 +155,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: rgba(157, 171, 185, 0.75);
+  color: var(--w-muted);
   cursor: grab;
   flex-shrink: 0;
 }
@@ -127,7 +172,7 @@
   height: 38px;
   min-width: 120px;
   max-width: 150px;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-right: 1px solid var(--w-border);
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -137,7 +182,7 @@
 
 .notch-prompt .material-symbols-outlined {
   font-size: 16px;
-  color: rgba(157, 171, 185, 0.84);
+  color: var(--w-muted);
 }
 
 .notch-prompt-select {
@@ -145,9 +190,24 @@
   min-width: 0;
   border: none;
   background: transparent;
-  color: rgba(230, 238, 248, 0.9);
+  color: var(--w-text);
   font-size: 11px;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 18px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='%239dabb9'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  cursor: pointer;
+}
+
+/* E5b — native <select> popup inherits the color scheme + token bg.
+ * Option rows get explicit surface/text so the dropdown matches the widget. */
+.notch-prompt-select option,
+.widget-select option {
+  background: var(--w-bg-strong);
+  color: var(--w-text);
 }
 
 .notch-wave {
@@ -196,7 +256,8 @@
 
 .hover-btn:hover {
   color: var(--w-text);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--w-warm);
+  box-shadow: var(--w-shadow-inset);
 }
 
 .hover-btn.primary {
@@ -214,12 +275,9 @@
 .widget-expanded {
   width: 360px;
   height: 120px;
-  border-radius: 16px;
-  border: 1px solid var(--w-border-soft);
+  border-radius: 22px;
   background: var(--w-bg);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--w-shadow-inset), var(--w-shadow-outline), var(--w-shadow-float);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -230,7 +288,7 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-bottom: 1px solid rgba(157, 171, 185, 0.16);
+  border-bottom: 1px solid var(--w-border);
 }
 
 .widget-tabs {
@@ -255,7 +313,7 @@
 
 .widget-tab:hover {
   color: var(--w-text);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--w-warm);
 }
 
 .widget-tab.active {
@@ -284,7 +342,7 @@
 
 .widget-btn-icon:hover {
   color: var(--w-text);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--w-warm);
 }
 
 .widget-btn-icon .material-symbols-outlined {
@@ -321,17 +379,29 @@
 
 .widget-select,
 .widget-textarea {
-  background: rgba(10, 16, 23, 0.78);
-  border: 1px solid rgba(157, 171, 185, 0.2);
+  background: var(--w-bg-strong);
+  border: none;
+  box-shadow: var(--w-shadow-inset);
   color: var(--w-text);
   border-radius: 9px;
   outline: none;
+  transition: box-shadow 0.15s ease;
+}
+.widget-select:focus,
+.widget-textarea:focus {
+  box-shadow: var(--w-shadow-inset), 0 0 0 2px rgba(19, 127, 236, 0.25);
 }
 
 .widget-select {
   height: 28px;
-  padding: 0 8px;
+  padding: 0 26px 0 10px;
   font-size: 12px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='%239dabb9'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  cursor: pointer;
 }
 
 .widget-textarea {
@@ -344,7 +414,7 @@
 }
 
 .widget-textarea::placeholder {
-  color: rgba(157, 171, 185, 0.75);
+  color: var(--w-muted);
 }
 
 .widget-reader-actions,
@@ -387,13 +457,13 @@
 
 .widget-btn-ghost {
   color: var(--w-muted);
-  background: rgba(16, 25, 34, 0.65);
-  border: 1px solid rgba(157, 171, 185, 0.22);
+  background: var(--w-bg);
+  border: 1px solid var(--w-border);
 }
 
 .widget-btn-ghost:hover {
   color: var(--w-text);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--w-warm);
 }
 
 .widget-btn-record .material-symbols-outlined,
@@ -416,8 +486,8 @@
   width: 100%;
   max-height: 44px;
   overflow-y: auto;
-  background: rgba(10, 16, 23, 0.78);
-  border: 1px solid rgba(157, 171, 185, 0.2);
+  background: var(--w-bg-strong);
+  box-shadow: var(--w-shadow-inset);
   border-radius: 9px;
   padding: 7px 8px;
   color: var(--w-text);
@@ -456,7 +526,7 @@
   color: var(--w-text);
   font-size: 12px;
   background: var(--w-bg-strong);
-  border: 1px solid rgba(157, 171, 185, 0.2);
+  border: 1px solid var(--w-border);
   border-radius: 999px;
   padding: 7px 16px;
 }
@@ -502,7 +572,7 @@
   padding: 0 7px;
   border-radius: 999px;
   background: var(--w-bg-strong);
-  border: 1px solid rgba(157, 171, 185, 0.18);
+  border: 1px solid var(--w-border);
 }
 
 .waveform-bar {
@@ -543,10 +613,10 @@
   height: 84px;
   border-radius: 14px;
   border: 1px solid var(--w-border-soft);
-  background: rgba(10, 16, 23, 0.86);
+  background: var(--w-bg-strong);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--w-shadow-inset), var(--w-shadow-float);
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
@@ -560,8 +630,8 @@
 }
 
 .widget-btn-chip {
-  border: 1px solid rgba(157, 171, 185, 0.22);
-  background: rgba(16, 25, 34, 0.75);
+  border: 1px solid var(--w-border);
+  background: var(--w-bg);
   color: var(--w-text);
   border-radius: 999px;
   height: 24px;
@@ -590,10 +660,67 @@
 }
 
 .subtitle-line.subtitle-placeholder {
-  color: rgba(157, 171, 185, 0.75);
+  color: var(--w-muted);
   font-weight: 400;
 }
 
 .material-symbols-outlined {
-  font-variation-settings: 'FILL' 0, 'wght' 420, 'GRAD' 0, 'opsz' 20;
+  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' -25, 'opsz' 20;
+}
+
+/* ── E5d: ElevenLabs-style scrollbar for any scrollable surface inside
+ *       the widget. Thin, near-invisible at rest, warm on hover. */
+.widget-text,
+.widget-scroll,
+.widget-expanded [data-scroll] {
+  scrollbar-width: thin;
+  scrollbar-color: var(--w-scrollbar-thumb, rgba(0, 0, 0, 0.18)) transparent;
+}
+
+.widget-text::-webkit-scrollbar,
+.widget-scroll::-webkit-scrollbar,
+.widget-expanded [data-scroll]::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.widget-text::-webkit-scrollbar-track,
+.widget-scroll::-webkit-scrollbar-track,
+.widget-expanded [data-scroll]::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 2px 0;
+}
+.widget-text::-webkit-scrollbar-thumb,
+.widget-scroll::-webkit-scrollbar-thumb,
+.widget-expanded [data-scroll]::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.14);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.15s ease;
+}
+.widget-text::-webkit-scrollbar-thumb:hover,
+.widget-scroll::-webkit-scrollbar-thumb:hover,
+.widget-expanded [data-scroll]::-webkit-scrollbar-thumb:hover {
+  background: rgba(78, 50, 23, 0.32);
+}
+.widget-text::-webkit-scrollbar-corner,
+.widget-scroll::-webkit-scrollbar-corner,
+.widget-expanded [data-scroll]::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+html.dark .widget-text,
+html.dark .widget-scroll,
+html.dark .widget-expanded [data-scroll] {
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+html.dark .widget-text::-webkit-scrollbar-thumb,
+html.dark .widget-scroll::-webkit-scrollbar-thumb,
+html.dark .widget-expanded [data-scroll]::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+}
+html.dark .widget-text::-webkit-scrollbar-thumb:hover,
+html.dark .widget-scroll::-webkit-scrollbar-thumb:hover,
+html.dark .widget-expanded [data-scroll]::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
 }

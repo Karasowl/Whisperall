@@ -1,6 +1,7 @@
 import { api } from './api';
 import { requestPlanRefresh } from '../stores/plan';
 import { inferTTSLanguage } from './lang-detect';
+import { reportError } from '../stores/notifications';
 
 const CHUNK_CHARS = 4000; // Google TTS limit ~5000, use 4000 for safety
 
@@ -278,6 +279,7 @@ async function playChunk(idx: number, rid: number): Promise<void> {
     status = 'idle';
     stopAudioOnly();
     notify();
+    reportError('tts.startReading', err, { message: msg });
   }
 }
 

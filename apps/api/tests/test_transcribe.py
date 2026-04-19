@@ -474,7 +474,7 @@ def test_from_url_supports_page_links_via_media_resolution(client, auth_headers)
          patch("app.routers.transcribe.check_usage"), \
          patch("app.routers.transcribe._resolve_media_from_url", new_callable=AsyncMock) as mock_resolve, \
          patch("app.routers.transcribe.groq_stt.transcribe_chunk", new_callable=AsyncMock) as mock_groq:
-        mock_resolve.return_value = (b"RIFF-fake-audio", "audio/wav", "/audio.wav")
+        mock_resolve.return_value = (b"RIFF-fake-audio", "audio/wav", "/audio.wav", None)
         mock_groq.return_value = "transcribed text"
         res = client.post(
             "/v1/transcribe/from-url",
@@ -524,7 +524,7 @@ def test_from_url_maps_provider_http_error_to_stable_api_error(client, auth_head
          patch("app.routers.transcribe.check_usage"), \
          patch("app.routers.transcribe._resolve_media_from_url", new_callable=AsyncMock) as mock_resolve, \
          patch("app.routers.transcribe.groq_stt.transcribe_chunk", new_callable=AsyncMock) as mock_groq:
-        mock_resolve.return_value = (b"RIFF-fake-audio", "audio/wav", "/audio.wav")
+        mock_resolve.return_value = (b"RIFF-fake-audio", "audio/wav", "/audio.wav", None)
         mock_groq.side_effect = httpx.HTTPStatusError(
             "Bad request from Groq",
             request=groq_request,
@@ -536,6 +536,90 @@ def test_from_url_maps_provider_http_error_to_stable_api_error(client, auth_head
             headers=auth_headers,
         )
 
+    # The endpoint now maps upstream provider failures to HTTP 502 (Bad
+    # Gateway) with `stage=transcribe` so the client can tell the error
+    # came from the STT call, not from URL resolution or size check.
+    assert res.status_code == 502
+    assert res.headers.get("x-whisperall-error-code") == "TRANSCRIBE_STT_FAILED"
+    assert res.headers.get("x-whisperall-error-stage") == "transcribe"
+    assert res.json()["error"]["code"] == "TRANSCRIBE_STT_FAILED"
+
+
+def test_from_url_job_requires_auth(client):
+    res = client.post("/v1/transcribe/from-url-job", json={"url": "https://example.com/x.mp3"})
+    assert res.status_code == 401
+
+
+def test_from_url_job_no_db_returns_503(client, auth_headers):
+    with patch("app.routers.transcribe.get_supabase_or_none", return_value=None):
+        res = client.post(
+            "/v1/transcribe/from-url-job",
+            json={"url": "https://example.com/x.mp3"},
+            headers=auth_headers,
+        )
+    assert res.status_code == 503
+    assert res.headers.get("x-whisperall-error-code") == "TRANSCRIBE_DB_UNAVAILABLE"
+
+
+def test_from_url_job_happy_path(client, auth_headers):
+    """End-to-end-ish: mock resolve, ffmpeg splitting, storage upload, and DB
+    inserts. Verifies the endpoint returns the real job id and total_chunks
+    matches what ffmpeg produced."""
+    db = MagicMock()
+    fake_job_row = {"id": "job-xyz", "status": "pending", "processed_chunks": 0, "total_chunks": 3}
+    db.table.return_value.insert.return_value.execute.return_value.data = [fake_job_row]
+    db.storage.from_.return_value.upload.return_value = None
+
+    with patch("app.routers.transcribe.get_supabase_or_none", return_value=db), \
+         patch("app.routers.transcribe.check_usage"), \
+         patch("app.routers.transcribe._resolve_media_from_url", new_callable=AsyncMock) as mock_resolve, \
+         patch("app.routers.transcribe._ffmpeg_split_audio") as mock_split:
+        mock_resolve.return_value = (
+            b"fake-audio-bytes-long-enough-to-pass-size-check" * 32,
+            "audio/mp3",
+            "/audio.mp3",
+            "Sample Video Title",
+        )
+        # Three mock chunks — bytes + duration tuples.
+        mock_split.return_value = [
+            (b"chunk0-bytes" * 64, 300.0),
+            (b"chunk1-bytes" * 64, 300.0),
+            (b"chunk2-bytes" * 64, 120.0),
+        ]
+        res = client.post(
+            "/v1/transcribe/from-url-job",
+            json={"url": "https://cdn.example.com/audio.mp3"},
+            headers=auth_headers,
+        )
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["id"] == "job-xyz"
+    assert body["total_chunks"] == 3
+    assert body["processed_chunks"] == 0
+    # Three storage uploads + one jobs insert + three chunk inserts.
+    assert db.storage.from_.call_count == 3
+    # Verify chunk paths are user-scoped as per storage RLS.
+    upload_calls = db.storage.from_.return_value.upload.call_args_list
+    for call in upload_calls:
+        path = call.args[0]
+        assert "/url-chunks/job-xyz/" in path, f"unexpected path {path}"
+        assert path.endswith(".mp3"), f"unexpected ext {path}"
+
+
+def test_from_url_job_rejects_tiny_response(client, auth_headers):
+    """If the source returns too few bytes it's almost certainly not media
+    (captcha/redirect/404 html). The endpoint short-circuits with stage=resolve."""
+    db = MagicMock()
+    with patch("app.routers.transcribe.get_supabase_or_none", return_value=db), \
+         patch("app.routers.transcribe.check_usage"), \
+         patch("app.routers.transcribe._resolve_media_from_url", new_callable=AsyncMock) as mock_resolve:
+        mock_resolve.return_value = (b"tiny", "text/html", "/", None)
+        res = client.post(
+            "/v1/transcribe/from-url-job",
+            json={"url": "https://private.example.com/"},
+            headers=auth_headers,
+        )
     assert res.status_code == 400
-    assert res.headers.get("x-whisperall-error-code") == "TRANSCRIBE_URL_PROVIDER_REJECTED"
-    assert res.json()["error"]["code"] == "TRANSCRIBE_URL_PROVIDER_REJECTED"
+    assert res.headers.get("x-whisperall-error-code") == "TRANSCRIBE_URL_TOO_SMALL"
+    assert res.headers.get("x-whisperall-error-stage") == "resolve"

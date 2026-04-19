@@ -41,7 +41,7 @@ export function HistoryPage() {
   return (
     <div className="flex-1 flex overflow-hidden" data-testid="history-page">
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        <div className="px-8 pt-12 pb-4">
+        <div className="px-8 pt-6 pb-4">
           <div className="flex justify-between items-start mb-6">
             <div>
               <h2 className="text-3xl font-black tracking-tight mb-2">{t('history.title')}</h2>

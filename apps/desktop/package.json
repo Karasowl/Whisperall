@@ -1,7 +1,7 @@
 {
   "name": "@whisperall/desktop",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.33.1-alpha",
   "type": "module",
   "main": "electron-dist/main.js",
   "scripts": {
@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:ai": "playwright test --config=playwright.ai.config.ts",
     "lint": "echo lint-not-configured",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "electron:dev": "tsc -p tsconfig.electron.json && node scripts/electron-dev.mjs",
@@ -19,32 +20,41 @@
     "dist:dir": "node scripts/pre-dist.mjs && vite build && tsc -p tsconfig.electron.json && npx electron-builder --config electron-builder.yml --dir"
   },
   "dependencies": {
+    "@milkdown/core": "^7.20.0",
+    "@milkdown/plugin-clipboard": "^7.20.0",
+    "@milkdown/plugin-history": "^7.20.0",
+    "@milkdown/plugin-listener": "^7.20.0",
+    "@milkdown/plugin-tooltip": "^7.20.0",
+    "@milkdown/preset-commonmark": "^7.20.0",
+    "@milkdown/preset-gfm": "^7.20.0",
+    "@milkdown/prose": "^7.20.0",
+    "@milkdown/react": "^7.20.0",
+    "@milkdown/utils": "^7.20.0",
     "@supabase/supabase-js": "^2.95.2",
-    "@tiptap/extension-bubble-menu": "^3.19.0",
-    "@tiptap/extension-highlight": "^3.19.0",
-    "@tiptap/extension-placeholder": "^3.19.0",
-    "@tiptap/extension-underline": "^3.19.0",
-    "@tiptap/react": "^3.19.0",
-    "@tiptap/starter-kit": "^3.19.0",
     "@whisperall/api-client": "workspace:*",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
+    "turndown": "^7.2.4",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@midscene/web": "^1.7.4",
     "@playwright/test": "^1.58.1",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^25.2.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^4.3.1",
     "@vitest/coverage-v8": "^2.1.9",
+    "dotenv": "^17.4.2",
     "electron": "33",
+    "electron-builder": "^25.1.8",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.6.2",
     "vite": "^5.4.11",
-    "vitest": "^2.1.0",
-    "electron-builder": "^25.1.8"
+    "vitest": "^2.1.0"
   }
 }
-

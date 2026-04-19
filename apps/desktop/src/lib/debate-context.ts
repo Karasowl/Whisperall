@@ -1,4 +1,4 @@
-import type { Editor } from '@tiptap/react';
+import type { EditorHandle } from '../components/editor/milkdown/api/EditorHandle';
 
 export type DebateContextSource = 'selection' | 'viewport' | 'full';
 
@@ -41,7 +41,7 @@ function findScrollContainer(node: HTMLElement): HTMLElement {
   return node;
 }
 
-function visibleTextFromEditor(editor: Editor, maxChars: number): string {
+function visibleTextFromEditor(editor: EditorHandle, maxChars: number): string {
   if (typeof window === 'undefined' || typeof document === 'undefined') return '';
   const rootDom = editor.view.dom as HTMLElement;
   const proseRoot = (rootDom.querySelector('.ProseMirror') as HTMLElement | null) ?? rootDom;
@@ -64,7 +64,7 @@ function visibleTextFromEditor(editor: Editor, maxChars: number): string {
 }
 
 export function extractDebateContext(
-  editor: Editor | null,
+  editor: EditorHandle | null,
   fallbackText: string,
   opts?: { focusMax?: number; sideMax?: number },
 ): DebateContext {
@@ -74,17 +74,17 @@ export function extractDebateContext(
   if (!fullText) return fallback('', focusMax);
   if (!editor) return fallback(fullText, focusMax);
 
-  const { from, to } = editor.state.selection;
+  const { from, to } = editor.view.state.selection;
   if (from !== to) {
-    const selected = compactWhitespace(editor.state.doc.textBetween(from, to, ' '));
+    const selected = compactWhitespace(editor.view.state.doc.textBetween(from, to, ' '));
     if (selected) {
       const beforeFrom = Math.max(0, from - sideMax * 2);
-      const afterTo = Math.min(editor.state.doc.content.size, to + sideMax * 2);
+      const afterTo = Math.min(editor.view.state.doc.content.size, to + sideMax * 2);
       return {
         source: 'selection',
         focus: clip(selected, focusMax),
-        before: clip(editor.state.doc.textBetween(beforeFrom, from, ' '), sideMax),
-        after: clip(editor.state.doc.textBetween(to, afterTo, ' '), sideMax),
+        before: clip(editor.view.state.doc.textBetween(beforeFrom, from, ' '), sideMax),
+        after: clip(editor.view.state.doc.textBetween(to, afterTo, ' '), sideMax),
         fullLength: fullText.length,
       };
     }

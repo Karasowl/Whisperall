@@ -1,3 +1,5 @@
+import { markdownToHtml } from './markdown';
+
 export type ExportFormat = 'txt' | 'md' | 'docx' | 'pdf';
 export type ExportNoteItem = { title: string; html: string; updatedAt?: string | null };
 export type RenderedExport = {
@@ -30,14 +32,53 @@ function escapeText(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function toPlain(html: string): string {
-  const el = document.createElement('div');
-  el.innerHTML = html;
-  return el.textContent || '';
+/**
+ * DOCX/PDF/HTML export path: content must be valid HTML. Legacy notes are
+ * already HTML; post-migration notes are markdown — convert them first.
+ */
+function toHtml(content: string): string {
+  if (!content) return '';
+  const looksLikeHtml = /^\s*<(p|h[1-6]|ul|ol|section|div|blockquote|pre)\b/i.test(content);
+  if (looksLikeHtml) return content;
+  return markdownToHtml(content);
 }
 
-function toMarkdown(html: string): string {
-  return html
+function toPlain(content: string): string {
+  if (!content) return '';
+  // Detect if content is HTML (legacy) or markdown (post-migration) and
+  // strip whichever format it's in.
+  const looksLikeHtml = /^\s*<(p|h[1-6]|ul|ol|section|div|blockquote|pre)\b/i.test(content);
+  if (looksLikeHtml) {
+    const el = document.createElement('div');
+    el.innerHTML = content;
+    return el.textContent || '';
+  }
+  // Markdown → plain: strip headings/emphasis/links markers.
+  return content
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/^>\s?/gm, '')
+    .replace(/<[^>]+>/g, '')
+    .trim();
+}
+
+/**
+ * Post-migration `content` is markdown-native. Legacy notes may still hold
+ * HTML until their first save cycle self-heals. This helper detects both
+ * and returns markdown. Regex-based HTML→MD is a lightweight fallback for
+ * untouched legacy content; we don't pull in `turndown` here to keep the
+ * export bundle lean.
+ */
+function toMarkdown(content: string): string {
+  if (!content) return '';
+  const looksLikeHtml = /^\s*<(p|h[1-6]|ul|ol|section|div|blockquote|pre)\b/i.test(content);
+  if (!looksLikeHtml) return content.trim(); // already markdown — pass through
+  return content
     .replace(/<h[12][^>]*>(.*?)<\/h[12]>/gi, '## $1\n\n')
     .replace(/<h[3-6][^>]*>(.*?)<\/h[3-6]>/gi, '### $1\n\n')
     .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
@@ -89,13 +130,13 @@ export function renderSingleNote(title: string, html: string, format: ExportForm
     case 'md':
       return { filename: `${safeTitle}.md`, mime: 'text/markdown', content: `# ${resolvedTitle}\n\n${toMarkdown(html)}`, printHtml: null };
     case 'docx':
-      return { filename: `${safeTitle}.doc`, mime: 'application/msword', content: wrapWordDocument(resolvedTitle, html), printHtml: null };
+      return { filename: `${safeTitle}.doc`, mime: 'application/msword', content: wrapWordDocument(resolvedTitle, toHtml(html)), printHtml: null };
     case 'pdf':
       return {
         filename: `${safeTitle}.pdf`,
         mime: 'application/pdf',
         content: '',
-        printHtml: wrapPrintablePage(resolvedTitle, `<h1>${escapeText(resolvedTitle)}</h1>${html}`),
+        printHtml: wrapPrintablePage(resolvedTitle, `<h1>${escapeText(resolvedTitle)}</h1>${toHtml(html)}`),
       };
     default:
       return { filename: `${safeTitle}.txt`, mime: 'text/plain', content: toPlain(html), printHtml: null };
@@ -142,7 +183,7 @@ export function renderCombinedNotes(bundleTitle: string, notes: ExportNoteItem[]
         const label = escapeText(note.title || `Note ${idx + 1}`);
         const updated = toDisplayDate(note.updatedAt);
         const meta = updated ? `<p class="meta">Updated: ${escapeText(updated)}</p>` : '';
-        return `<h2>${idx + 1}. ${label}</h2>${meta}${note.html}`;
+        return `<h2>${idx + 1}. ${label}</h2>${meta}${toHtml(note.html)}`;
       }).join('<hr/>');
       return {
         filename: `${safeTitle}.doc`,
@@ -156,7 +197,7 @@ export function renderCombinedNotes(bundleTitle: string, notes: ExportNoteItem[]
         const label = escapeText(note.title || `Note ${idx + 1}`);
         const updated = toDisplayDate(note.updatedAt);
         const meta = updated ? `<p class="meta">Updated: ${escapeText(updated)}</p>` : '';
-        return `<section><h2>${idx + 1}. ${label}</h2>${meta}${note.html}</section>`;
+        return `<section><h2>${idx + 1}. ${label}</h2>${meta}${toHtml(note.html)}</section>`;
       }).join('<hr/>');
       return {
         filename: `${safeTitle}.pdf`,

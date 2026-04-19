@@ -2,11 +2,11 @@ import { ipcMain, desktopCapturer, Notification, shell } from 'electron';
 import { showMainWindow, getMainWindow, setMinimizeToTray } from './windows.js';
 import {
   showOverlay, hideOverlay, toggleOverlay, resizeOverlay, setOverlayIgnoreMouse, sendSubtitleText,
-  startOverlayDrag, moveOverlayDrag, endOverlayDrag, resetOverlayPosition,
+  startOverlayDrag, moveOverlayDrag, endOverlayDrag, resetOverlayPosition, setDockZone, undockToPosition,
 } from './overlay.js';
 import { updateHotkeys, updateSttSettings, setLastDictationText } from './hotkeys.js';
 import { updateTraySettings, getTraySettings } from './tray.js';
-import { pasteText, undoPaste, readClipboard } from './clipboard.js';
+import { pasteText, undoPaste, readClipboard, writeClipboard } from './clipboard.js';
 import { isValidAuthStorageKey, readAuthStorage, writeAuthStorage } from './auth-storage.js';
 import {
   startCodexAuth, cancelCodexAuth, disconnectCodex, testCodexConnection, getCodexAuthStatus, codexCanInfer, codexChat,
@@ -70,6 +70,14 @@ export function registerIpcHandlers(): void {
     resetOverlayPosition();
   });
 
+  // --- Widget dock zone (magnetic snap + drag-out) ---
+  ipcMain.on('widget:set-dock-zone', (_e, bounds: { x: number; y: number; width: number; height: number } | null) => {
+    setDockZone(bounds);
+  });
+  ipcMain.on('widget:undock-to-position', (_e, screenX: number, screenY: number) => {
+    undockToPosition(screenX, screenY);
+  });
+
   // --- Tray ---
   ipcMain.on('update-tray-settings', (_e, settings: { minimizeToTray?: boolean; showNotifications?: boolean }) => {
     updateTraySettings(settings);
@@ -80,6 +88,7 @@ export function registerIpcHandlers(): void {
 
   // --- Clipboard ---
   ipcMain.handle('clipboard:read', () => readClipboard());
+  ipcMain.handle('clipboard:write', (_e, text: string) => { writeClipboard(text); });
 
   ipcMain.on('clipboard:paste', async (_e, text: string) => {
     const win = getMainWindow();

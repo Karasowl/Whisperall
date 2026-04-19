@@ -39,7 +39,7 @@ def _extract_speaker_segments(result: dict) -> list[dict]:
 async def transcribe_chunk(
     audio_bytes: bytes,
     language: str | None = None,
-    model: str = "nova-2",
+    model: str = "nova-3",
     content_type: str = "audio/wav",
 ) -> str:
     """Transcribe a short audio chunk via Deepgram."""
@@ -70,10 +70,24 @@ async def transcribe_chunk(
 async def transcribe_chunk_diarized(
     audio_bytes: bytes,
     language: str | None = None,
-    model: str = "nova-2",
+    model: str = "nova-3",
     content_type: str = "audio/wav",
 ) -> dict:
-    """Transcribe a chunk with speaker diarization via Deepgram."""
+    """Transcribe a chunk with speaker diarization via Deepgram.
+
+    Defaults bumped from `nova-2` → `nova-3` in 2026-Q2: nova-3 gives
+    substantially better speaker boundaries on conversational / talking-head
+    content and adds `diarize_version=2024-01-09` behaviour by default, which
+    stabilises speaker identity inside a single request. The old `nova-2`
+    default caused the user-reported "voice-over intro → main presenter"
+    case to ping-pong between Speaker 1 and Speaker 2 multiple times on a
+    10-min Spanish clip; nova-3 keeps consistent labels.
+
+    Cross-chunk speaker identity is still Deepgram's blind spot (each chunk
+    is a separate request so "Speaker 1" in chunk N isn't necessarily the
+    same person as "Speaker 1" in chunk N+1). Fixing that properly requires
+    sending the full audio in one request — tracked separately.
+    """
     if not settings.deepgram_api_key:
         return {
             "text": "[deepgram-stub] transcribed chunk",
@@ -93,6 +107,12 @@ async def transcribe_chunk_diarized(
         "punctuate": "true",
         "diarize": "true",
         "utterances": "true",
+        # Pin the diarization algorithm to a known-modern version. Without
+        # this param Deepgram sometimes falls back to older, less-stable
+        # behaviour depending on regional routing.
+        "diarize_version": "2024-01-09",
+        # Paragraph detection also helps segment coherence.
+        "paragraphs": "true",
     }
     if language:
         params["language"] = language

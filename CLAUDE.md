@@ -42,13 +42,22 @@ Overlay widget for quick access from any OS app. Dark-only, minimal, under 2000 
 - **M14** (this branch): Subtitle streaming wired (live → IPC → overlay), subtitle toggle UI, settings sync fix
 - **M14b** (this branch): Electron compilation pipeline fix — TS→CJS via `electron-dist/`, app actually launches now
 - **M16** (this branch): Notes system + History fix — documents CRUD (DB + API + store), auto-save from dictation/live/transcription, NotesPage, EditorPage with documentId + debounced auto-save, History query columns fixed
+- **Spring 2026 redesign — v0.1.0 → v0.7.0**: see `docs/IMPORTANT/REDESIGN-PLAN.md` and `CHANGELOG.md`. Six phases, all complete:
+  - **A** (v0.2.0): bug pass — repaste fantasma, draft fantasma en "Nueva nota", Voice Note button removido, version-badge → modal local, topbar overlap, editor full-width.
+  - **B** (v0.3.0): Action System — `actions.ts` store + `ActionDock`. Dictation/live/transcription expose stop/cancel/preview through one primitive.
+  - **C** (v0.4.0): typewriter reveal — `lib/typewriter.ts` + `wa-reveal` CSS, `prefers-reduced-motion` aware.
+  - **D** (v0.5.0): Settings rail — modal con 9 secciones en rail lateral.
+  - **E1** (v0.6.0): tokens ElevenLabs (warm stone, sombras multicapa, pill radius), default theme **light**, `<ThemeToggle />` topbar, Geist + Geist Mono.
+  - **E2** (v0.7.0): `Button` (6 variants) y `Card` (3 variants); CTAs visibles migrados.
+  - **F** (v0.7.0): typecheck 0, vitest 251/252 (1 pre-existente clipboard debounce), vite build OK, pytest 220/220.
 
 ## What's NEXT
 
-- **M17**: TipTap block editor (replace textarea with rich text: bold, italic, headings, lists, blockquote, floating toolbar)
+- **M17**: TipTap block editor (replace textarea with rich text: bold, italic, headings, lists, blockquote, floating toolbar) + register a TipTap mark for `wa-reveal` so the typewriter blur survives across the editor schema.
 - **M18**: Multi-block content (transcription block, image/audio/PDF blocks, Supabase Storage attachments)
 - **M19**: Notion export (OAuth + block mapping)
-- Polish, E2E coverage, packaging/release
+- **Phase E3** (post-MVP polish): roll out `<Button>` / `<Card>` to remaining surfaces (EditorPage, SettingsModal rows, NotificationBell, export menus); port the design tokens to the overlay widget (plain CSS).
+- Packaging + release pipeline
 
 ## Architecture (quick ref)
 
@@ -96,6 +105,9 @@ cd packages/mcp-server && npx tsc --noEmit          # MCP typecheck
 - TDD: write tests alongside code
 - Reuse existing infrastructure (stores, api-client, IPC channels, providers)
 - MANDATORY: After each milestone, update BOTH `docs/IMPORTANT/STATUS.md` AND this file
+- **MANDATORY: Versioning + CHANGELOG** — on every change with functional/visual impact: bump `apps/desktop/package.json` version (SemVer: patch for fixes, minor for features, major for breaking), add entry to `CHANGELOG.md` under `[Unreleased]` before committing. A commit without a CHANGELOG entry is incomplete.
+- **Theming**: the app is **dual-theme** (light + dark) with runtime toggle. Default initial theme is **light**. Do NOT hard-code colors; always use theme CSS variables from `src/index.css` `@theme`. Design language follows `docs/design-system/elevenlabs.md`.
+- **Error visibility**: every `catch` in renderer or electron code MUST push to `useNotificationsStore` with tone `'error'` including the raw message. Never let errors die in `console.error` alone.
 - See `.claude/rules/` for path-specific rules (testing, code-style, milestone-updates)
 
 ## On Context Loss / New Session
@@ -103,10 +115,12 @@ cd packages/mcp-server && npx tsc --noEmit          # MCP typecheck
 If you're starting fresh or context was compacted, ALWAYS:
 1. Read this file (auto-loaded)
 2. Read `docs/IMPORTANT/STATUS.md` for full spec + checkboxes of what's done/left
-3. Check git log for recent commits: `git log --oneline -10`
-4. **Read `.agent-locks.json`** — check what files are locked and by whom
-5. **Read `.agent-mail.json`** — check for messages from codex-agent
-6. The feature table above is the single source of truth for project state
+3. **Read `docs/IMPORTANT/REDESIGN-PLAN.md`** — the living plan for bugs + Action System + typewriter + settings + full redesign. Single source of truth for in-flight design work.
+4. Read `docs/design-system/elevenlabs.md` before writing any UI.
+5. Check git log for recent commits: `git log --oneline -10`
+6. **Read `.agent-locks.json`** — check what files are locked and by whom
+7. **Read `.agent-mail.json`** — check for messages from codex-agent
+8. The feature table above is the single source of truth for project state
 
 ---
 

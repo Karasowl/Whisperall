@@ -33,5 +33,16 @@ export function createTranscribeEndpoint(client: ApiClient) {
     async fromUrl(params: TranscribeUrlParams, opts?: RequestOpts): Promise<TranscribeResultResponse> {
       return client.postJson<TranscribeResultResponse>("/v1/transcribe/from-url", params, opts);
     },
+
+    /**
+     * Chunked URL transcription (Option B). Server downloads the media,
+     * transcodes + splits with ffmpeg, uploads chunks, and creates a
+     * `transcribe_jobs` row. Client then runs the same `/jobs/:id/run`
+     * batch loop as the file upload flow — no more single-blob 25 MB cap
+     * or provider timeout for long videos.
+     */
+    async fromUrlAsJob(params: TranscribeUrlParams, opts?: RequestOpts): Promise<TranscribeJobResponse> {
+      return client.postJson<TranscribeJobResponse>("/v1/transcribe/from-url-job", params, opts);
+    },
   };
 }

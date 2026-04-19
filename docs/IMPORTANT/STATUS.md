@@ -1,6 +1,19 @@
 # WhisperAll — Project Status & Requirements
 
-Last updated: 2026-02-08
+Last updated: 2026-04-15 — see `CHANGELOG.md` for the per-version log and `docs/IMPORTANT/REDESIGN-PLAN.md` for the in-flight redesign work (Phases A–F, all complete).
+
+## Current build (v0.7.0)
+
+Phases of the spring-2026 redesign:
+- **A — Bugs (B1–B7)** — repaste fantasma, draft fantasma, voice-note redundante, version-badge → modal local, topbar overlap, editor full-width, sidebar Procesos+Logs+collapse+VersionBadge.
+- **B — Action System** — `src/stores/actions.ts` + `ActionDock` floating primitive; dictation/live/transcription wired with stop/cancel.
+- **C — Typewriter** — `src/lib/typewriter.ts` + `wa-reveal` CSS; record-into-note streams word-by-word with fade+blur.
+- **D — Settings rail** — modal con 9 secciones en rail lateral, 1 pane por archivo interno.
+- **E1 — Tokens + theme toggle** — palette ElevenLabs en `index.css`, dual-theme con default light, `<ThemeToggle />` en topbar, Geist + Geist Mono cargados.
+- **E2 — Primitives + rollout** — `Button` (6 variants) y `Card` (3 variants), aplicados a CTAs visibles (Save, Upgrade, ActionDock).
+- **F — Verification** — `tsc --noEmit` 0 errores (4 preexistentes corregidos), `vitest` 251/252 (1 fallo preexistente clipboard debounce), `vite build` OK 10.97s, `pytest` 220/220.
+
+Files added in this redesign: `actions.ts`, `ui.ts`, `typewriter.ts`, `Button.tsx`, `Card.tsx`, `ActionPill.tsx`, `ChangelogModal.tsx`, `ThemeToggle.tsx`, `VersionBadge.tsx`, `LogsPage.tsx`, `ErrorBoundary.tsx`, `docs/IMPORTANT/REDESIGN-PLAN.md`, `docs/design-system/elevenlabs.md`, `CHANGELOG.md`.
 
 ## Original Prompt (source of truth)
 

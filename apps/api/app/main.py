@@ -7,11 +7,61 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+# ── Logging configuration ─────────────────────────────────────────────────
+# Python's root logger ships with a `lastResort` handler at WARNING level;
+# without explicit config, `log.info(…)` calls inside `app.routers.*` go to
+# /dev/null. Uvicorn configures its own `uvicorn` / `uvicorn.access` /
+# `uvicorn.error` loggers but does NOT touch `app.*`. We opt our package
+# into INFO so pipeline progress lines (`[transcribe.urljob] stage=…`) show
+# up in `backend.log`. Format matches uvicorn's so the log tail looks
+# homogeneous.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     [%(name)s] %(message)s",
+)
+logging.getLogger("app").setLevel(logging.INFO)
+
 from .config import settings
 from .db import get_supabase_or_none
 from .routers import health, dictate, live, transcribe, tts, translate, ai_edit, documents, folders, history, usage, api_keys, admin, reader, processes
 
 log = logging.getLogger(__name__)
+
+
+# ── Silence polling GETs in uvicorn's access log ───────────────────────────
+# The client polls /v1/usage every few seconds and the note editor pulls
+# /v1/documents + /v1/folders frequently. Their access-log lines dominate
+# `backend.log` and push actionable events (transcribe stages, errors) out
+# of any reasonable tail window. We install a LogRecord filter that drops
+# `GET … 200 OK` for these paths, keeping non-200 and POST/PUT/DELETE calls
+# so genuine failures still show up.
+_NOISY_GET_PATHS = (
+    "/health",
+    "/v1/usage",
+    "/v1/documents",
+    "/v1/folders",
+    "/v1/history",
+)
+
+
+class _AccessLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            # uvicorn.access formats as: `%s - "%s %s HTTP/%s" %d`
+            args = record.args if isinstance(record.args, tuple) else ()
+            if len(args) >= 4:
+                _client, method_path, _http, status_code = args[0], args[1], args[2], args[3]
+                if isinstance(method_path, str) and method_path.startswith("GET "):
+                    path_only = method_path.split(" ", 1)[1].split("?", 1)[0]
+                    if any(path_only == p or path_only.startswith(p + "/") for p in _NOISY_GET_PATHS):
+                        if isinstance(status_code, int) and 200 <= status_code < 400:
+                            return False
+        except Exception:
+            pass
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_AccessLogFilter())
 
 _HTTP_ERROR_CODES = {
     status.HTTP_400_BAD_REQUEST: "BAD_REQUEST",

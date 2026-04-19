@@ -40,6 +40,11 @@ $wsh.SendKeys('^v')
   return runCommand('powershell', ['-NoProfile', '-Command', script]);
 }
 
+/** Write text to the system clipboard without pasting. */
+export function writeClipboard(text: string): void {
+  clipboard.writeText(text);
+}
+
 export async function pasteText(text: string): Promise<void> {
   if (!text) return;
   const now = Date.now();

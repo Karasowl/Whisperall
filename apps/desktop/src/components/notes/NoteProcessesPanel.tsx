@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useT } from '../../lib/i18n';
 import { combineProcessesForDocument, type ProcessType } from '../../lib/processes';
 import { useProcessesStore } from '../../stores/processes';
@@ -10,14 +10,18 @@ type Props = {
   onOpenProcess?: (id: string, type: ProcessType) => void;
 };
 
-function RowBody({ title, detail, error }: { title: string; detail: string; error: string | null }) {
+function RowBody({ title, detail, error, isTerminal }: { title: string; detail: string; error: string | null; isTerminal: boolean }) {
   return (
     <>
       <div className="min-w-0">
         <div className="truncate text-xs text-text/85">{title}</div>
         {error && <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-red-300">{error}</div>}
       </div>
-      <span className="ml-2 shrink-0 text-[11px] text-muted">{detail}</span>
+      {/* When the process is in a terminal-with-error state we suppress
+       * the "Processing… · 0%" misleading label and print the real
+       * status instead. Prevents the contradiction of "Processing" +
+       * "Process interrupted" side-by-side on the same row. */}
+      <span className={`ml-2 shrink-0 text-[11px] ${isTerminal ? 'text-red-300 font-medium' : 'text-muted'}`}>{detail}</span>
     </>
   );
 }
@@ -34,23 +38,52 @@ export function NoteProcessesPanel({ documentId, onOpenProcesses, onOpenProcess 
     () => combineProcessesForDocument(documentId, jobs, local),
     [documentId, jobs, local],
   );
+  // Collapsed by default when all linked processes are in a terminal
+  // state (completed / failed / canceled / interrupted) — running
+  // processes open the panel automatically so the user notices them.
+  const hasActive = linked.some((item) => item.status === 'running' || item.status === 'queued' || item.status === 'paused');
+  const [collapsed, setCollapsed] = useState(() => !hasActive);
 
   if (linked.length === 0) return null;
 
+  const activeCount = linked.filter((item) => item.status === 'running' || item.status === 'queued' || item.status === 'paused').length;
+  const failedCount = linked.filter((item) => item.status === 'failed' || item.status === 'canceled' || !!item.error).length;
+
   return (
     <section className="mt-2 rounded-xl border border-edge bg-surface/50 px-3 py-2" data-testid="note-processes-panel">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h4 className="text-xs font-semibold text-text">{t('processes.noteTitle')}</h4>
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex items-center gap-1.5 text-xs font-semibold text-text hover:text-primary transition-colors"
+          aria-expanded={!collapsed}
+          data-testid="note-processes-toggle"
+        >
+          <span className={`material-symbols-outlined text-[16px] transition-transform ${collapsed ? '' : 'rotate-90'}`}>chevron_right</span>
+          <span>{t('processes.noteTitle')}</span>
+          <span className="text-[11px] font-normal text-muted">
+            ({linked.length}{activeCount > 0 ? ` · ${activeCount} ${t('processes.activeShort') || 'active'}` : ''}{failedCount > 0 ? ` · ${failedCount} ${t('processes.failedShort') || 'failed'}` : ''})
+          </span>
+        </button>
         {onOpenProcesses && (
-          <button type="button" onClick={onOpenProcesses} className="rounded-lg border border-edge px-2 py-1 text-[11px] text-muted hover:text-text">
-            {t('processes.openHub')}
+          <button type="button" onClick={onOpenProcesses} className="rounded-lg border border-edge px-2 py-1 text-[11px] text-muted hover:text-text flex items-center gap-1">
+            <span className="material-symbols-outlined text-[13px]">arrow_outward</span>
+            {t('processes.openProcesses') || t('nav.processes')}
           </button>
         )}
       </div>
-      <div className="space-y-1.5">
+      {!collapsed && (
+      <div className="space-y-1.5 mt-2">
         {linked.map((item) => {
           const isManagedTranscriptionJob = item.type === 'transcribe_file' && transcriptionJobIds.has(item.id);
-          const detail = `${t(item.stageLabelKey)} · ${item.pct}%`;
+          // Detail label: when a process failed/was canceled/has an error,
+          // the "stageLabel · pct%" read as success ("Processing… · 0%").
+          // Show the real status instead.
+          const isTerminal = item.status === 'failed' || item.status === 'canceled' || !!item.error;
+          const statusKey = `processes.filter.${item.status}`;
+          const detail = isTerminal
+            ? t(statusKey)
+            : `${t(item.stageLabelKey)} · ${item.pct}%`;
           return (
             <div key={item.id} className="flex items-start gap-2">
               {onOpenProcess ? (
@@ -59,11 +92,11 @@ export function NoteProcessesPanel({ documentId, onOpenProcesses, onOpenProcess 
                   onClick={() => onOpenProcess(item.id, item.type)}
                   className="flex w-full min-w-0 items-start justify-between rounded-lg border border-edge px-2.5 py-1.5 text-left hover:border-primary/35"
                 >
-                  <RowBody title={item.title} detail={detail} error={item.error} />
+                  <RowBody title={item.title} detail={detail} error={item.error} isTerminal={isTerminal} />
                 </button>
               ) : (
                 <div className="flex w-full min-w-0 items-start justify-between rounded-lg border border-edge px-2.5 py-1.5 text-left">
-                  <RowBody title={item.title} detail={detail} error={item.error} />
+                  <RowBody title={item.title} detail={detail} error={item.error} isTerminal={isTerminal} />
                 </div>
               )}
               {isManagedTranscriptionJob && (item.status === 'running' || item.status === 'queued') && (
@@ -85,6 +118,7 @@ export function NoteProcessesPanel({ documentId, onOpenProcesses, onOpenProcess 
           );
         })}
       </div>
+      )}
     </section>
   );
 }

@@ -10,6 +10,10 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     strictPort: true,
+    fs: {
+      // Allow importing workspace-root files (e.g. CHANGELOG.md?raw).
+      allow: [resolve(__dirname, '..', '..')],
+    },
   },
   build: {
     outDir: 'dist',

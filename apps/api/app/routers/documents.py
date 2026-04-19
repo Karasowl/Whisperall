@@ -229,10 +229,16 @@ async def get_debate_state(doc_id: str, user: AuthUser = Depends(get_current_use
             .maybe_single()
             .execute()
         )
-        state_json = (res.data or {}).get("state_json") if isinstance(res.data, dict) else {}
+        # supabase-py sometimes returns `None` (not an APIResponse) for
+        # `maybe_single()` when the row doesn't exist, depending on version.
+        # That previously raised `'NoneType' object has no attribute 'data'`
+        # and bubbled into a 500 that polluted every backend.log tail. An
+        # empty row is the normal, benign case — return a blank state.
+        row_data = getattr(res, "data", None) if res is not None else None
+        state_json = row_data.get("state_json") if isinstance(row_data, dict) else {}
         if not isinstance(state_json, dict):
             state_json = {}
-        return {"state_json": state_json, "persisted": True}
+        return {"state_json": state_json, "persisted": bool(row_data)}
     except Exception as e:
         if _error_mentions_missing_relation(e, "document_debate_states"):
             return {"state_json": {}, "persisted": False}

@@ -36,12 +36,15 @@ export function DebatePanelInput({
     }
   }, [onRun, running, disabled]);
 
-  // Auto-resize textarea
+  // Auto-resize textarea — starts at 1 line (~36 px) and grows up to
+  // 96 px. Previously it mounted already tall because of default rows;
+  // the explicit reset keeps it compact until the user needs room.
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
+    const next = prompt ? Math.min(el.scrollHeight, 96) : 36;
+    el.style.height = `${next}px`;
   }, [prompt]);
 
   return (
@@ -70,16 +73,23 @@ export function DebatePanelInput({
         >
           {running ? t('editor.processing') : t('notes.debateRun')}
         </button>
+        {/* "Play" is an auto-loop toggle: when ON, the debate runs
+            every N seconds in the background. The label + icon now
+            reflect that explicitly so users don't confuse it with
+            audio playback. */}
         <button
           type="button"
           onClick={onTogglePlay}
           disabled={disabled}
-          className={`px-2.5 py-1.5 rounded-lg border text-xs transition-colors disabled:opacity-40 ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs transition-colors disabled:opacity-40 ${
             play ? 'border-primary/40 text-primary bg-primary/10' : 'border-edge text-muted hover:text-text hover:bg-base/60'
           }`}
           data-testid="debate-play-toggle"
+          title={play ? t('notes.debatePauseTitle') || 'Stop auto-run loop' : t('notes.debatePlayTitle') || 'Auto-run every N seconds'}
+          aria-pressed={play}
         >
-          {play ? t('notes.debatePause') : t('notes.debatePlay')}
+          <span className="material-symbols-outlined text-[15px]">{play ? 'pause_circle' : 'loop'}</span>
+          <span>{play ? t('notes.debatePause') : (t('notes.debateAutoRun') || 'Auto')}</span>
         </button>
         {play && (
           <span className="text-[11px] text-muted">

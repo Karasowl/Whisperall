@@ -8,13 +8,22 @@ export class ApiError extends Error {
   status: number;
   code: string;
   resource?: string;
+  /**
+   * Optional pipeline stage where the error was raised. Populated by the
+   * `X-Whisperall-Error-Stage` response header on endpoints that instrument
+   * themselves (currently: `POST /v1/transcribe/from-url`). Lets the client
+   * show "Failed at: download" instead of a generic error string so the user
+   * can tell where in a multi-step pipeline the failure happened.
+   */
+  stage?: string;
 
-  constructor(status: number, detail: string, code: string, resource?: string) {
+  constructor(status: number, detail: string, code: string, resource?: string, stage?: string) {
     super(`API error ${status}: ${detail}`);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.resource = resource;
+    this.stage = stage;
   }
 }
 
@@ -60,7 +69,8 @@ export class ApiClient {
     }
     resource = res.headers.get("X-Whisperall-Resource") ?? undefined;
     if (!code) code = res.headers.get("X-Whisperall-Error-Code") ?? "";
-    throw new ApiError(res.status, detail, code, resource);
+    const stage = res.headers.get("X-Whisperall-Error-Stage") ?? undefined;
+    throw new ApiError(res.status, detail, code, resource, stage);
   }
 
   async postJson<T>(path: string, body: unknown, opts?: RequestOpts): Promise<T> {

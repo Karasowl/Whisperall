@@ -9,20 +9,32 @@ body,
 }
 
 /* ── Theme Variables ─────────────────────────────── */
+/* Phase E: palette derived from docs/design-system/elevenlabs.md.
+ * Light variant tracks ElevenLabs' near-white + warm-stone canvas; dark is
+ * the in-house dark variant carrying the same grammar. Shadow tokens are
+ * multi-layered, sub-0.1 opacity stacks ("surfaces that barely exist").
+ */
 :root {
-  --theme-base: #F6F8FB;
-  --theme-surface: #ffffff;
-  --theme-surface-alt: #F1F5F9;
-  --theme-edge: #CBD5E1;
-  --theme-muted: #475569;
-  --theme-text: #0F172A;
+  --theme-base: #ffffff;
+  --theme-surface: #f6f6f6;
+  --theme-surface-alt: #f5f5f5;
+  --theme-warm: #f5f2ef;
+  --theme-edge: #e5e5e5;
+  --theme-text: #0a0a0a;
   --theme-text-secondary: #334155;
+  --theme-text-tertiary: #6b7280;
+  --theme-text-quaternary: #9ca3af;
+  --theme-muted: #6b7280;
   --theme-glass-bg: rgba(255, 255, 255, 0.85);
-  --theme-paper-dot: #CBD5E1;
-  --theme-scrollbar-track: #F6F8FB;
-  --theme-scrollbar-thumb: #CBD5E1;
-  --theme-scrollbar-hover: #94A3B8;
-  --theme-shadow-soft: 0 2px 15px -3px rgba(0, 0, 0, 0.07), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --theme-paper-dot: #cbd5e1;
+  --theme-scrollbar-track: #f6f6f6;
+  --theme-scrollbar-thumb: #d4d4d4;
+  --theme-scrollbar-hover: #a3a3a3;
+  --theme-shadow-inset-border: inset 0 0 0 0.5px rgba(0, 0, 0, 0.075);
+  --theme-shadow-outline: 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --theme-shadow-soft: 0 4px 4px rgba(0, 0, 0, 0.04);
+  --theme-shadow-card: 0 0 1px rgba(0, 0, 0, 0.4), 0 4px 4px rgba(0, 0, 0, 0.04);
+  --theme-shadow-warm: 0 6px 16px rgba(78, 50, 23, 0.04);
   --theme-shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
 }
 
@@ -30,16 +42,23 @@ html.dark {
   --theme-base: #101922;
   --theme-surface: #1c242c;
   --theme-surface-alt: #111418;
+  --theme-warm: #1f2730;
   --theme-edge: #283039;
-  --theme-muted: #9dabb9;
   --theme-text: #f1f5f9;
   --theme-text-secondary: #cbd5e1;
+  --theme-text-tertiary: #8896a4;
+  --theme-text-quaternary: #5e6d7e;
+  --theme-muted: #8896a4;
   --theme-glass-bg: rgba(28, 36, 44, 0.6);
   --theme-paper-dot: #2a343e;
   --theme-scrollbar-track: #101922;
   --theme-scrollbar-thumb: #283039;
   --theme-scrollbar-hover: #3b4754;
-  --theme-shadow-soft: 0 2px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+  --theme-shadow-inset-border: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --theme-shadow-outline: 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --theme-shadow-soft: 0 4px 4px rgba(0, 0, 0, 0.3);
+  --theme-shadow-card: 0 0 1px rgba(0, 0, 0, 0.6), 0 4px 8px rgba(0, 0, 0, 0.25);
+  --theme-shadow-warm: 0 6px 16px rgba(0, 0, 0, 0.3);
   --theme-shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.2);
 }
 
@@ -49,17 +68,27 @@ html.dark {
   --color-base: var(--theme-base);
   --color-surface: var(--theme-surface);
   --color-surface-alt: var(--theme-surface-alt);
+  --color-warm: var(--theme-warm);
   --color-edge: var(--theme-edge);
   --color-muted: var(--theme-muted);
   --color-text: var(--theme-text);
   --color-text-secondary: var(--theme-text-secondary);
-  --font-family-display: "Inter", system-ui, sans-serif;
+  --color-text-tertiary: var(--theme-text-tertiary);
+  --color-text-quaternary: var(--theme-text-quaternary);
+  /* Geist-first stack with Inter fallback (open-source per user choice). */
+  --font-family-display: "Geist", "Geist Variable", "Inter", system-ui, sans-serif;
+  --font-family-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --radius-DEFAULT: 0.25rem;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
   --radius-2xl: 1rem;
+  --radius-pill: 9999px;
   --shadow-soft: var(--theme-shadow-soft);
   --shadow-inner-soft: var(--theme-shadow-inner);
+  --shadow-card: var(--theme-shadow-card);
+  --shadow-warm: var(--theme-shadow-warm);
+  --shadow-outline: var(--theme-shadow-outline);
+  --shadow-inset-border: var(--theme-shadow-inset-border);
   --animate-blink: blink 1s step-end infinite;
   --animate-shimmer: shimmer 2s infinite;
   --animate-fade-in-down: fade-in-down 0.5s ease-out forwards;
@@ -95,23 +124,31 @@ html.dark {
   }
 }
 
-/* ── Scrollbar (Electron/WebKit) ──────────────────── */
+/* ── Scrollbar (Electron/WebKit) — E6 ElevenLabs thin capsule ─── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-scrollbar-thumb) transparent;
+}
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-
 ::-webkit-scrollbar-track {
-  background: var(--theme-scrollbar-track);
+  background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
   background: var(--theme-scrollbar-thumb);
-  border-radius: 4px;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.15s ease;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background: var(--theme-scrollbar-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* ── Glass panel ──────────────────────────────────── */
@@ -136,12 +173,15 @@ html.dark {
 }
 
 /* ── Material Symbols ─────────────────────────────── */
+/* E6 — ElevenLabs-style whisper-thin icons. Drop weight 400 → 300,
+ * negative grade for airier strokes, 20 opsz so glyphs are optically
+ * tuned for the small sizes we actually use in chrome. */
 .material-symbols-outlined {
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' -25, 'opsz' 20;
 }
 
 .fill-1 {
-  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-variation-settings: 'FILL' 1, 'wght' 320, 'GRAD' -25, 'opsz' 20;
 }
 
 /* ── Electron window drag ─────────────────────────── */
@@ -227,6 +267,29 @@ html.dark {
   border-radius: 0.75rem;
   padding: 0.85rem 1rem;
   margin: 0.85rem 0;
+  position: relative;
+}
+/* Eyebrow label appears at the top-right of every transcription block so
+ * users know the content originated from an audio transcript. */
+.prose-editor .wa-transcription-block::before {
+  content: 'TRANSCRIPT';
+  position: absolute;
+  top: 0.4rem;
+  right: 0.75rem;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  color: rgba(19, 127, 236, 0.8);
+  pointer-events: none;
+}
+/* Visual hint that the body IS editable (the whole point of Phase editable-transcript). */
+.prose-editor .wa-transcription-body {
+  outline: none;
+}
+.prose-editor .wa-transcription-body:focus-within {
+  outline: 1px dashed rgba(19, 127, 236, 0.45);
+  outline-offset: 6px;
+  border-radius: 0.45rem;
 }
 
 .prose-editor .wa-transcription-block h3 {
@@ -325,4 +388,443 @@ html.dark .styled-select {
 .styled-select option {
   background: var(--theme-surface);
   color: var(--theme-text);
+}
+
+/* ── Phase C: typewriter reveal (word-by-word fade + blur) ───── */
+.wa-reveal {
+  display: inline;
+  opacity: 0;
+  filter: blur(4px);
+  transition: opacity 220ms ease-out, filter 220ms ease-out;
+  will-change: opacity, filter;
+}
+.wa-reveal-shown {
+  opacity: 1;
+  filter: blur(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .wa-reveal, .wa-reveal-shown {
+    opacity: 1;
+    filter: none;
+    transition: none;
+  }
+}
+
+/* Indeterminate progress bar used when we lack chunk-level progress
+   (e.g. URL transcription: backend does not stream stage progress yet). */
+@keyframes wa-indeterminate-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.wa-indeterminate {
+  animation: wa-indeterminate-slide 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wa-indeterminate {
+    animation: none;
+    width: 100% !important;
+    opacity: 0.5;
+  }
+}
+
+/* Subtle attention pulse — used on the notification bell icon while there
+   are active background processes. Keeps the user aware of in-flight work
+   without flashing aggressively. */
+@keyframes wa-pulse-opacity {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+.wa-pulse {
+  animation: wa-pulse-opacity 1.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wa-pulse { animation: none; }
+}
+
+/* ── Phase E2/E6: base typography (ElevenLabs letter-spacing) ───── */
+body {
+  font-family: var(--font-family-display, "Geist", "Inter", system-ui, sans-serif);
+  letter-spacing: 0.14px;
+  font-variation-settings: 'wght' 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+/* E6 — lighter heading weights across the app. ElevenLabs uses a display
+ * face at weight 300 for most titles; we approximate with Geist at 300/400. */
+h1 { font-weight: 300; letter-spacing: -0.02em; }
+h2 { font-weight: 300; letter-spacing: -0.015em; }
+h3 { font-weight: 400; letter-spacing: -0.01em; }
+h4 { font-weight: 500; letter-spacing: -0.005em; }
+code, pre, kbd, samp {
+  font-family: var(--font-family-mono, "Geist Mono", ui-monospace, monospace);
+  letter-spacing: 0;
+}
+/* E6 — small uppercase labels get the airy tracking-0.14em treatment. */
+label, .wa-eyebrow {
+  letter-spacing: 0.14em;
+}
+
+/* ── Widget dock scoping (E8) — override widget.css rules that conflict
+ *    with the main renderer when the Widget renders inline. */
+.wa-widget-dock #root { padding: 0 !important; }
+.wa-widget-dock .material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' -25, 'opsz' 20;
+}
+.wa-widget-dock { color-scheme: inherit; }
+
+/* ── Obsidian-style Live Preview markdown markers ─────────────── */
+/* The livePreview ProseMirror plugin paints syntax hints (##, **, *, `)
+ * as widget decorations. They're read-only, non-selectable, and dimmed. */
+.prose-editor .wa-md-marker,
+.milkdown .wa-md-marker {
+  display: inline;
+  color: var(--theme-text-quaternary, rgba(156, 163, 175, 0.5));
+  opacity: 0.4;
+  font-weight: 400;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+  letter-spacing: 0;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  /* Relative sizing wins over absolute: even inside a 2rem H1 the marker
+   * stays roughly one step below body copy so headings dominate visually. */
+  font-size: 0.65em;
+  white-space: pre;
+  vertical-align: baseline;
+}
+/* Block markers sit at start of the line — slight right margin, no extra
+ * line-break. The right margin must NOT be big enough to wrap on narrow
+ * viewports. */
+.prose-editor .wa-md-marker:first-child,
+.milkdown .wa-md-marker:first-child {
+  margin-right: 0.25em;
+}
+
+/* ── Milkdown editor styles (same grammar as .prose-editor) ────── */
+.milkdown {
+  min-height: 300px;
+}
+.milkdown .ProseMirror {
+  outline: none;
+  min-height: 300px;
+  padding: 1.25rem;
+  color: var(--theme-text-secondary);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+.milkdown .ProseMirror:focus { outline: none; }
+/* Heading scale — Obsidian-style visual hierarchy. Headings MUST look
+ * unambiguously different from body copy. We use size + weight + a subtle
+ * bottom rule on H1/H2 to give them the "chapter / section" feel. */
+.milkdown h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.2;
+  margin: 1.5rem 0 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--theme-edge);
+  color: var(--theme-text);
+  letter-spacing: -0.025em;
+}
+.milkdown h2 {
+  font-size: 1.6rem;
+  font-weight: 750;
+  line-height: 1.25;
+  margin: 1.25rem 0 0.6rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--theme-edge) 70%, transparent);
+  color: var(--theme-text);
+  letter-spacing: -0.02em;
+}
+.milkdown h3 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 1rem 0 0.45rem;
+  color: var(--theme-text);
+  letter-spacing: -0.015em;
+}
+.milkdown h4 {
+  font-size: 1.1rem;
+  font-weight: 650;
+  margin: 0.85rem 0 0.35rem;
+  color: var(--theme-text);
+  letter-spacing: -0.01em;
+}
+.milkdown p { margin: 0.25rem 0; }
+.milkdown ul, .milkdown ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+.milkdown ul li { list-style: disc; }
+.milkdown ol li { list-style: decimal; }
+.milkdown blockquote {
+  border-left: 3px solid var(--color-primary, #137fec);
+  padding-left: 1rem;
+  margin: 0.5rem 0;
+  color: var(--theme-muted);
+  font-style: italic;
+}
+.milkdown pre {
+  position: relative;
+  background: var(--theme-surface-alt);
+  border: 1px solid var(--theme-edge);
+  border-radius: 0.5rem;
+  padding: 2.1rem 1rem 0.9rem;
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+  overflow-x: auto;
+  font-family: var(--font-family-mono);
+  line-height: 1.55;
+}
+.milkdown pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  color: var(--theme-text);
+}
+.milkdown code {
+  background: var(--theme-surface-alt);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.85em;
+  font-family: var(--font-family-mono);
+}
+/* ── Code block language picker (widget decoration) ─────────────── */
+.wa-code-block-toolbar {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.55rem;
+  z-index: 2;
+  user-select: none;
+}
+.wa-code-block-lang {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--theme-surface);
+  color: var(--theme-text-tertiary);
+  border: 1px solid var(--theme-edge);
+  border-radius: 0.35rem;
+  font-family: var(--font-family-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  padding: 0.15rem 1.4rem 0.15rem 0.5rem;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 0.7rem) 55%, calc(100% - 0.45rem) 55%;
+  background-size: 0.3rem 0.3rem, 0.3rem 0.3rem;
+  background-repeat: no-repeat;
+}
+.wa-code-block-lang:hover {
+  color: var(--theme-text);
+  border-color: color-mix(in oklab, var(--theme-edge) 60%, var(--theme-text));
+}
+.wa-code-block-lang:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  color: var(--theme-text);
+}
+
+/* ── highlight.js token palette — dual theme ─────────────────────
+ * We apply hljs classes via ProseMirror inline decorations, which produce
+ * FLAT class strings on each text range (not nested <span> trees). That
+ * means a descendant selector like `.hljs-tag .hljs-name` never matches.
+ * Every rule below MUST use single-class or compound-class selectors so
+ * the decoration's class attribute satisfies them directly. */
+.milkdown .hljs-keyword,
+.milkdown .hljs-selector-tag,
+.milkdown .hljs-meta-keyword,
+.milkdown .hljs-doctag,
+.milkdown .hljs-tag,
+.milkdown .hljs-name,
+.milkdown .hljs-template-tag {
+  color: #d946ef;
+}
+html.dark .milkdown .hljs-keyword,
+html.dark .milkdown .hljs-selector-tag,
+html.dark .milkdown .hljs-meta-keyword,
+html.dark .milkdown .hljs-doctag,
+html.dark .milkdown .hljs-tag,
+html.dark .milkdown .hljs-name,
+html.dark .milkdown .hljs-template-tag {
+  color: #f472b6;
+}
+.milkdown .hljs-string,
+.milkdown .hljs-regexp,
+.milkdown .hljs-addition,
+.milkdown .hljs-attribute,
+.milkdown .hljs-attr,
+.milkdown .hljs-meta-string {
+  color: #b45309;
+}
+html.dark .milkdown .hljs-string,
+html.dark .milkdown .hljs-regexp,
+html.dark .milkdown .hljs-addition,
+html.dark .milkdown .hljs-attribute,
+html.dark .milkdown .hljs-attr,
+html.dark .milkdown .hljs-meta-string {
+  color: #fbbf24;
+}
+.milkdown .hljs-number,
+.milkdown .hljs-literal,
+.milkdown .hljs-variable,
+.milkdown .hljs-template-variable,
+.milkdown .hljs-type {
+  color: #0ea5e9;
+}
+html.dark .milkdown .hljs-number,
+html.dark .milkdown .hljs-literal,
+html.dark .milkdown .hljs-variable,
+html.dark .milkdown .hljs-template-variable,
+html.dark .milkdown .hljs-type {
+  color: #67e8f9;
+}
+.milkdown .hljs-title,
+.milkdown .hljs-section,
+.milkdown .hljs-selector-id,
+.milkdown .hljs-selector-class {
+  color: #0369a1;
+  font-weight: 600;
+}
+html.dark .milkdown .hljs-title,
+html.dark .milkdown .hljs-section,
+html.dark .milkdown .hljs-selector-id,
+html.dark .milkdown .hljs-selector-class {
+  color: #a5b4fc;
+  font-weight: 600;
+}
+.milkdown .hljs-comment,
+.milkdown .hljs-quote,
+.milkdown .hljs-deletion {
+  color: color-mix(in oklab, var(--theme-text) 45%, transparent);
+  font-style: italic;
+}
+.milkdown .hljs-built_in,
+.milkdown .hljs-symbol,
+.milkdown .hljs-bullet,
+.milkdown .hljs-link,
+.milkdown .hljs-meta {
+  color: #0891b2;
+}
+html.dark .milkdown .hljs-built_in,
+html.dark .milkdown .hljs-symbol,
+html.dark .milkdown .hljs-bullet,
+html.dark .milkdown .hljs-link,
+html.dark .milkdown .hljs-meta {
+  color: #5eead4;
+}
+.milkdown .hljs-params,
+.milkdown .hljs-operator,
+.milkdown .hljs-punctuation {
+  color: color-mix(in oklab, var(--theme-text) 75%, transparent);
+}
+.milkdown .hljs-emphasis { font-style: italic; }
+.milkdown .hljs-strong { font-weight: 700; }
+.milkdown strong { color: var(--theme-text); font-weight: 700; }
+.milkdown em { font-style: italic; }
+.milkdown hr {
+  border: none;
+  border-top: 1px solid var(--theme-edge);
+  margin: 1rem 0;
+}
+.milkdown a {
+  color: var(--color-primary, #137fec);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── Editor empty placeholder ─────────────────────────────────── */
+/* The wrapper carries a `data-placeholder` attribute and flips
+ * `data-empty` when the doc has zero text. We render the placeholder on
+ * the wrapper's own `::before` positioned inside the ProseMirror area,
+ * so `attr()` resolves on the same element it's read from.
+ * Kept purely visual — no DOM content inside the editor, so undo /
+ * serialization stay clean. */
+.wa-milkdown-wrapper { position: relative; }
+.wa-milkdown-wrapper[data-empty]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  left: 1.25rem;  /* matches .milkdown .ProseMirror padding */
+  right: 1.25rem;
+  /* Offset vertically past the toolbar + first-paragraph line. The
+   * toolbar is ~40 px tall; the first-p baseline sits ~1.25 rem below
+   * the editor's inner padding. */
+  top: calc(40px + 1.25rem);
+  color: var(--theme-text-quaternary, rgba(156, 163, 175, 0.5));
+  font-style: italic;
+  opacity: 0.7;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── In-note word search (Ctrl+F) ─────────────────────────────── */
+.wa-ws-match {
+  background-color: color-mix(in oklab, #fbbf24 40%, transparent);
+  border-radius: 2px;
+  padding: 1px 0;
+}
+.wa-ws-match.wa-ws-current {
+  background-color: color-mix(in oklab, #f97316 70%, transparent);
+  outline: 1px solid #fb923c;
+}
+.wa-ws-toolbar {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 9999px;
+  background: var(--theme-surface);
+  box-shadow: var(--theme-shadow-inset-border), var(--theme-shadow-soft);
+  font-size: 12px;
+  user-select: none;
+}
+.wa-ws-toolbar .wa-ws-icon {
+  font-size: 16px;
+  color: var(--theme-text-tertiary);
+  margin-left: 0.15rem;
+}
+.wa-ws-toolbar .wa-ws-input {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--theme-text);
+  font-size: 12px;
+  width: 140px;
+  padding: 0.2rem 0.1rem;
+}
+.wa-ws-toolbar .wa-ws-input::placeholder {
+  color: var(--theme-text-quaternary);
+}
+.wa-ws-toolbar .wa-ws-count {
+  color: var(--theme-text-tertiary);
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  min-width: 44px;
+  text-align: center;
+  padding: 0 0.2rem;
+}
+.wa-ws-toolbar .wa-ws-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--theme-text-tertiary);
+  padding: 0.25rem;
+  border-radius: 9999px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 120ms, color 120ms;
+}
+.wa-ws-toolbar .wa-ws-btn:hover {
+  background: color-mix(in oklab, var(--theme-text) 8%, transparent);
+  color: var(--theme-text);
+}
+.wa-ws-toolbar .wa-ws-btn .material-symbols-outlined {
+  font-size: 16px;
 }

@@ -1,18 +1,23 @@
 import { useState, useEffect, useRef, useMemo, useCallback, type MouseEvent as ReactMouseEvent } from 'react';
-import type { Editor } from '@tiptap/react';
+import type { EditorHandle } from '../components/editor/milkdown/api/EditorHandle';
 import type { Page } from '../App';
-import { ApiError, type TranscriptSegment } from '@whisperall/api-client';
+import { ApiError, type TranscriptSegment, type Folder } from '@whisperall/api-client';
 import { useDictationStore } from '../stores/dictation';
 import { useLiveStore } from '../stores/live';
 import { useSettingsStore } from '../stores/settings';
 import { useDocumentsStore } from '../stores/documents';
+import { useUiStore } from '../stores/ui';
 import { useFoldersStore } from '../stores/folders';
 import { useAuthStore } from '../stores/auth';
 import { useProcessesStore } from '../stores/processes';
 import { useNotificationsStore } from '../stores/notifications';
-import { resolveTranscriptionJobProgress, resolveTranscriptionJobStage, transcriptionStageLabelKey, useTranscriptionStore } from '../stores/transcription';
+import { resolveTranscriptionJobProgress, resolveTranscriptionJobStage, transcriptionStageDetailKey, transcriptionStageLabelKey, useTranscriptionStore } from '../stores/transcription';
 import { electron } from '../lib/electron';
 import { api } from '../lib/api';
+import { createRevealQueue } from '../lib/typewriter';
+import { copyText } from '../lib/clipboard-utils';
+import { Button } from '../components/ui/Button';
+// WidgetDock moved to AppShell (global dock slot).
 import { exportNote, exportNotesBundle, type ExportFormat } from '../lib/export';
 import {
   buildImportedNoteHtml,
@@ -30,7 +35,7 @@ import {
   type TTSProgress,
 } from '../lib/tts';
 import { PlanGate } from '../components/PlanGate';
-import { RichEditor } from '../components/editor/RichEditor';
+import { MilkdownEditor } from '../components/editor/MilkdownEditor';
 import { type AudioSeekRequest } from '../components/editor/AudioPlayer';
 import { NoteAudioPanel } from '../components/notes/NoteAudioPanel';
 import { NoteRetranscribePanel } from '../components/notes/NoteRetranscribePanel';
@@ -39,15 +44,18 @@ import { NoteProcessesPanel } from '../components/notes/NoteProcessesPanel';
 import { CustomPromptDialog, type CustomPrompt } from '../components/editor/CustomPromptDialog';
 import { AiBudgetDialog } from '../components/editor/AiBudgetDialog';
 import { DebatePanel } from '../components/notes/DebatePanel';
+import { FolderPicker } from '../components/notes/FolderPicker';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { useNotesActionsStore } from '../stores/notes-actions';
 import { useT } from '../lib/i18n';
-import { relativeDate, smartTitle } from '../lib/format-date';
+import { promptText } from '../lib/prompt';
+import { relativeDate, smartTitle, stripMediaExtension, sanitizeDisplayTitle } from '../lib/format-date';
 import { projectAiEditBudget } from '../lib/ai-edit-budget';
 import { requestPlanRefresh, usePlanStore } from '../stores/plan';
 
 const SOURCE_ICONS: Record<string, string> = { dictation: 'mic', live: 'groups', transcription: 'description', manual: 'edit_note', reader: 'menu_book' };
-const TRANSCRIBE_LANGUAGES = [
+type TranscribeLanguage = { code: string; label?: string; labelKey?: string };
+const TRANSCRIBE_LANGUAGES: ReadonlyArray<TranscribeLanguage> = [
   { code: 'auto', labelKey: 'transcribe.autoDetect' },
   { code: 'en', label: 'English' },
   { code: 'es', label: 'Spanish' },
@@ -58,13 +66,13 @@ const TRANSCRIBE_LANGUAGES = [
   { code: 'ja', label: 'Japanese' },
   { code: 'ko', label: 'Korean' },
   { code: 'zh', label: 'Chinese' },
-] as const;
+];
 const BUILT_IN_MODES = [
   { id: 'casual', icon: 'chat' }, { id: 'clean_fillers', icon: 'cleaning_services' },
   { id: 'formal', icon: 'school' }, { id: 'summarize', icon: 'summarize' },
 ] as const;
 
-// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Color tag system Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ——— Color tag system ———
 const NOTE_COLORS = ['blue', 'red', 'orange', 'yellow', 'green', 'purple', 'pink'] as const;
 type NoteColor = typeof NOTE_COLORS[number];
 const COLOR_STYLES: Record<NoteColor, { border: string; bg: string; dot: string }> = {
@@ -156,6 +164,62 @@ const NOTE_READER_IDLE: TTSProgress = {
   error: null,
 };
 
+/**
+ * Per-card hover-actions cluster. Absolute-positioned at the card's
+ * top-right so it never reflows the title row. Owns its own ref + open
+ * state for the folder picker so each card can trigger an independent
+ * portal menu.
+ */
+type NoteCardActionsProps = {
+  doc: { id: string; folder_id: string | null };
+  folders: Folder[];
+  isSelected: boolean;
+  onToggleSelect: () => void;
+  onMoveToFolder: (folderId: string | null) => void;
+  onDelete: () => void;
+  labels: { select: string; move: string; del: string; root: string };
+};
+function NoteCardActions({ doc, folders, isSelected, onToggleSelect, onMoveToFolder, onDelete, labels }: NoteCardActionsProps) {
+  const folderBtnRef = useRef<HTMLButtonElement>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const btnBase = 'h-7 w-7 grid place-items-center rounded-full bg-surface/90 backdrop-blur border border-edge text-muted hover:text-text hover:bg-surface transition-colors';
+  return (
+    <>
+      <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity z-10" onClick={(e) => e.stopPropagation()}>
+        <button type="button" onClick={onToggleSelect} className={btnBase} data-testid={`select-note-${doc.id}`} title={labels.select}>
+          <span className="material-symbols-outlined text-[15px]">{isSelected ? 'check_box' : 'check_box_outline_blank'}</span>
+        </button>
+        {folders.length > 0 && (
+          <button
+            ref={folderBtnRef}
+            type="button"
+            onClick={() => setPickerOpen((v) => !v)}
+            className={`${btnBase} ${doc.folder_id ? 'text-primary' : ''}`}
+            data-testid={`move-doc-${doc.id}`}
+            title={labels.move}
+            aria-expanded={pickerOpen}
+          >
+            <span className="material-symbols-outlined text-[15px]">folder_open</span>
+          </button>
+        )}
+        <button type="button" onClick={onDelete} className={`${btnBase} hover:text-red-400`} title={labels.del} data-testid={`delete-note-${doc.id}`}>
+          <span className="material-symbols-outlined text-[15px]">delete</span>
+        </button>
+      </div>
+      {pickerOpen && (
+        <FolderPicker
+          triggerRef={folderBtnRef}
+          currentFolderId={doc.folder_id}
+          folders={folders}
+          onChange={(id) => onMoveToFolder(id)}
+          onClose={() => setPickerOpen(false)}
+          rootLabel={labels.root}
+        />
+      )}
+    </>
+  );
+}
+
 function htmlToPlainText(html: string): string {
   return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -195,6 +259,15 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
 
   const [mode, setMode] = useState<'list' | 'edit'>('list');
   const [docId, setDocId] = useState<string | null>(null);
+  // Mirror the edit/list state onto the shell UI store so AppShell can
+  // hide the widget-dock when the user is inside a note. Cleaned up on
+  // unmount so navigating away (e.g. to Transcribe) doesn't leave the
+  // flag stuck.
+  const setNoteOpen = useUiStore((s) => s.setNoteOpen);
+  useEffect(() => {
+    setNoteOpen(mode === 'edit');
+    return () => setNoteOpen(false);
+  }, [mode, setNoteOpen]);
   const [title, setTitle] = useState('');
   const [htmlContent, setHtmlContent] = useState('');
   const [plainText, setPlainText] = useState('');
@@ -214,14 +287,25 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
   const [showPromptDialog, setShowPromptDialog] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [colorFilter, setColorFilter] = useState<NoteColor | null>(null);
+  // Declared early so `filteredDocs` (below) can reference it. See
+  // handleDeleteNote / undoDeleteNote later for the delete-with-undo logic.
+  const [scheduledDeletes, setScheduledDeletes] = useState<Map<string, { timer: number; startedAt: number }>>(new Map());
   const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
   const [contextMenuMode, setContextMenuMode] = useState<ContextMenuMode>('convert');
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showBulkExport, setShowBulkExport] = useState(false);
   const [utilityPanel, setUtilityPanel] = useState<NoteUtilityPanel>('none');
   const [retranscribeLanguage, setRetranscribeLanguage] = useState('auto');
   const [retranscribeDiarization, setRetranscribeDiarization] = useState(true);
+  // Feature parity with the transcribe dialog — these two are currently
+  // cosmetic (neither Groq whisper-large-v3-turbo nor Deepgram nova-3 take
+  // a client-side punctuation flag, and AI-summary post-processing isn't
+  // wired through the retranscribe loop yet) but keeping them visible means
+  // the retranscribe panel matches user expectations set by the main dialog.
+  const [retranscribeAiSummary, setRetranscribeAiSummary] = useState(false);
+  const [retranscribePunctuation, setRetranscribePunctuation] = useState(true);
   const [retranscribeLoading, setRetranscribeLoading] = useState(false);
   const [retranscribeError, setRetranscribeError] = useState('');
   const [importDocLoading, setImportDocLoading] = useState(false);
@@ -245,7 +329,7 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
   const toggleView = () => { const v: ViewMode = viewMode === 'grid' ? 'list' : 'grid'; setViewMode(v); localStorage.setItem(VIEW_KEY, v); };
   const prevDictText = useRef('');
   const prevSegCount = useRef(0);
-  const editorRef = useRef<Editor | null>(null);
+  const editorRef = useRef<EditorHandle | null>(null);
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const transcribeFileInputRef = useRef<HTMLInputElement | null>(null);
   const actionFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -267,6 +351,18 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
     const matchingJob = [...transcribeJobs].reverse().find((job) => job.documentId === docId && job.audioUrl);
     return matchingJob?.audioUrl ?? null;
   }, [docId, transcribeJobs]);
+  // Any non-terminal transcription job attached to THIS note — either it
+  // already references the doc, or it was fired with this doc as its target.
+  // Drives the small "in progress" spinner chip in the note header so the
+  // user always knows there's background work happening for this note.
+  const attachedActiveJob = useMemo(() => {
+    if (!docId) return null;
+    return transcribeJobs.find((job) => {
+      const matchesDoc = job.documentId === docId || job.targetDocumentId === docId;
+      if (!matchesDoc) return false;
+      return job.status === 'processing' || job.status === 'pending' || job.status === 'paused';
+    }) ?? null;
+  }, [docId, transcribeJobs]);
   const runtimeAudioUrl = persistedAudioUrl ?? jobAudioUrl ?? (transcribeSavedDocumentId === docId ? transcribeSourceAudioUrl : null);
   const activeHistoryEntry = transcriptHistory.find((h) => h.id === activeHistoryId) ?? null;
   const activeSegments = activeHistoryEntry?.segments ?? [];
@@ -274,7 +370,7 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
   const retranscribeAudioUrl = activeHistoryEntry?.audio_url ?? persistedAudioUrl;
   const hasAudioUtilities = !!activePlaybackAudioUrl;
   const activeHistoryMeta = activeHistoryEntry
-    ? `${new Date(activeHistoryEntry.created_at).toLocaleString(uiLanguage === 'es' ? 'es-ES' : 'en-US')} Ã¢â‚¬Â¢ ${activeHistoryEntry.language} Ã¢â‚¬Â¢ ${activeHistoryEntry.diarization ? t('transcribe.diarization') : t('notes.noDiarization')}`
+    ? `${new Date(activeHistoryEntry.created_at).toLocaleString(uiLanguage === 'es' ? 'es-ES' : 'en-US')} • ${activeHistoryEntry.language} • ${activeHistoryEntry.diarization ? t('transcribe.diarization') : t('notes.noDiarization')}`
     : '';
   const sourceLabel = (source: string) => {
     if (source === 'dictation') return t('dictate.dictation');
@@ -310,15 +406,38 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
   const activeTranscribeStage = activeTranscribeJob ? resolveTranscriptionJobStage(activeTranscribeJob) : null;
   const activeTranscribeProgress = activeTranscribeJob ? resolveTranscriptionJobProgress(activeTranscribeJob) : null;
   const transcribeStageLabel = activeTranscribeStage ? t(transcriptionStageLabelKey(activeTranscribeStage)) : t('transcribe.processing');
+  // Elapsed-time ticker for URL jobs: the backend doesn't stream progress so
+  // the only honest signal we can surface while awaiting the blocking call is
+  // how long we've been waiting. Re-renders every second while loading.
+  const [elapsedTick, setElapsedTick] = useState(0);
+  useEffect(() => {
+    if (!transcribeUrlStartedAt || !transcribeLoading) return;
+    setElapsedTick((n) => n + 1);
+    const id = setInterval(() => setElapsedTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [transcribeUrlStartedAt, transcribeLoading]);
+  const transcribeElapsedLabel = useMemo(() => {
+    if (!transcribeUrlStartedAt || !transcribeLoading) return '';
+    const secs = Math.max(0, Math.round((Date.now() - transcribeUrlStartedAt) / 1000));
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}m ${s.toString().padStart(2, '0')}s` : `${s}s`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcribeUrlStartedAt, transcribeLoading, elapsedTick]);
   const transcribeStageDetail = activeTranscribeProgress && activeTranscribeProgress.total > 0
     ? `${activeTranscribeProgress.done}/${activeTranscribeProgress.total} · ${activeTranscribeProgress.pct}%`
-    : '';
+    : activeTranscribeStage
+      ? (() => {
+          const key = transcriptionStageDetailKey(activeTranscribeStage);
+          return key ? t(key) : '';
+        })()
+      : '';
   const showInlineTranscribeStatus = transcribeLoading || !!transcribeErrorState || !!transcribeSavedDocumentId || !!activeTranscribeJob;
   const contextMenuStyle = useMemo(() => {
     if (!contextMenuPos) return null;
     if (typeof window === 'undefined') return { left: contextMenuPos.x, top: contextMenuPos.y };
     const menuWidth = 296;
-    const menuHeight = 680;
+    const menuHeight = 520;
     const margin = 12;
     const clampedX = Math.max(margin, Math.min(contextMenuPos.x, window.innerWidth - menuWidth - margin));
     const clampedY = Math.max(72, Math.min(contextMenuPos.y, window.innerHeight - menuHeight - margin));
@@ -335,14 +454,12 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
   const getSelectedEditorText = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return '';
-    const { from, to } = editor.state.selection;
-    if (from === to) return '';
-    return editor.state.doc.textBetween(from, to, ' ').trim();
+    return editor.getSelectedText();
   }, []);
 
   const handleEditorContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
-    if (!target?.closest('.prose-editor')) return;
+    if (!target?.closest('.ProseMirror')) return;
     event.preventDefault();
     const selectedText = getSelectedEditorText();
     setContextMenuMode(selectedText ? 'work' : 'convert');
@@ -369,7 +486,7 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
     };
   }, [contextMenuPos, closeContextMenu]);
 
-  // Handle pending document open (from Transcribe Ã¢â€ â€™ Open in Notes)
+  // Handle pending document open (from Transcribe → Open in Notes)
   const pendingOpenId = useDocumentsStore((s) => s.pendingOpenId);
   useEffect(() => {
     if (pendingOpenId && documents.length > 0) {
@@ -517,9 +634,13 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
       setUtilityPanel(hasAudioUtilities ? 'audio' : 'history');
     }
   }, [currentDoc, docId, hasAudioUtilities, htmlContent, transcribeSavedDocumentId, utilityPanel]);
-  // Filter documents
+  // Filter documents. Scheduled-for-delete notes are hidden so the
+  // undo toast's "gone until you click undo" promise holds visually.
   const filteredDocs = useMemo(() => {
     let docs = documents;
+    if (scheduledDeletes.size > 0) {
+      docs = docs.filter((d) => !scheduledDeletes.has(d.id));
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       docs = docs.filter((d) => d.title.toLowerCase().includes(q) || d.content.replace(/<[^>]*>/g, '').toLowerCase().includes(q));
@@ -528,7 +649,7 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
       docs = docs.filter((d) => getColor(d.tags ?? []) === colorFilter);
     }
     return docs;
-  }, [documents, searchQuery, colorFilter]);
+  }, [documents, searchQuery, colorFilter, scheduledDeletes]);
 
   const selectedDocs = useMemo(
     () => documents.filter((d) => selectedNoteIds.includes(d.id)),
@@ -550,7 +671,15 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
     stopTTS();
     setNoteReadProgress(NOTE_READER_IDLE);
     historyRequestSeq.current += 1;
-    setDocId(doc.id); setTitle(doc.title); setHtmlContent(doc.content);
+    // B2 fix — opening an existing note must not carry dictation buffer
+    // from a prior session into the editor.
+    dictation.reset();
+    live.reset?.();
+    // Legacy notes auto-titled with a timestamp get loaded with an
+    // empty title so the input shows the "Untitled" placeholder.
+    // `persistCurrentNote` falls back to first-line-of-content when
+    // the user leaves the input empty, so we don't lose information.
+    setDocId(doc.id); setTitle(sanitizeDisplayTitle(doc.title)); setHtmlContent(doc.content);
     setNoteColor(getColor(doc.tags ?? [])); setNoteTags(doc.tags ?? []);
     setTranscriptHistory([]);
     setHistoryLoading(false);
@@ -573,6 +702,10 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
     stopTTS();
     setNoteReadProgress(NOTE_READER_IDLE);
     historyRequestSeq.current += 1;
+    // B2 fix — clear prior dictation/live payload so the fresh note never
+    // inherits a stale transcript from the previous session.
+    dictation.reset();
+    live.reset?.();
     setDocId(null); setTitle(''); setHtmlContent(''); setPlainText('');
     setNoteColor('blue'); setNoteTags([]);
     setTranscriptHistory([]);
@@ -623,7 +756,12 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
   };
 
   const persistCurrentNote = useCallback(async () => {
-    const finalTitle = title.trim() || htmlContent.replace(/<[^>]*>/g, '').split(/[.\n]/)[0]?.slice(0, 60) || smartTitle(uiLanguage);
+    // Title resolution: user-typed → first line of content → blank.
+    // We deliberately DO NOT auto-fill the title with a timestamp any
+    // more — an "Untitled" state is cleaner than a fake title like
+    // "Note — Apr 16, 2026, 3:55 PM". Display falls back via
+    // `t('editor.untitled')` everywhere a title is rendered.
+    const finalTitle = title.trim() || htmlContent.replace(/<[^>]*>/g, '').trim().split(/[.\n]/)[0]?.slice(0, 60).trim() || '';
     const tags = setColorTag(noteTags, noteColor);
     setSaveError('');
     try {
@@ -646,20 +784,44 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
     await persistCurrentNote();
   };
 
-  // Dictation text Ã¢â€ â€™ insert at cursor (auto-flush every 30s + on stop)
+  // Phase C — typewriter reveal queue (word-by-word fade-in via CSS).
+  const revealQueueRef = useRef<ReturnType<typeof createRevealQueue> | null>(null);
   useEffect(() => {
     if (mode !== 'edit' || !editorRef.current) return;
-    if (dictation.text && dictation.text !== prevDictText.current) {
-      const newPart = dictation.text.slice(prevDictText.current.length).trim();
-      if (newPart) {
-        editorRef.current.commands.insertContent(safeHtmlParagraphs(newPart));
+    if (revealQueueRef.current) revealQueueRef.current.dispose();
+    revealQueueRef.current = createRevealQueue({
+      maxWps: 8,
+      write: (word) => {
+        const ed = editorRef.current;
+        if (!ed) return;
+        ed.insertHtmlAtCursor(`<span class="wa-reveal">${escapeHtml(word)}</span>`);
+        requestAnimationFrame(() => {
+          const dom = ed.view.dom as HTMLElement;
+          dom.querySelectorAll('span.wa-reveal:not(.wa-reveal-shown)').forEach((el) => {
+            el.classList.add('wa-reveal-shown');
+          });
+        });
         setSaved(false);
+      },
+    });
+    return () => { revealQueueRef.current?.dispose(); revealQueueRef.current = null; };
+  }, [mode]);
+
+  // Dictation text → insert at cursor (auto-flush every 30s + on stop)
+  useEffect(() => {
+    if (mode !== 'edit' || !editorRef.current) return;
+    if (dictation.text && dictation.text !== prevDictText.current && revealQueueRef.current) {
+      // Phase C: enqueue delta into the typewriter queue instead of
+      // inserting the full chunk at once.
+      const newPart = dictation.text.slice(prevDictText.current.length);
+      if (newPart.trim()) {
+        revealQueueRef.current.enqueue((prevDictText.current ? ' ' : '') + newPart.trim());
       }
       prevDictText.current = dictation.text;
     }
   }, [dictation.text, mode]);
 
-  // Live segments Ã¢â€ â€™ append to editor
+  // Live segments → append to editor
   useEffect(() => {
     if (mode !== 'edit' || !isLive || live.segments.length <= prevSegCount.current) return;
     const append = live.segments.slice(prevSegCount.current).map((s) =>
@@ -675,7 +837,44 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
     if (docId) { updateDocument(docId, { tags }).catch(() => {}); }
     else { setSaved(false); }
   };
-  const handleDeleteNote = (id: string) => { setPendingDeleteNoteId(id); };
+  // Delete-with-undo (Gmail style). Instead of a modal confirmation on
+  // every trash click, we hide the note immediately and show a toast
+  // with an Undo button. After UNDO_DELETE_MS the delete is actually
+  // flushed to the server. If the user clicks Undo, we cancel the
+  // timeout and the card reappears — no server call happens.
+  const UNDO_DELETE_MS = 5000;
+  const handleDeleteNote = (id: string) => {
+    setSelectedNoteIds((prev) => prev.filter((selectedId) => selectedId !== id));
+    // If already scheduled, bail — prevents double-click from doubling
+    // the timeout or losing the undo window.
+    if (scheduledDeletes.has(id)) return;
+    const timer = window.setTimeout(() => {
+      deleteDocument(id).catch(() => {});
+      setScheduledDeletes((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+    }, UNDO_DELETE_MS);
+    setScheduledDeletes((prev) => {
+      const next = new Map(prev);
+      next.set(id, { timer, startedAt: Date.now() });
+      return next;
+    });
+  };
+  const undoDeleteNote = (id: string) => {
+    setScheduledDeletes((prev) => {
+      const entry = prev.get(id);
+      if (!entry) return prev;
+      window.clearTimeout(entry.timer);
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+  // Kept for bulk-delete flow below (which still uses the confirm dialog
+  // because bulk is higher-risk and the user explicitly opted into it).
   const confirmDeleteNote = () => {
     if (!pendingDeleteNoteId) return;
     setSelectedNoteIds((prev) => prev.filter((selectedId) => selectedId !== pendingDeleteNoteId));
@@ -735,10 +934,15 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
       setSeekRequest(null);
     }
   };
-  const handleRenameSpeaker = (speaker: string) => {
+  const handleRenameSpeaker = async (speaker: string) => {
     if (!docId) return;
     const currentLabel = speakerAliases[speaker] || speaker;
-    const nextLabel = (window.prompt(t('editor.renameSpeakerPrompt'), currentLabel) ?? '').trim();
+    // Electron disables native prompt() — use our portal-based modal instead.
+    const entered = await promptText({
+      message: t('editor.renameSpeakerPrompt'),
+      defaultValue: currentLabel,
+    });
+    const nextLabel = (entered ?? '').trim();
     if (!nextLabel || nextLabel === currentLabel) return;
     const nextAliases = { ...speakerAliases, [speaker]: nextLabel };
     setSpeakerAliases(nextAliases);
@@ -850,7 +1054,8 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
       }
       const editor = editorRef.current;
       if (!editor) return;
-      editor.chain().focus().insertContent(safeHtmlParagraphs(text)).run();
+      editor.focus();
+      editor.insertHtmlAtCursor(safeHtmlParagraphs(text));
       setSaved(false);
       showActionFeedback(t('notes.pasteSuccess'), 'success');
       event.preventDefault();
@@ -925,17 +1130,31 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
       return;
     }
     setTargetDocumentId(targetId);
-    if (!noteTranscribeProcessIdRef.current) {
+    const isUrlJob = !stagedTranscribeFile && !!stagedTranscribeUrl.trim();
+    // Only register a LocalProcess for FILE jobs. URL jobs are already tracked
+    // via the synthetic TranscriptionJob created inside the transcription
+    // store — creating a LocalProcess too produces duplicate entries in the
+    // Processes hub and leaves a phantom "running" row behind in localStorage
+    // when the synthetic completes (which never notifies the processes store).
+    if (!isUrlJob && !noteTranscribeProcessIdRef.current) {
       noteTranscribeProcessIdRef.current = useProcessesStore.getState().start({
         type: 'transcribe_file',
-        title: stagedTranscribeFile?.name || stagedTranscribeUrl || title.trim() || t('transcribe.title'),
+        title: stagedTranscribeFile?.name || title.trim() || t('transcribe.title'),
         stageLabelKey: activeTranscribeStage ? transcriptionStageLabelKey(activeTranscribeStage) : 'transcribe.stagePreparing',
         documentId: targetId,
         total: activeTranscribeProgress?.total || 1,
       });
     }
     closeContextMenu();
+    // For URL jobs: close the dialog immediately after kicking the job off so
+    // the user can queue another transcription. `startTranscription` resolves
+    // synchronously for URL (fire-and-forget via runUrlTranscription), so the
+    // await here is effectively a no-op for that path.
     void startTranscription();
+    if (isUrlJob) {
+      setTranscribeDialogOpen(false);
+      noteTranscribeProcessIdRef.current = null;
+    }
   };
 
   const handleImportDocument = async (file?: File | null) => {
@@ -998,22 +1217,14 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
   const handleCopy = async () => {
     const text = (plainText || htmlContent.replace(/<[^>]*>/g, '') || dictation.text).trim();
     if (!text) { showActionFeedback(t('notes.copyEmpty'), 'info'); return; }
-    try {
-      await navigator.clipboard.writeText(text);
-      showActionFeedback(t('notes.copySuccess'), 'success');
-    } catch {
-      showActionFeedback(t('notes.copyError'), 'error');
-    }
+    const ok = await copyText(text);
+    showActionFeedback(ok ? t('notes.copySuccess') : t('notes.copyError'), ok ? 'success' : 'error');
   };
   const handleContextCopy = async () => {
     const selected = getSelectedEditorText();
     if (selected) {
-      try {
-        await navigator.clipboard.writeText(selected);
-        showActionFeedback(t('notes.copySuccess'), 'success');
-      } catch {
-        showActionFeedback(t('notes.copyError'), 'error');
-      }
+      const ok = await copyText(selected);
+      showActionFeedback(ok ? t('notes.copySuccess') : t('notes.copyError'), ok ? 'success' : 'error');
       return;
     }
     await handleCopy();
@@ -1021,15 +1232,15 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
   const handleContextCut = async () => {
     const editor = editorRef.current;
     if (!editor) return;
-    const { from, to } = editor.state.selection;
-    if (from === to) {
+    if (editor.isSelectionEmpty()) {
       showActionFeedback(t('notes.cutNoSelection'), 'info');
       return;
     }
-    const selected = editor.state.doc.textBetween(from, to, ' ');
+    const selected = editor.getSelectedText();
     try {
-      await navigator.clipboard.writeText(selected);
-      editor.chain().focus().deleteSelection().run();
+      await copyText(selected);
+      editor.focus();
+      editor.deleteSelection();
       setSaved(false);
       showActionFeedback(t('notes.cutSuccess'), 'success');
     } catch {
@@ -1045,7 +1256,8 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
         showActionFeedback(t('notes.pasteEmpty'), 'info');
         return;
       }
-      editor.chain().focus().insertContent(safeHtmlParagraphs(clipText)).run();
+      editor.focus();
+      editor.insertHtmlAtCursor(safeHtmlParagraphs(clipText));
       setSaved(false);
       showActionFeedback(t('notes.pasteSuccess'), 'success');
     } catch {
@@ -1055,7 +1267,8 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
   const handleContextSelectAll = () => {
     const editor = editorRef.current;
     if (!editor) return;
-    editor.chain().focus().selectAll().run();
+    editor.focus();
+    editor.selectAll();
   };
   const handleExport = (fmt: ExportFormat) => {
     const noteTitle = title.trim() || smartTitle(uiLanguage);
@@ -1245,7 +1458,7 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
 
         {renderDockDivider()}
 
-        {contextMenuMode === 'convert' && (
+        {(contextMenuMode === 'convert' || contextMenuMode === 'work') && (
           <div data-testid="note-panel-convert">
             <PlanGate resource="stt_seconds">
               <div>
@@ -1261,7 +1474,7 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
                 })}
                 {renderDockAction({
                   icon: live.source === 'mic' ? 'mic' : 'desktop_windows',
-                  label: live.source === 'mic' ? `${t('dictate.mic')} Ã¢â€ â€™ ${t('dictate.system')}` : `${t('dictate.system')} Ã¢â€ â€™ ${t('dictate.mic')}`,
+                  label: live.source === 'mic' ? `${t('dictate.mic')} → ${t('dictate.system')}` : `${t('dictate.system')} → ${t('dictate.mic')}`,
                   onClick: handleToggleSource,
                   disabled: status === 'recording',
                   kind: 'setting',
@@ -1287,198 +1500,13 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
                 })}
 
                 {renderDockDivider()}
-                <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.groupTranscribe')}</p>
                 {renderDockAction({
                   icon: 'upload_file',
-                  label: t('transcribe.upload'),
-                  onClick: () => {
-                    transcribeFileInputRef.current?.click();
-                  },
-                  kind: 'setting',
-                  tone: stagedTranscribeFile ? 'primary' : 'neutral',
-                  testId: 'note-transcribe-file-btn',
+                  label: t('transcribe.openDialog'),
+                  onClick: () => { setTranscribeDialogOpen(true); closeContextMenu(); },
+                  tone: transcribeHasInput || transcribeLoading ? 'primary' : 'neutral',
+                  testId: 'note-open-transcribe-dialog-btn',
                 })}
-                <div className="px-3 pt-2" data-testid="note-transcribe-url-row">
-                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('transcribe.pasteLink')}</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="url"
-                      value={transcribeUrlDraft}
-                      onChange={(e) => setTranscribeUrlDraft(e.target.value)}
-                      placeholder={t('transcribe.urlPlaceholder')}
-                      className="min-w-0 flex-1 rounded-md border border-edge bg-base px-2.5 py-2 text-[12px] text-text outline-none transition-colors placeholder:text-muted/40 focus:border-primary"
-                      data-testid="note-transcribe-url-input"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleStageTranscribeUrl}
-                      className="rounded-md border border-edge bg-surface px-2.5 py-2 text-[11px] font-medium text-text/90 transition-colors hover:border-primary hover:text-primary"
-                      data-testid="note-transcribe-url-btn"
-                    >
-                      {t('transcribe.loadUrl')}
-                    </button>
-                  </div>
-                </div>
-                {transcribeStatusText && (
-                  <p className="px-3 pt-2 text-[11px] leading-5 text-primary/85 break-all" data-testid="note-transcribe-staged-source">
-                    {transcribeStatusText}
-                  </p>
-                )}
-                <div className="px-3 pt-3">
-                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('transcribe.spokenLang')}</label>
-                  <select
-                    value={transcribeLanguage}
-                    onChange={(e) => setTranscribeLanguage(e.target.value)}
-                    className="w-full rounded-md border border-edge bg-base px-2.5 py-2 text-[12px] text-text outline-none transition-colors focus:border-primary"
-                    data-testid="note-transcribe-language"
-                  >
-                    {TRANSCRIBE_LANGUAGES.map((option) => (
-                      <option key={option.code} value={option.code}>{option.labelKey ? t(option.labelKey) : option.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mt-2 space-y-1.5 px-3">
-                  <label className="flex items-center justify-between gap-3 rounded-md border border-edge/70 bg-white/[0.02] px-2.5 py-2 text-[12px] text-text/90" data-testid="note-transcribe-diarization-row">
-                    <span className="font-medium">{t('transcribe.diarization')}</span>
-                    <input type="checkbox" checked={transcribeDiarization} onChange={(e) => setTranscribeDiarization(e.target.checked)} className="accent-primary" />
-                  </label>
-                  <label className="flex items-center justify-between gap-3 rounded-md border border-edge/70 bg-white/[0.02] px-2.5 py-2 text-[12px] text-text/90" data-testid="note-transcribe-summary-row">
-                    <span className="font-medium">{t('transcribe.aiSummary')}</span>
-                    <input type="checkbox" checked={transcribeAiSummary} onChange={(e) => setTranscribeAiSummary(e.target.checked)} className="accent-primary" />
-                  </label>
-                  <label className="flex items-center justify-between gap-3 rounded-md border border-edge/70 bg-white/[0.02] px-2.5 py-2 text-[12px] text-text/90" data-testid="note-transcribe-punctuation-row">
-                    <span className="font-medium">{t('transcribe.punctuation')}</span>
-                    <input type="checkbox" checked={transcribePunctuation} onChange={(e) => setTranscribePunctuation(e.target.checked)} className="accent-primary" />
-                  </label>
-                </div>
-                <div className="px-3 pt-3">
-                  <button
-                    type="button"
-                    onClick={handleStartInlineTranscription}
-                    disabled={!transcribeCanStart}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-                    data-testid="note-start-transcribe-btn"
-                  >
-                    <span>{transcribeButtonLabel}</span>
-                    {transcribeLoading && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
-                  </button>
-                </div>
-                {showInlineTranscribeStatus && (
-                  <div
-                    className={`mx-3 mt-3 rounded-lg border px-3 py-2.5 ${
-                      transcribeErrorState
-                        ? 'border-red-500/25 bg-red-500/8'
-                        : transcribeSavedDocumentId
-                          ? 'border-emerald-500/25 bg-emerald-500/8'
-                          : 'border-primary/20 bg-primary/8'
-                    }`}
-                    data-testid="note-transcribe-status-card"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className={`text-[12px] font-semibold ${
-                          transcribeErrorState ? 'text-red-200' : transcribeSavedDocumentId ? 'text-emerald-200' : 'text-text'
-                        }`}>
-                          {transcribeErrorState ? t('transcribe.failed') : transcribeSavedDocumentId ? t('transcribe.savedToNotes') : transcribeStageLabel}
-                        </p>
-                        {!transcribeErrorState && transcribeStageDetail && (
-                          <p className="pt-0.5 text-[11px] text-muted/70">{transcribeStageDetail}</p>
-                        )}
-                        {transcribeStatusText && (
-                          <p className="pt-1 text-[11px] leading-5 text-muted/65 break-all">{transcribeStatusText}</p>
-                        )}
-                        {transcribeErrorState && (
-                          <p className="pt-1 text-[11px] leading-5 text-red-200/90">{transcribeErrorState}</p>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        {transcribeLoading && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (transcribeUrlStartedAt != null) cancelUrlTranscription();
-                              else if (transcribeActiveJobId) cancelTranscribeJob(transcribeActiveJobId);
-                            }}
-                            className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-300 transition-colors hover:bg-red-500/15"
-                            data-testid="note-cancel-transcribe-btn"
-                          >
-                            {t('reader.stop')}
-                          </button>
-                        )}
-                        {onNavigate && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              closeContextMenu();
-                              onNavigate('processes');
-                            }}
-                            className="rounded-md border border-edge px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:border-primary hover:text-primary"
-                            data-testid="note-open-processes-hub-btn"
-                          >
-                            {t('processes.openHub')}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {!transcribeErrorState && activeTranscribeProgress && activeTranscribeProgress.total > 0 && (
-                      <div className="mt-2">
-                        <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
-                          <div
-                            className="h-full rounded-full bg-primary transition-all duration-300"
-                            style={{ width: `${activeTranscribeProgress.pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {docId && (
-                  <>
-                    {renderDockDivider()}
-                    <p className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/40">{t('notes.linkedAudio')}</p>
-                    {renderDockAction({
-                      icon: 'history',
-                      label: t('notes.historyShort'),
-                      onClick: () => {
-                        toggleUtilityPanel('history');
-                        closeContextMenu();
-                      },
-                      disabled: false,
-                      tone: utilityPanel === 'history' ? 'primary' : 'neutral',
-                      testId: 'note-open-history-panel-btn',
-                    })}
-                    {hasAudioUtilities ? (
-                      <>
-                        {renderDockAction({
-                          icon: 'audio_file',
-                          label: t('notes.audioShort'),
-                          onClick: () => {
-                            toggleUtilityPanel('audio');
-                            closeContextMenu();
-                          },
-                          disabled: false,
-                          tone: utilityPanel === 'audio' ? 'primary' : 'neutral',
-                          testId: 'note-open-audio-panel-btn',
-                        })}
-                        {renderDockAction({
-                          icon: 'graphic_eq',
-                          label: t('notes.retranscribeShort'),
-                          onClick: () => {
-                            toggleUtilityPanel('retranscribe');
-                            closeContextMenu();
-                          },
-                          disabled: false,
-                          tone: utilityPanel === 'retranscribe' ? 'primary' : 'neutral',
-                          testId: 'note-open-retranscribe-panel-btn',
-                        })}
-                      </>
-                    ) : (
-                      <p className="px-3 py-2 text-[11px] leading-5 text-muted/60" data-testid="note-transcribe-needs-audio">
-                        {t('notes.audioMissing')}
-                      </p>
-                    )}
-                  </>
-                )}
               </div>
             </PlanGate>
           </div>
@@ -1578,6 +1606,200 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
     </div>
   ) : null;
 
+  const transcribeDialog = transcribeDialogOpen ? (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      data-testid="transcribe-dialog"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) setTranscribeDialogOpen(false); }}
+    >
+      <div className="w-full max-w-md rounded-2xl border border-edge bg-surface shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-edge">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-primary">graphic_eq</span>
+            <h3 className="text-[13px] font-semibold text-text">{t('transcribe.dialogTitle')}</h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => setTranscribeDialogOpen(false)}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-white/[0.06] hover:text-text"
+            aria-label="Close"
+            data-testid="transcribe-dialog-close"
+          >
+            <span className="material-symbols-outlined text-[18px]">close</span>
+          </button>
+        </div>
+        <PlanGate resource="stt_seconds">
+          <div className="max-h-[70vh] overflow-y-auto px-4 py-4 space-y-3">
+            <button
+              type="button"
+              onClick={() => { transcribeFileInputRef.current?.click(); }}
+              className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-[13px] font-medium transition-colors ${
+                stagedTranscribeFile
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-edge bg-base text-text/90 hover:border-primary/50 hover:text-primary'
+              }`}
+              data-testid="note-transcribe-file-btn"
+            >
+              <span className="material-symbols-outlined text-[18px]">upload_file</span>
+              <span className="truncate">{stagedTranscribeFile ? stagedTranscribeFile.name : t('transcribe.upload')}</span>
+            </button>
+            <div data-testid="note-transcribe-url-row">
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/60">{t('transcribe.pasteLink')}</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="url"
+                  value={transcribeUrlDraft}
+                  onChange={(e) => setTranscribeUrlDraft(e.target.value)}
+                  placeholder={t('transcribe.urlPlaceholder')}
+                  className="min-w-0 flex-1 rounded-md border border-edge bg-base px-2.5 py-2 text-[12px] text-text outline-none transition-colors placeholder:text-muted/40 focus:border-primary"
+                  data-testid="note-transcribe-url-input"
+                />
+                <button
+                  type="button"
+                  onClick={handleStageTranscribeUrl}
+                  className="rounded-md border border-edge bg-surface px-2.5 py-2 text-[11px] font-medium text-text/90 transition-colors hover:border-primary hover:text-primary"
+                  data-testid="note-transcribe-url-btn"
+                >
+                  {t('transcribe.loadUrl')}
+                </button>
+              </div>
+            </div>
+            {transcribeStatusText && !showInlineTranscribeStatus && (
+              <p className="text-[11px] leading-5 text-primary/85 break-all" data-testid="note-transcribe-staged-source">
+                {transcribeStatusText}
+              </p>
+            )}
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted/60">{t('transcribe.spokenLang')}</label>
+              <select
+                value={transcribeLanguage}
+                onChange={(e) => setTranscribeLanguage(e.target.value)}
+                className="w-full rounded-md border border-edge bg-base px-2.5 py-2 text-[12px] text-text outline-none transition-colors focus:border-primary"
+                data-testid="note-transcribe-language"
+              >
+                {TRANSCRIBE_LANGUAGES.map((option) => (
+                  <option key={option.code} value={option.code}>{option.labelKey ? t(option.labelKey) : option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="flex items-center justify-between gap-3 rounded-md border border-edge/70 bg-white/[0.02] px-2.5 py-2 text-[12px] text-text/90" data-testid="note-transcribe-diarization-row">
+                <span className="font-medium">{t('transcribe.diarization')}</span>
+                <input type="checkbox" checked={transcribeDiarization} onChange={(e) => setTranscribeDiarization(e.target.checked)} className="accent-primary" />
+              </label>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-edge/70 bg-white/[0.02] px-2.5 py-2 text-[12px] text-text/90" data-testid="note-transcribe-summary-row">
+                <span className="font-medium">{t('transcribe.aiSummary')}</span>
+                <input type="checkbox" checked={transcribeAiSummary} onChange={(e) => setTranscribeAiSummary(e.target.checked)} className="accent-primary" />
+              </label>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-edge/70 bg-white/[0.02] px-2.5 py-2 text-[12px] text-text/90" data-testid="note-transcribe-punctuation-row">
+                <span className="font-medium">{t('transcribe.punctuation')}</span>
+                <input type="checkbox" checked={transcribePunctuation} onChange={(e) => setTranscribePunctuation(e.target.checked)} className="accent-primary" />
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={handleStartInlineTranscription}
+              disabled={!transcribeCanStart}
+              title={!transcribeCanStart && !transcribeLoading ? t('transcribe.needsInput') : undefined}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+              data-testid="note-start-transcribe-btn"
+            >
+              <span>{transcribeButtonLabel}</span>
+              {transcribeLoading && <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>}
+            </button>
+            {!transcribeCanStart && !transcribeLoading && !showInlineTranscribeStatus && (
+              <p className="text-[11px] leading-5 text-muted/60 text-center" data-testid="note-transcribe-hint">
+                {t('transcribe.needsInput')}
+              </p>
+            )}
+            {showInlineTranscribeStatus && (
+              <div
+                className={`rounded-lg border px-3 py-2.5 ${
+                  transcribeErrorState
+                    ? 'border-red-500/25 bg-red-500/8'
+                    : transcribeSavedDocumentId
+                      ? 'border-emerald-500/25 bg-emerald-500/8'
+                      : 'border-primary/20 bg-primary/8'
+                }`}
+                data-testid="note-transcribe-status-card"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-[12px] font-semibold ${
+                      transcribeErrorState ? 'text-red-200' : transcribeSavedDocumentId ? 'text-emerald-200' : 'text-text'
+                    }`}>
+                      {transcribeErrorState ? t('transcribe.failed') : transcribeSavedDocumentId ? t('transcribe.savedToNotes') : transcribeStageLabel}
+                    </p>
+                    {!transcribeErrorState && transcribeStageDetail && (
+                      <p className="pt-0.5 text-[11px] text-muted/70">{transcribeStageDetail}</p>
+                    )}
+                    {transcribeStatusText && (
+                      <p className="pt-1 text-[11px] leading-5 text-muted/65 break-all">{transcribeStatusText}</p>
+                    )}
+                    {transcribeElapsedLabel && !transcribeErrorState && !transcribeSavedDocumentId && (
+                      <p className="pt-1 text-[11px] leading-5 text-muted/55" data-testid="note-transcribe-elapsed">
+                        {t('transcribe.elapsed')}: {transcribeElapsedLabel}
+                      </p>
+                    )}
+                    {transcribeErrorState && (
+                      <p className="pt-1 text-[11px] leading-5 text-red-200/90">{transcribeErrorState}</p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {transcribeLoading && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (transcribeUrlStartedAt != null) cancelUrlTranscription();
+                          else if (transcribeActiveJobId) cancelTranscribeJob(transcribeActiveJobId);
+                        }}
+                        className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-300 transition-colors hover:bg-red-500/15"
+                        data-testid="note-cancel-transcribe-btn"
+                      >
+                        {t('reader.stop')}
+                      </button>
+                    )}
+                    {onNavigate && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTranscribeDialogOpen(false);
+                          onNavigate('processes');
+                        }}
+                        className="rounded-md border border-edge px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:border-primary hover:text-primary"
+                        data-testid="note-open-processes-hub-btn"
+                      >
+                        {t('processes.openHub')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {!transcribeErrorState && activeTranscribeProgress && activeTranscribeProgress.total > 0 && (
+                  <div className="mt-2">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-300"
+                        style={{ width: `${activeTranscribeProgress.pct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {/* Indeterminate pulse bar when we have no chunk counter (URL jobs) */}
+                {!transcribeErrorState && transcribeLoading && (!activeTranscribeProgress || activeTranscribeProgress.total === 0) && (
+                  <div className="mt-2">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+                      <div className="h-full w-1/3 rounded-full bg-primary/70 wa-indeterminate" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </PlanGate>
+      </div>
+    </div>
+  ) : null;
+
   useEffect(() => {
     return () => {
       stopTTS();
@@ -1589,44 +1811,98 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
     };
   }, []);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ LIST MODE Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ——— LIST MODE ———
   if (mode === 'list') return (
     <div className="flex-1 min-h-0 relative flex flex-col bg-base" data-testid="dictate-page">
-      <div className="px-8 pt-12 pb-4">
-        <div className="mb-5">
-          <h2 className="text-3xl font-black tracking-tight mb-2">{t('notes.title')}</h2>
-          <p className="text-muted">{t('notes.desc')}</p>
+      {/* E4 — ElevenLabs-inspired header: whisper-thin title, airy spacing. */}
+      <div className="px-10 pt-14 pb-6">
+        <div className="flex items-end justify-between gap-4 mb-8 flex-wrap">
+          <div>
+            <h2 className="text-[44px] leading-[1.05] font-light tracking-[-0.02em] mb-2 text-text">{t('notes.title')}</h2>
+            <p className="text-[13px] text-text-tertiary tracking-[0.14px]">
+              {documents.length === filteredDocs.length
+                ? (uiLanguage === 'es' ? `${documents.length} ${documents.length === 1 ? 'nota' : 'notas'}` : `${documents.length} ${documents.length === 1 ? 'note' : 'notes'}`)
+                : (uiLanguage === 'es' ? `${filteredDocs.length} de ${documents.length} notas` : `${filteredDocs.length} of ${documents.length} notes`)}
+              {folders.length > 0 && ` · ${folders.length} ${uiLanguage === 'es' ? (folders.length === 1 ? 'carpeta' : 'carpetas') : (folders.length === 1 ? 'folder' : 'folders')}`}
+            </p>
+          </div>
+          {/* Primary CTA lives with the page header so creating a note is a
+              one-glance action, not a hunt-in-the-sidebar task. */}
+          <button
+            type="button"
+            onClick={() => newNote()}
+            className="h-11 px-5 rounded-full bg-primary text-white text-sm font-semibold tracking-[0.14px] shadow-[var(--theme-shadow-card)] hover:brightness-110 hover:-translate-y-[0.5px] active:brightness-95 transition-all flex items-center gap-2"
+            data-testid="new-note-cta"
+          >
+            <span className="material-symbols-outlined text-[18px]">add</span>
+            {uiLanguage === 'es' ? 'Nueva nota' : 'New note'}
+          </button>
         </div>
-        <div className="mt-1 rounded-2xl border border-edge bg-surface/40 p-3 space-y-2.5">
+        <div className="rounded-2xl bg-[var(--theme-warm)] shadow-[var(--theme-shadow-inset-border),var(--theme-shadow-warm)] p-2.5 space-y-2.5">
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="relative flex-1 min-w-[240px] max-w-[420px]">
               <span className="material-symbols-outlined text-[20px] text-muted absolute left-3 top-1/2 -translate-y-1/2">search</span>
-              <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t('notes.search')}
-                className="w-full pl-10 pr-4 h-11 rounded-xl bg-surface border border-edge text-sm text-text placeholder:text-muted/50 outline-none focus:border-primary transition-colors" data-testid="notes-search" />
+              <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={uiLanguage === 'es' ? 'Buscar por título, contenido, hablante…' : 'Search by title, content, speaker…'}
+                className="w-full pl-11 pr-10 h-11 rounded-full bg-surface shadow-[var(--theme-shadow-inset-border)] text-sm text-text placeholder:text-muted/50 outline-none focus:shadow-[var(--theme-shadow-inset-border),0_0_0_3px_rgba(19,127,236,0.15)] transition-shadow tracking-[0.14px]" data-testid="notes-search" />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted hover:text-text"
+                  title={uiLanguage === 'es' ? 'Limpiar' : 'Clear'}>
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              )}
             </div>
-            <div className="flex items-center gap-1.5 px-2.5 h-11 rounded-xl bg-surface border border-edge shrink-0">
+            {/* Color filter — "All" button first, then each color. Active
+                filter reads unambiguously via ring + scale. */}
+            <div className="flex items-center gap-1.5 px-3 h-11 rounded-full bg-surface shadow-[var(--theme-shadow-inset-border)] shrink-0" title={uiLanguage === 'es' ? 'Filtrar por color' : 'Filter by color'}>
+              <button
+                type="button"
+                onClick={() => setColorFilter(null)}
+                className={`h-6 px-2.5 rounded-full text-[11px] font-medium tracking-[0.04em] transition-colors ${colorFilter === null ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
+                data-testid="filter-all"
+              >
+                {uiLanguage === 'es' ? 'Todos' : 'All'}
+              </button>
               {NOTE_COLORS.map((c) => (
                 <button key={c} onClick={() => setColorFilter(colorFilter === c ? null : c)}
                   className={`w-5 h-5 rounded-full ${COLOR_STYLES[c].dot} transition-all ${colorFilter === c ? 'ring-2 ring-[var(--theme-text)] ring-offset-1 ring-offset-[var(--theme-base)] scale-110' : 'opacity-60 hover:opacity-100'}`}
                   title={c} data-testid={`filter-${c}`} />
               ))}
-              {(colorFilter || searchQuery) && (
-                <button onClick={() => { setColorFilter(null); setSearchQuery(''); }} className="ml-1 p-0.5 rounded text-muted hover:text-text" title={t('notes.clearFilter')}>
-                  <span className="material-symbols-outlined text-[16px]">close</span>
-                </button>
-              )}
             </div>
-            <button onClick={toggleView} className="h-11 w-11 rounded-xl bg-surface border border-edge text-muted hover:text-text transition-colors shrink-0 grid place-items-center" title={viewMode === 'grid' ? 'List view' : 'Grid view'} data-testid="view-toggle">
-              <span className="material-symbols-outlined text-[20px]">{viewMode === 'grid' ? 'view_list' : 'grid_view'}</span>
-            </button>
+            {/* Grid / list — segmented two-button control, no mystery icon
+                toggle. Active state is dominant; inactive is muted. */}
+            <div className="flex items-center h-11 rounded-full bg-surface shadow-[var(--theme-shadow-inset-border)] shrink-0 p-0.5" role="group" aria-label={uiLanguage === 'es' ? 'Vista' : 'View'}>
+              <button
+                type="button"
+                onClick={() => viewMode !== 'grid' && toggleView()}
+                aria-pressed={viewMode === 'grid'}
+                className={`h-10 w-10 rounded-full grid place-items-center transition-colors ${viewMode === 'grid' ? 'bg-[var(--theme-warm)] text-primary shadow-[var(--theme-shadow-inset-border)]' : 'text-muted hover:text-text'}`}
+                title={uiLanguage === 'es' ? 'Cuadrícula' : 'Grid'}
+                data-testid="view-toggle-grid"
+              >
+                <span className="material-symbols-outlined text-[18px]">grid_view</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => viewMode !== 'list' && toggleView()}
+                aria-pressed={viewMode === 'list'}
+                className={`h-10 w-10 rounded-full grid place-items-center transition-colors ${viewMode === 'list' ? 'bg-[var(--theme-warm)] text-primary shadow-[var(--theme-shadow-inset-border)]' : 'text-muted hover:text-text'}`}
+                title={uiLanguage === 'es' ? 'Lista' : 'List'}
+                data-testid="view-toggle-list"
+              >
+                <span className="material-symbols-outlined text-[18px]">view_list</span>
+              </button>
+            </div>
             <button
               type="button"
               onClick={selectAllVisible}
               disabled={filteredDocs.length === 0}
-              className="h-11 px-3 rounded-xl bg-surface border border-edge text-xs text-muted hover:text-text transition-colors disabled:opacity-30"
+              className="h-11 px-3 rounded-full bg-surface shadow-[var(--theme-shadow-inset-border)] text-xs text-muted hover:text-text transition-colors disabled:opacity-30 flex items-center gap-1.5"
               data-testid="select-all-notes-btn"
+              title={uiLanguage === 'es' ? 'Seleccionar todas las visibles' : 'Select all visible'}
             >
-              {t('notes.selectAllVisible')}
+              <span className="material-symbols-outlined text-[16px]">check_box_outline_blank</span>
+              {uiLanguage === 'es' ? 'Seleccionar' : 'Select'}
             </button>
           </div>
           {selectedNoteIds.length > 0 && (
@@ -1711,51 +1987,61 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
           </div>
         )}
         {viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="notes-grid">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5" data-testid="notes-grid">
             {filteredDocs.map((doc) => {
-              const color = getColor(doc.tags ?? []);
-              const cs = COLOR_STYLES[color];
               const src = doc.source ?? 'manual';
-              const preview = doc.content.replace(/<[^>]*>/g, '').slice(0, 120);
+              const preview = doc.content.replace(/<[^>]*>/g, '').trim().slice(0, 140);
               const isSelected = selectedNoteIds.includes(doc.id);
+              // `sanitizeDisplayTitle` recognizes legacy auto-generated
+              // timestamp titles and treats them as empty; display falls
+              // back to "Untitled". DB value untouched.
+              const displayTitle = sanitizeDisplayTitle(stripMediaExtension(doc.title)) || t('editor.untitled');
+              const emptyLabel = uiLanguage === 'es' ? 'Sin contenido' : 'Empty';
+              const folder = doc.folder_id ? folders.find((f) => f.id === doc.folder_id) : null;
               return (
                 <div key={doc.id} onClick={() => openNote(doc.id)}
-                  className={`flex flex-col p-4 rounded-2xl border border-edge/80 border-l-4 ${cs.border} bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 transition-all text-left group min-h-[170px] cursor-pointer`} data-testid={`note-${doc.id}`}>
-                  <div className="flex items-start gap-2 mb-2.5">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); toggleSelection(doc.id); }}
-                      className="p-0.5 rounded text-muted hover:text-text mt-0.5"
-                      data-testid={`select-note-${doc.id}`}
-                      title={t('notes.exportSelected')}
-                    >
-                      <span className="material-symbols-outlined text-[18px]">{isSelected ? 'check_box' : 'check_box_outline_blank'}</span>
-                    </button>
-                    <span className={`material-symbols-outlined text-[16px] grid place-items-center h-6 w-6 rounded-md ${cs.bg} text-muted shrink-0`}>{SOURCE_ICONS[src]}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[15px] font-semibold text-text truncate">{doc.title}</p>
-                      <p className="text-[11px] text-muted uppercase tracking-wide mt-0.5">{sourceLabel(src)}</p>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {folders.length > 0 && (
-                        <select value={doc.folder_id ?? ''} onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => { e.stopPropagation(); handleMoveToFolder(doc.id, e.target.value || null); }}
-                          className="styled-select text-[10px] bg-surface border border-edge rounded px-1 py-0.5 text-text cursor-pointer outline-none shrink-0"
-                          title={t('folders.moveToFolder')} data-testid={`move-doc-${doc.id}`}>
-                          <option value="">{t('folders.allNotes')}</option>
-                          {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                        </select>
-                      )}
-                      <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(doc.id); }}
-                        className="p-1 rounded text-muted hover:text-red-400 hover:bg-red-400/10 transition-all shrink-0" title={t('notes.delete')}>
-                        <span className="material-symbols-outlined text-[16px]">delete</span>
-                      </button>
-                    </div>
+                  className="relative flex flex-col p-5 rounded-2xl bg-surface shadow-[var(--theme-shadow-inset-border)] hover:shadow-[var(--theme-shadow-inset-border),var(--theme-shadow-soft),var(--theme-shadow-warm)] hover:-translate-y-[1px] transition-all duration-200 text-left group min-h-[180px] cursor-pointer"
+                  data-testid={`note-${doc.id}`}>
+                  {/* Title row owns the full width — actions don't reflow
+                   * it. The overlay cluster below lives in its own layer
+                   * so hover never squeezes the title. */}
+                  <h3 className="text-[15.5px] font-normal leading-snug text-text tracking-[-0.005em] line-clamp-2 mb-3 pr-24">
+                    {displayTitle}
+                  </h3>
+                  {preview ? (
+                    <p className="text-[13px] text-muted/85 leading-[1.6] tracking-[0.14px] line-clamp-3 flex-1">{preview}</p>
+                  ) : (
+                    <p className="text-[13px] text-muted/40 italic leading-[1.6] flex-1">{emptyLabel}</p>
+                  )}
+                  <div className="flex items-center gap-2 mt-4 text-[11px] text-muted/60 flex-wrap">
+                    <span className="material-symbols-outlined text-[13px]">{SOURCE_ICONS[src]}</span>
+                    <span className="capitalize tracking-[0.02em]">{sourceLabel(src).toLowerCase()}</span>
+                    <span className="opacity-40">·</span>
+                    <span>{relativeDate(doc.updated_at, uiLanguage)}</span>
+                    {folder && (
+                      <>
+                        <span className="opacity-40">·</span>
+                        <span className="inline-flex items-center gap-1" title={folder.name}>
+                          <span className="material-symbols-outlined text-[13px]">folder</span>
+                          <span className="truncate max-w-[120px]">{folder.name}</span>
+                        </span>
+                      </>
+                    )}
                   </div>
-                  <p className="text-[13px] text-text-secondary/90 leading-5 line-clamp-3 flex-1">{preview || '...'}</p>
-                  <div className="mt-3 pt-2 border-t border-edge/60 flex items-center justify-between">
-                    <span className="text-[11px] text-muted">{relativeDate(doc.updated_at, uiLanguage)}</span>
-                  </div>
+                  <NoteCardActions
+                    doc={doc}
+                    folders={folders}
+                    isSelected={isSelected}
+                    onToggleSelect={() => toggleSelection(doc.id)}
+                    onMoveToFolder={(folderId) => handleMoveToFolder(doc.id, folderId)}
+                    onDelete={() => handleDeleteNote(doc.id)}
+                    labels={{
+                      select: t('notes.exportSelected'),
+                      move: t('folders.moveToFolder'),
+                      del: t('notes.delete'),
+                      root: uiLanguage === 'es' ? 'Sin carpeta' : 'No folder',
+                    }}
+                  />
                 </div>
               );
             })}
@@ -1766,50 +2052,84 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
               const color = getColor(doc.tags ?? []);
               const cs = COLOR_STYLES[color];
               const src = doc.source ?? 'manual';
-              const preview = doc.content.replace(/<[^>]*>/g, '').slice(0, 100);
+              const preview = doc.content.replace(/<[^>]*>/g, '').trim().slice(0, 100);
               const isSelected = selectedNoteIds.includes(doc.id);
+              const displayTitle = sanitizeDisplayTitle(stripMediaExtension(doc.title)) || t('editor.untitled');
+              const emptyLabel = uiLanguage === 'es' ? 'Sin contenido' : 'Empty';
+              const folder = doc.folder_id ? folders.find((f) => f.id === doc.folder_id) : null;
               return (
                 <div key={doc.id} onClick={() => openNote(doc.id)}
-                  className={`flex items-start gap-3 p-4 rounded-2xl border border-edge border-l-4 ${cs.border} bg-surface hover:bg-surface-alt/70 transition-colors text-left group cursor-pointer`} data-testid={`note-${doc.id}`}>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); toggleSelection(doc.id); }}
-                    className="p-0.5 rounded text-muted hover:text-text shrink-0 mt-1"
-                    data-testid={`select-note-${doc.id}`}
-                    title={t('notes.exportSelected')}
-                  >
-                    <span className="material-symbols-outlined text-[18px]">{isSelected ? 'check_box' : 'check_box_outline_blank'}</span>
-                  </button>
-                  <span className={`material-symbols-outlined text-[18px] grid place-items-center h-8 w-8 rounded-lg ${cs.bg} text-muted shrink-0`}>{SOURCE_ICONS[src]}</span>
+                  className="relative flex items-center gap-4 px-5 py-3.5 pr-28 rounded-2xl bg-surface shadow-[var(--theme-shadow-inset-border)] hover:shadow-[var(--theme-shadow-inset-border),var(--theme-shadow-soft)] transition-shadow text-left group cursor-pointer"
+                  data-testid={`note-${doc.id}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${cs.dot} opacity-50 shrink-0`} aria-hidden />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-text truncate">{doc.title}</p>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-edge text-muted uppercase tracking-wide shrink-0">{sourceLabel(src)}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h3 className="text-[14px] font-normal text-text tracking-[-0.005em] truncate">{displayTitle}</h3>
+                      {folder && (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-muted/60 shrink-0" title={folder.name}>
+                          <span className="material-symbols-outlined text-[12px]">folder</span>
+                          <span className="truncate max-w-[100px]">{folder.name}</span>
+                        </span>
+                      )}
                     </div>
-                    <p className="text-xs text-text-secondary/90 line-clamp-2 mt-1.5">{preview}</p>
-                    <span className="text-[11px] text-muted mt-2 block">{relativeDate(doc.updated_at, uiLanguage)}</span>
+                    <p className={`text-[12px] leading-[1.55] tracking-[0.14px] line-clamp-1 mt-0.5 ${preview ? 'text-muted/80' : 'text-muted/40 italic'}`}>{preview || emptyLabel}</p>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {folders.length > 0 && (
-                      <select value={doc.folder_id ?? ''} onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => { e.stopPropagation(); handleMoveToFolder(doc.id, e.target.value || null); }}
-                        className="styled-select text-xs bg-surface border border-edge rounded px-1.5 py-1 text-text cursor-pointer outline-none shrink-0"
-                        title={t('folders.moveToFolder')} data-testid={`move-doc-${doc.id}`}>
-                        <option value="">{t('folders.allNotes')}</option>
-                        {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-                      </select>
-                    )}
-                    <button onClick={(e) => { e.stopPropagation(); handleDeleteNote(doc.id); }}
-                      className="p-1.5 rounded-lg text-muted hover:text-red-400 hover:bg-red-400/10 transition-all shrink-0" title={t('notes.delete')}>
-                      <span className="material-symbols-outlined text-[18px]">delete</span>
-                    </button>
+                  <div className="flex items-center gap-2 text-[11px] text-muted/60 shrink-0">
+                    <span className="material-symbols-outlined text-[13px]">{SOURCE_ICONS[src]}</span>
+                    <span className="capitalize tracking-[0.02em]">{sourceLabel(src).toLowerCase()}</span>
+                    <span className="opacity-40">·</span>
+                    <span>{relativeDate(doc.updated_at, uiLanguage)}</span>
                   </div>
+                  <NoteCardActions
+                    doc={doc}
+                    folders={folders}
+                    isSelected={isSelected}
+                    onToggleSelect={() => toggleSelection(doc.id)}
+                    onMoveToFolder={(folderId) => handleMoveToFolder(doc.id, folderId)}
+                    onDelete={() => handleDeleteNote(doc.id)}
+                    labels={{
+                      select: t('notes.exportSelected'),
+                      move: t('folders.moveToFolder'),
+                      del: t('notes.delete'),
+                      root: uiLanguage === 'es' ? 'Sin carpeta' : 'No folder',
+                    }}
+                  />
                 </div>
               );
             })}
           </div>
         )}
       </div>
+      {/* Undo-delete toast stack. Sits bottom-right above the action dock.
+       * Each scheduled delete gets its own toast with an Undo button; the
+       * 5 s timer fires the real `deleteDocument` when it expires. */}
+      {scheduledDeletes.size > 0 && (
+        <div className="fixed bottom-24 right-6 z-[120] flex flex-col gap-2" data-testid="undo-delete-stack">
+          {Array.from(scheduledDeletes.keys()).map((id) => {
+            const doc = documents.find((d) => d.id === id);
+            const titleLabel = doc ? (sanitizeDisplayTitle(stripMediaExtension(doc.title)) || t('editor.untitled')) : '';
+            return (
+              <div key={id} className="flex items-center gap-3 rounded-xl border border-edge bg-surface px-3.5 py-2.5 shadow-[var(--theme-shadow-card),var(--theme-shadow-inset-border)] text-sm max-w-sm">
+                <span className="material-symbols-outlined text-[18px] text-muted">delete</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] text-text truncate">
+                    {uiLanguage === 'es' ? 'Nota eliminada' : 'Note deleted'}
+                  </p>
+                  <p className="text-[11px] text-muted truncate">{titleLabel}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => undoDeleteNote(id)}
+                  className="shrink-0 px-3 py-1.5 rounded-full text-[12px] font-semibold text-primary hover:bg-primary/10 transition-colors"
+                  data-testid={`undo-delete-${id}`}
+                >
+                  {uiLanguage === 'es' ? 'Deshacer' : 'Undo'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <ConfirmDialog
         open={!!pendingDeleteNoteId}
         title={t('notes.delete')}
@@ -1843,15 +2163,34 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
     </div>
   );
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ EDIT MODE Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ——— EDIT MODE ———
   return (
     <div className="flex-1 min-h-0 relative flex flex-col bg-base" data-testid="dictate-page">
-      <header className="shrink-0 px-8 pt-8 pb-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <button onClick={goBack} className="flex items-center gap-2 text-sm text-muted hover:text-primary transition-colors" data-testid="back-to-notes">
-            <span className="material-symbols-outlined text-[20px]">arrow_back</span><span className="font-medium">{t('editor.backToNotes')}</span>
-          </button>
+      {/* Top padding: AppShell's dedicated TopBar (48 px, separate
+          chrome strip) now owns theme toggle + notification bell +
+          widget-dock, so this header only needs breathing room from
+          the TopBar's bottom border. `pt-6` (24 px) matches the
+          horizontal px-8 visual rhythm. */}
+      <header className="shrink-0 px-8 pt-6 pb-4 flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
+            <button onClick={goBack} className="flex items-center gap-2 text-sm text-muted hover:text-primary transition-colors" data-testid="back-to-notes">
+              <span className="material-symbols-outlined text-[20px]">arrow_back</span><span className="font-medium">{t('editor.backToNotes')}</span>
+            </button>
+            {attachedActiveJob && onNavigate && (
+              <button
+                type="button"
+                onClick={() => onNavigate('processes')}
+                className="flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/15"
+                title={t('transcribe.attachedJobIndicator')}
+                data-testid="note-attached-job-indicator"
+              >
+                <span className="material-symbols-outlined animate-spin text-[14px]">progress_activity</span>
+                <span>{t('transcribe.inProgress')}</span>
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-3 flex-wrap justify-end">
             {status === 'recording' && <span className="flex h-2.5 w-2.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" />}
             {!isLive && dictation.error && status !== 'recording' && <span className="text-xs text-red-400 max-w-[200px] truncate" title={dictation.error}>{t('dictate.flushError')}</span>}
             {isLive && live.error && <span className="text-xs text-red-400 max-w-[260px] truncate" title={live.error}>{formatLiveError(live.error, t)}</span>}
@@ -1865,48 +2204,27 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
               </span>
             )}
             {docId && (
-              <button
-                type="button"
-                onClick={() => toggleUtilityPanel('history')}
-                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityPanel === 'history' ? 'border-primary/50 bg-primary/10 text-primary' : 'border-edge text-muted hover:text-text hover:bg-surface'}`}
-                data-testid="note-history-toggle"
-              >
-                <span className="material-symbols-outlined text-[16px]">history</span>
+              <Button variant="outline" size="sm" leftIcon="history" active={utilityPanel === 'history'}
+                onClick={() => toggleUtilityPanel('history')} data-testid="note-history-toggle">
                 {t('notes.historyShort')}
-                {transcriptHistory.length > 0 && <span className="rounded-full bg-base/70 px-1.5 py-0.5 text-[10px] text-muted">{transcriptHistory.length}</span>}
-              </button>
+                {transcriptHistory.length > 0 && <span className="ml-1 rounded-full bg-base/70 px-1.5 py-0.5 text-[10px] text-muted">{transcriptHistory.length}</span>}
+              </Button>
             )}
             {hasAudioUtilities && (
-              <button
-                type="button"
-                onClick={() => toggleUtilityPanel('audio')}
-                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityPanel === 'audio' ? 'border-primary/50 bg-primary/10 text-primary' : 'border-edge text-muted hover:text-text hover:bg-surface'}`}
-                data-testid="note-audio-toggle"
-              >
-                <span className="material-symbols-outlined text-[16px]">audio_file</span>
+              <Button variant="outline" size="sm" leftIcon="audio_file" active={utilityPanel === 'audio'}
+                onClick={() => toggleUtilityPanel('audio')} data-testid="note-audio-toggle">
                 {t('notes.audioShort')}
-              </button>
+              </Button>
             )}
             {retranscribeAudioUrl && (
-              <button
-                type="button"
-                onClick={() => toggleUtilityPanel('retranscribe')}
-                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${utilityPanel === 'retranscribe' ? 'border-primary/50 bg-primary/10 text-primary' : 'border-edge text-muted hover:text-text hover:bg-surface'}`}
-                data-testid="note-retranscribe-toggle"
-              >
-                <span className="material-symbols-outlined text-[16px]">graphic_eq</span>
+              <Button variant="outline" size="sm" leftIcon="graphic_eq" active={utilityPanel === 'retranscribe'}
+                onClick={() => toggleUtilityPanel('retranscribe')} data-testid="note-retranscribe-toggle">
                 {t('notes.retranscribeShort')}
-              </button>
+              </Button>
             )}
-            <button onClick={handleCopy} disabled={!hasContent} title={t('dictate.copy')}
-              className="p-2 rounded-lg text-muted hover:text-primary hover:bg-surface transition-colors disabled:opacity-30" data-testid="copy-btn">
-              <span className="material-symbols-outlined text-[18px]">content_copy</span>
-            </button>
+            <Button variant="ghost" size="icon" leftIcon="content_copy" onClick={handleCopy} disabled={!hasContent} title={t('dictate.copy')} data-testid="copy-btn" />
             <div className="relative">
-              <button type="button" onClick={() => { const next = !showExport; setShowExport(next); if (next) showActionFeedback(t('export.chooseFormat'), 'info'); }} disabled={!hasContent} title={t('export.title')}
-                className="p-2 rounded-lg text-muted hover:text-primary hover:bg-surface transition-colors disabled:opacity-30" data-testid="export-btn">
-                <span className="material-symbols-outlined text-[18px]">download</span>
-              </button>
+              <Button variant="ghost" size="icon" leftIcon="download" onClick={() => { const next = !showExport; setShowExport(next); if (next) showActionFeedback(t('export.chooseFormat'), 'info'); }} disabled={!hasContent} title={t('export.title')} data-testid="export-btn" />
               {showExport && (
                 <div className="absolute right-0 top-full mt-1 bg-surface border border-edge rounded-xl shadow-xl py-1 z-50 min-w-[160px]" data-testid="export-menu">
                   {(['txt', 'md', 'docx', 'pdf'] as ExportFormat[]).map((fmt) => (
@@ -1918,21 +2236,41 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
                 </div>
               )}
             </div>
-            <button onClick={handleSave} disabled={!hasContent}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-30" data-testid="save-btn">
-              <span className="material-symbols-outlined text-[18px]">save</span>{t('notes.save')}
-            </button>
+            {/* Save button is only meaningful when there are UNSAVED
+                changes. When `saved` is true the emerald badge above
+                already communicates the state; re-showing a prominent
+                blue "Save" button duplicates the information and makes
+                the user wonder whether a click would re-save or
+                re-serialize something. Hide it until dirty. */}
+            {!saved && (
+              <button onClick={handleSave} disabled={!hasContent}
+                className="flex items-center gap-2 h-9 px-5 rounded-full bg-primary text-white text-sm font-semibold tracking-[0.14px] shadow-[var(--theme-shadow-card)] hover:brightness-110 hover:-translate-y-[0.5px] active:brightness-95 transition-all disabled:opacity-30 disabled:hover:translate-y-0" data-testid="save-btn">
+                <span className="material-symbols-outlined text-[18px]">save</span>{t('notes.save')}
+              </button>
+            )}
           </div>
         </div>
-        {/* Title + color picker */}
+        {/* Title + color picker. The color picker gets a proper label
+            on hover so users understand it tags the note by color. */}
         <div className="flex items-center gap-3">
           <input className="text-2xl font-bold text-text bg-transparent outline-none border-b border-transparent focus:border-primary pb-1 flex-1"
             value={title} onChange={(e) => { setTitle(e.target.value); setSaved(false); }} placeholder={t('editor.untitled')} data-testid="editor-title" />
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div
+            className="flex items-center gap-1.5 shrink-0"
+            role="radiogroup"
+            aria-label={uiLanguage === 'es' ? 'Color de la nota' : 'Note color tag'}
+            title={uiLanguage === 'es' ? 'Etiqueta de color — agrupa notas por color' : 'Color tag — groups notes by color'}
+          >
             {NOTE_COLORS.map((c) => (
-              <button key={c} onClick={() => handleColorChange(c)}
+              <button
+                key={c}
+                type="button"
+                onClick={() => handleColorChange(c)}
+                role="radio"
+                aria-checked={noteColor === c}
                 className={`w-4 h-4 rounded-full ${COLOR_STYLES[c].dot} transition-all ${noteColor === c ? 'ring-2 ring-[var(--theme-text)] scale-125' : 'opacity-40 hover:opacity-80'}`}
-                title={c} />
+                title={c}
+              />
             ))}
           </div>
         </div>
@@ -1956,8 +2294,10 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
       </header>
 
       <div className="flex-1 min-h-0 flex">
+        {/* B5: stretch to full available width (honors collapsed sidebar).
+            Soft upper cap on ultra-wide screens to keep lines readable. */}
         <div className="flex-1 min-w-0 overflow-y-auto px-8 pb-8 flex justify-center">
-          <div className="w-full max-w-3xl">
+          <div className="w-full max-w-none 2xl:max-w-[1400px]">
             {isLive && live.status === 'recording' && live.segments.length === 0 && !live.interimText && !live.error && (
               <div className="flex flex-col items-center justify-center py-16 gap-4" data-testid="live-listening-inline">
                 <div className="relative flex items-center justify-center h-16 w-16">
@@ -1993,10 +2333,14 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
                   <NoteRetranscribePanel
                     language={retranscribeLanguage}
                     diarization={retranscribeDiarization}
+                    aiSummary={retranscribeAiSummary}
+                    punctuation={retranscribePunctuation}
                     loading={retranscribeLoading}
                     error={retranscribeError}
                     onChangeLanguage={setRetranscribeLanguage}
                     onChangeDiarization={setRetranscribeDiarization}
+                    onChangeAiSummary={setRetranscribeAiSummary}
+                    onChangePunctuation={setRetranscribePunctuation}
                     onRun={() => { void handleRetranscribeFromNote(); }}
                     onCancel={retranscribeLoading ? handleCancelRetranscribe : undefined}
                   />
@@ -2018,14 +2362,15 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
                 )}
               </div>
             )}
-            <div className="relative" onContextMenu={handleEditorContextMenu} data-testid="note-editor-interaction-zone">
-              <RichEditor
+            <div className="relative" data-testid="note-editor-interaction-zone">
+              <MilkdownEditor
                 content={htmlContent}
                 onChange={handleEditorChange}
                 placeholder={t('dictate.placeholder')}
-                onEditorReady={(e) => { editorRef.current = e; }}
+                onEditorReady={(h) => { editorRef.current = h; }}
                 onReadSelection={handleReadSelection}
                 onAiSelection={handleAiSelection}
+                onContextMenu={handleEditorContextMenu}
               />
             </div>
 
@@ -2040,9 +2385,11 @@ export function DictatePage({ onNavigate }: DictatePageProps) {
           noteText={noteReaderText}
           getEditor={() => editorRef.current}
           onNotify={(message, tone) => { showActionFeedback(message, tone); }}
+          ensureNoteId={persistCurrentNote}
         />
       </div>
       {noteContextMenu}
+      {transcribeDialog}
       {showPromptDialog && <CustomPromptDialog prompts={customPrompts} onSave={(p) => { setCustomPrompts(p); saveCustomPrompts(p); }} onClose={() => setShowPromptDialog(false)} />}
       <AiBudgetDialog
         open={budgetDialog.open}

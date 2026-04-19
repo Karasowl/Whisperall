@@ -5,16 +5,20 @@ import { useLiveStore } from '../stores/live';
 import { ApiError, type DocumentTranscriptionEntry, type TranscriptSegment } from '@whisperall/api-client';
 import { api } from '../lib/api';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import type { Editor } from '@tiptap/react';
+// Editor type now provided by milkdown/api/EditorHandle (imported below).
 import { TranscriptView } from '../components/editor/TranscriptView';
 import { InsightsPanel } from '../components/editor/InsightsPanel';
+import { Button } from '../components/ui/Button';
 import { AudioPlayer, type AudioSeekRequest } from '../components/editor/AudioPlayer';
-import { RichEditor } from '../components/editor/RichEditor';
+import { MilkdownEditor } from '../components/editor/MilkdownEditor';
+import type { EditorHandle } from '../components/editor/milkdown/api/EditorHandle';
 import { CustomPromptDialog, type CustomPrompt } from '../components/editor/CustomPromptDialog';
 import { AiBudgetDialog } from '../components/editor/AiBudgetDialog';
 import { useT } from '../lib/i18n';
+import { promptText } from '../lib/prompt';
+import { useNotificationsStore } from '../stores/notifications';
 import { useSettingsStore } from '../stores/settings';
-import { formatDocDate, smartTitle } from '../lib/format-date';
+import { formatDocDate } from '../lib/format-date';
 import {
   buildTranscriptionBlockHtml,
   extractTranscriptionBlocksFromHtml,
@@ -154,7 +158,7 @@ export function EditorPage({ documentId, onBack }: Props) {
   const [blockAudioUrl, setBlockAudioUrl] = useState<string | null>(null);
   const [seekRequest, setSeekRequest] = useState<AudioSeekRequest | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
-  const editorRef = useRef<Editor | null>(null);
+  const editorRef = useRef<EditorHandle | null>(null);
   const budgetResolverRef = useRef<((ok: boolean) => void) | null>(null);
   const seekNonceRef = useRef(0);
 
@@ -163,7 +167,11 @@ export function EditorPage({ documentId, onBack }: Props) {
     if (!documentId) { clearCurrent(); return; }
     if (documentId === 'new') {
       clearCurrent();
-      createDocument({ title: smartTitle(uiLanguage), content: '', source: 'manual' })
+      // Empty title — the UI displays "Untitled" as placeholder until
+      // the user names the note. Avoids polluting the title field with
+      // a timestamp that reads like user content at the list / export
+      // layer.
+      createDocument({ title: '', content: '', source: 'manual' })
         .then((doc) => { setTitle(doc.title); setHtmlContent(doc.content); })
         .catch(() => {});
     } else {
@@ -215,7 +223,23 @@ export function EditorPage({ documentId, onBack }: Props) {
   }, [currentDocument, updateDocument]);
 
   const handleTitleChange = (v: string) => { setTitle(v); autoSave(v, htmlContent); };
+  const transcriptEditNoticeShownRef = useRef(false);
   const handleEditorChange = (html: string, text: string) => {
+    // Detect if this edit mutated the body of a transcription block and show
+    // the one-time "you're editing the transcript" notice per note.
+    if (documentId && !transcriptEditNoticeShownRef.current) {
+      const flagKey = `wa-transcript-edit-notice:${documentId}`;
+      const alreadyShown = localStorage.getItem(flagKey) === '1';
+      if (!alreadyShown) {
+        const prevBodyMatch = htmlContent.match(/<div[^>]*class="[^"]*wa-transcription-body[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+        const nextBodyMatch = html.match(/<div[^>]*class="[^"]*wa-transcription-body[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+        if (prevBodyMatch && nextBodyMatch && prevBodyMatch[1] !== nextBodyMatch[1]) {
+          transcriptEditNoticeShownRef.current = true;
+          localStorage.setItem(flagKey, '1');
+          useNotificationsStore.getState().push(t('editor.transcriptEdited'), 'info');
+        }
+      }
+    }
     setHtmlContent(html);
     setPlainText(text);
     autoSave(title, html);
@@ -396,8 +420,8 @@ export function EditorPage({ documentId, onBack }: Props) {
   // Insert last dictation at cursor position
   const insertDictation = () => {
     if (!dictationText || !editorRef.current) return;
-    editorRef.current.commands.insertContent(safeHtmlParagraphs(dictationText));
-    autoSave(title, editorRef.current.getHTML());
+    editorRef.current.insertHtmlAtCursor(safeHtmlParagraphs(dictationText));
+    autoSave(title, editorRef.current.getMarkdown());
   };
 
   const insertTranscriptionBlock = useCallback(async (args: {
@@ -421,8 +445,8 @@ export function EditorPage({ documentId, onBack }: Props) {
     });
     if (!html || !currentDocument) return null;
     if (editorRef.current) {
-      editorRef.current.commands.insertContent(html);
-      const next = editorRef.current.getHTML();
+      editorRef.current.insertHtmlAtCursor(html);
+      const next = editorRef.current.getMarkdown();
       setHtmlContent(next);
       autoSave(title, next);
       setContentView('note');
@@ -473,7 +497,7 @@ export function EditorPage({ documentId, onBack }: Props) {
     const next = replaceTranscriptionBlockInHtml(htmlContent, params.blockId, section);
     if (next !== htmlContent) {
       setHtmlContent(next);
-      if (editorRef.current) editorRef.current.commands.setContent(next, { emitUpdate: false });
+      if (editorRef.current) editorRef.current.setMarkdown(next, { emitChange: false });
       autoSave(title, next);
       setContentView('note');
     }
@@ -652,9 +676,14 @@ export function EditorPage({ documentId, onBack }: Props) {
 
   const handleSavePrompts = (prompts: CustomPrompt[]) => { setCustomPrompts(prompts); saveCustomPrompts(prompts); };
 
-  const handleRenameSpeaker = (speaker: string) => {
+  const handleRenameSpeaker = async (speaker: string) => {
     const currentLabel = speakerAliases[speaker] || speaker;
-    const nextLabel = (window.prompt(t('editor.renameSpeakerPrompt'), currentLabel) ?? '').trim();
+    // Native window.prompt is blocked in Electron — see lib/prompt.tsx.
+    const entered = await promptText({
+      message: t('editor.renameSpeakerPrompt'),
+      defaultValue: currentLabel,
+    });
+    const nextLabel = (entered ?? '').trim();
     if (!nextLabel || nextLabel === currentLabel || !currentDocument) return;
     const nextAliases = { ...speakerAliases, [speaker]: nextLabel };
     setSpeakerAliases(nextAliases);
@@ -688,12 +717,11 @@ export function EditorPage({ documentId, onBack }: Props) {
   return (
     <div className="flex-1 flex flex-col overflow-hidden" data-testid="editor-page">
       {/* Header */}
-      <div className="shrink-0 px-8 pt-12 pb-4 border-b border-edge bg-base/50 backdrop-blur-sm no-drag">
+      <div className="shrink-0 px-8 pt-6 pb-4 border-b border-edge bg-base/50 backdrop-blur-sm no-drag">
         {onBack && documentId && (
-          <button onClick={onBack} className="flex items-center gap-2 text-sm text-muted hover:text-primary mb-3 transition-colors py-1 px-1 -ml-1 rounded-lg hover:bg-white/5" data-testid="back-to-notes">
-            <span className="material-symbols-outlined text-[20px]">arrow_back</span>
-            <span className="font-medium">{t('editor.backToNotes')}</span>
-          </button>
+          <Button variant="ghost" size="sm" leftIcon="arrow_back" onClick={onBack} data-testid="back-to-notes" className="mb-3 -ml-2">
+            {t('editor.backToNotes')}
+          </Button>
         )}
 
         {/* Title row */}
@@ -910,8 +938,8 @@ export function EditorPage({ documentId, onBack }: Props) {
               onRenameSpeaker={documentId ? handleRenameSpeaker : undefined}
             />
           ) : (
-            <RichEditor content={htmlContent} onChange={handleEditorChange}
-              placeholder={documentId ? t('editor.notePlaceholder') : t('editor.placeholder')} onEditorReady={(e) => { editorRef.current = e; }} />
+            <MilkdownEditor content={htmlContent} onChange={handleEditorChange}
+              placeholder={documentId ? t('editor.notePlaceholder') : t('editor.placeholder')} onEditorReady={(h) => { editorRef.current = h; }} />
           )}
         </div>
         {hasTranscript && <InsightsPanel />}

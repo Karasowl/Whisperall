@@ -3,10 +3,14 @@ import { useT } from '../../lib/i18n';
 type Props = {
   language: string;
   diarization: boolean;
+  aiSummary: boolean;
+  punctuation: boolean;
   loading: boolean;
   error: string;
   onChangeLanguage: (language: string) => void;
   onChangeDiarization: (enabled: boolean) => void;
+  onChangeAiSummary: (enabled: boolean) => void;
+  onChangePunctuation: (enabled: boolean) => void;
   onRun: () => void;
   onCancel?: () => void;
 };
@@ -24,10 +28,14 @@ const LANG_OPTIONS = [
 export function NoteRetranscribePanel({
   language,
   diarization,
+  aiSummary,
+  punctuation,
   loading,
   error,
   onChangeLanguage,
   onChangeDiarization,
+  onChangeAiSummary,
+  onChangePunctuation,
   onRun,
   onCancel,
 }: Props) {
@@ -63,6 +71,28 @@ export function NoteRetranscribePanel({
             data-testid="note-retranscribe-diarization"
           />
           {t('transcribe.diarization')}
+        </label>
+
+        <label className="inline-flex items-center gap-2 text-sm text-muted select-none">
+          <input
+            type="checkbox"
+            checked={punctuation}
+            onChange={(event) => onChangePunctuation(event.target.checked)}
+            className="accent-primary"
+            data-testid="note-retranscribe-punctuation"
+          />
+          {t('transcribe.punctuation')}
+        </label>
+
+        <label className="inline-flex items-center gap-2 text-sm text-muted select-none">
+          <input
+            type="checkbox"
+            checked={aiSummary}
+            onChange={(event) => onChangeAiSummary(event.target.checked)}
+            className="accent-primary"
+            data-testid="note-retranscribe-ai-summary"
+          />
+          {t('transcribe.aiSummary')}
         </label>
 
         {loading && onCancel ? (

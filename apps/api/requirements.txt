@@ -13,6 +13,11 @@ respx==0.22.0
 websockets>=13.0
 edge-tts>=6.1.0
 yt-dlp>=2024.10.22
+# Brings a prebuilt ffmpeg binary via pip (exposes imageio_ffmpeg.get_ffmpeg_exe()).
+# Used by the URL transcription path to split downloaded audio into chunks so
+# the chunked STT pipeline (same code path as file upload) can handle long
+# videos. Removes the previous single-blob 25 MB cap + provider timeout issue.
+imageio-ffmpeg>=0.5.1
 pypdf>=5.2.0
 python-docx>=1.1.2
 ebooklib>=0.18

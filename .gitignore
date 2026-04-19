@@ -113,8 +113,11 @@ backend-build/
 coverage/
 test-results/
 playwright-report/
+playwright-report-ai/
 .playwright/
 .vercel
+midscene_run/
+apps/desktop/.tmp/
 
 # Installer backend staging
 apps/desktop/backend-bundle/

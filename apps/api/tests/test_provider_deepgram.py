@@ -69,7 +69,9 @@ class TestTranscribeChunk:
         await deepgram.transcribe_chunk(b"audio", language="es")
 
         url = str(route.calls.last.request.url)
-        assert "model=nova-2" in url
+        # Default model was bumped nova-2 → nova-3 in 2026-Q2 for better
+        # diarization stability on conversational content.
+        assert "model=nova-3" in url
         assert "smart_format=true" in url
         assert "punctuate=true" in url
         assert "language=es" in url
