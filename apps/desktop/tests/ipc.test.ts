@@ -43,6 +43,18 @@ describe('IPC channel registration', () => {
       'auth-storage:remove',
       'desktop-sources',
       'update-title-bar',
+      'translator:show',
+      'translator:hide',
+      'translator:toggle',
+      'translator:get-bounds',
+      'translator:capture-region',
+      'translator:drag-start',
+      'translator:drag-move',
+      'translator:drag-end',
+      'translator:resize-start',
+      'translator:resize-move',
+      'translator:resize-end',
+      'translator:error',
     ];
 
     for (const channel of expectedChannels) {

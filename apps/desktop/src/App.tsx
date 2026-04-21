@@ -158,6 +158,41 @@ export default function App() {
     });
   }, []);
 
+  // Relay errors from the translator overlay (separate renderer with its own
+  // zustand) into this window's notifications store so the user sees them in
+  // the bell icon.
+  useEffect(() => {
+    const bridge = electron?.translator;
+    if (!bridge?.onError) return;
+    return bridge.onError((payload) => {
+      useNotificationsStore.getState().pushError(
+        { message: payload.message, detail: payload.detail, context: 'screen-translator', source: 'renderer' },
+      );
+    });
+  }, []);
+
+  // Generic diagnostic channel: main process pushes any lifecycle events
+  // (hotkey registered, widget shown, etc.) into the bell icon. Replaces
+  // native Windows toasts since those silently fail under Focus Assist and
+  // on portable builds without an AppUserModelID.
+  useEffect(() => {
+    if (!electron?.onDiag) return;
+    return electron.onDiag((payload) => {
+      const tone = payload.tone ?? 'info';
+      const input = {
+        message: payload.message,
+        detail: payload.detail,
+        context: payload.context,
+        source: 'electron' as const,
+      };
+      if (tone === 'error') {
+        useNotificationsStore.getState().pushError(input);
+      } else {
+        useNotificationsStore.getState().push(input, tone);
+      }
+    });
+  }, []);
+
   useEffect(() => {
     const previous = prevDictationStatus.current;
     if (dictationCueSounds && previous !== dictationStatus) {

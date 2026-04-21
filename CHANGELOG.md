@@ -4,6 +4,185 @@ All notable changes to WhisperAll are documented here. Format based on [Keep a C
 
 ## [Unreleased]
 
+### Fixed — M18b hotfix: Tesseract CSP + error visibility (0.36.1-alpha)
+
+Two bugs reported after the M18b build landed, both surfaced by the same screenshot (user dropped the widget over a pixel-art game: `ERROR` chip + "Something went wrong. Check notifications." with no way to actually read the error anywhere):
+
+1. **CSP blocked Tesseract from loading.** `tesseract.js` v7 creates a Web Worker from a local blob: URL, and inside that worker it calls `importScripts('https://cdn.jsdelivr.net/...')` to load `tesseract-core.wasm.js`. `importScripts` is gated by `script-src`, not `connect-src`. My previous CSP only had the CDN hosts under `connect-src`, so every OCR attempt failed before the first frame was read. Fix: add `https://cdn.jsdelivr.net`, `https://unpkg.com`, `https://tessdata.projectnaptha.com` to both `script-src` and `worker-src` in `translator-overlay.html`.
+
+2. **Errors disappeared into the void.** The translator overlay is a separate BrowserWindow with its own zustand stores — pushing to `useNotificationsStore` inside it never reached the main window's bell icon. The Processes page doesn't show these either; it's wired only for transcription jobs. Fix chain:
+   - `useTranslatorStore` now persists `lastErrorMessage`.
+   - `TranslatorOverlay.tsx` renders the raw error text in the body when `status === 'error'` (monospace, wrapped) instead of the generic "Something went wrong" placeholder — the user can now read exactly why OCR / DeepL / capture failed.
+   - New IPC channel `translator:error` relays the message from the translator overlay renderer → main process → main window renderer, which subscribes via a new `useEffect` in `App.tsx` and forwards to `useNotificationsStore.pushError` with `context: 'screen-translator'`. The bell icon now lights up on failure.
+
+Files modified:
+- `apps/desktop/translator-overlay.html` — CSP updated.
+- `apps/desktop/electron/modules/ipc.ts` — `translator:error` handler with `getMainWindow().webContents.send` relay.
+- `apps/desktop/electron/preload.ts` + `src/global.d.ts` — `translator.reportError` / `translator.onError` surface.
+- `apps/desktop/src/stores/translator.ts` — `lastErrorMessage` + `setErrorMessage`.
+- `apps/desktop/src/translator/TranslatorOverlay.tsx` — inline error view + dual-sink error emission (local store + IPC).
+- `apps/desktop/src/translator/translator.css` — `.translator-error*` styles.
+- `apps/desktop/src/App.tsx` — subscription to `electron.translator.onError`.
+- `apps/desktop/tests/ipc.test.ts` — assert `translator:error` is registered.
+
+### Added — M18b: Screen translator live loop + magical reveal (0.36.0-alpha)
+
+Wires the widget to actually translate. The control loop `capture-loop.ts` runs while the window is visible and not being interacted with: grab PNG of the region → 64-bit aHash → OCR via Tesseract.js → normalize → if text changed, call DeepL via `api.translate.translate` → push the translated paragraph into `RevealSurface.tsx`, which renders it word-by-word with the `wa-reveal` blur-fade (shared with the main editor) plus a subtle left-to-right mask sweep on the paragraph for the "magical scanner" feel.
+
+Backoffs baked in:
+- Idle backoff (up to 1500 ms) when the aHash is within Hamming distance ≤3 — no new pixels, no OCR call, no DeepL spend.
+- Error backoff: 3 consecutive failures raises ONE `pushError` to `useNotificationsStore` with `context: 'screen-translator'`, then backs off to 3 s until the next success.
+- `paused` flag stops the loop during drag/resize and while the widget is hidden. Flipped from the translator store on drag-start/resize-start.
+
+Files added:
+- `apps/desktop/src/translator/capture-loop.ts` — `startCaptureLoop(deps)` with `LoopHandle` / `LoopState`. Dependencies (capture, ocr, translate, onReveal, onStatus, onError, getState) are all injected for testability.
+- `apps/desktop/src/translator/RevealSurface.tsx` — lazy-creates a `createRevealQueue` per paragraph, appends `.wa-reveal` spans on write, toggles `.wa-reveal-shown` next-frame so the blur-fade transition animates.
+
+Files modified:
+- `apps/desktop/src/translator/TranslatorOverlay.tsx` — starts/stops the loop on visibility; injects the translator store + settings store via `getState`; swaps the placeholder for `<RevealSurface />` once there's translated text.
+- `apps/desktop/src/translator/translator.css` — new `.translator-reveal` + `.translator-sweep` mask-gradient keyframe animation; respects `prefers-reduced-motion`.
+
+Tests added (8 new, all green): `tests/translator/capture-loop.test.ts` covers: successful capture→translate→reveal; frame-diff idle backoff; text-diff skip; `paused=true` short-circuit; 3-fail → onError; whitespace-only OCR emits `no-text`; `stop()` halts scheduling; null capture (window hidden) skips OCR.
+
+Currently the widget downloads Tesseract's default `eng` pack from the CDN on first use (one-time ~10MB). M18c bundles the 8-language pack set into `resources/tessdata/` so the feature becomes fully offline and zero-setup.
+
+### Added — M18a: Screen translator widget scaffold (0.35.0-alpha)
+
+First slice of the "glass lupa" feature: a dedicated transparent/frameless/always-on-top BrowserWindow you can drag and resize anywhere on screen. Sits independent of the existing compact overlay (separate state file, separate IPC namespace, separate Vite entry) because Electron's `transparent:true + resizable:true` still breaks transparency on Windows (issues #49173, #48421). We keep `resizable:false` at the Electron level and fake resize via IPC-driven `setBounds()` from 8 custom CSS handles.
+
+M18a is scaffold only — the translation loop, reveal animation, and settings UI land in M18b/M18c. Today Ctrl+Alt+T opens the window; drag + resize work; the widget excludes itself from `desktopCapturer` via `setContentProtection(true)` (Win10 2004+) so the OCR loop in M18b will never read its own pixels back.
+
+Plug-and-play design locked in:
+- Tesseract.js 7 picked as v1 OCR engine. Cross-platform WASM, no native addons — survives `pnpm build:full` untouched.
+- Default multi-language init is `eng+spa` so the user never has to pick a source language.
+- Language packs bundled into `resources/tessdata/` arrive in M18c (electron-builder `extraResources`); until then Tesseract falls back to its CDN at first use.
+- Zero user setup: open the hotkey, drop the widget over text, done.
+
+Files added:
+- `apps/desktop/electron/modules/translator-window.ts` — BrowserWindow + state persistence + `setContentProtection(true)` + drag + resize-delta math with 8-way anchor support.
+- `apps/desktop/electron/modules/translator-capture.ts` — `captureTranslatorRegion()` uses `desktopCapturer` + `nativeImage.crop()` with DPI + multi-monitor aware coordinate translation. Returns PNG base64.
+- `apps/desktop/translator-overlay.html` + `apps/desktop/src/translator/` — new Vite entry: `main.tsx`, `TranslatorOverlay.tsx` (drag header + status chip + viewport outline), `ResizeHandles.tsx` (8-way IPC-driven resize), `translator.css` (glass tokens cloned from `widget.css`, wa-reveal classes cloned from `index.css`).
+- `apps/desktop/src/translator/hash.ts` — 64-bit aHash + Hamming distance for frame-diffing in M18b; `normalizeOcrText()` for text-diff.
+- `apps/desktop/src/translator/ocr/engine.ts` + `tesseract-engine.ts` — plug-in interface + singleton Tesseract worker with lazy dynamic import so the 2MB+ WASM chunk only loads when the window opens.
+- `apps/desktop/src/stores/translator.ts` — zustand store (`visible`, `dragging`, `resizing`, `status`, `consecFailures`, `bounds`).
+
+Files modified:
+- `apps/desktop/electron/modules/ipc.ts` — 11 new `translator:*` channels (show/hide/toggle/get-bounds/capture-region + drag-start/move/end + resize-start/move/end).
+- `apps/desktop/electron/modules/hotkeys.ts` — new `screen_translator` key with default `Ctrl+Alt+T` → `toggleTranslator()`.
+- `apps/desktop/electron/main.ts` — bootstrap via `preCreateTranslator()` in `app.whenReady`.
+- `apps/desktop/electron/preload.ts` + `src/global.d.ts` — `whisperall.translator.*` bridge.
+- `apps/desktop/vite.config.ts` — third rollup input alongside `main` and `overlay`.
+- `apps/desktop/src/stores/settings.ts` — new `screenTranslator` sub-object (`target_lang: 'es'`, `refresh_ms: 750`, `show_outline: true`) with `normalizeScreenTranslator()` guard.
+
+Tests added (23 new, all green): `tests/translator/hash.test.ts` (9), `tests/stores/translator.test.ts` (7), `tests/electron/translator-window.test.ts` (7). Plus additions to `tests/ipc.test.ts` (all `translator:*` channels) and `tests/hotkeys.test.ts` (Ctrl+Alt+T registered).
+
+Pre-existing unrelated failures in `dictation.test.ts`, `transcription.test.ts`, `widget.test.ts`, and `codex-auth.test.ts` remain; M18a changed nothing in those paths.
+
+### Changed — Global diarization via full-audio Deepgram pass (the real fix)
+
+Chunked diarization never worked across chunk boundaries. Each chunk sent a 2-min audio slice to Deepgram, got back local speaker IDs (Speaker 0, Speaker 1), and those IDs didn't correlate across chunks — chunk 0's "Speaker 0" might be chunk 5's "Speaker 1" even when it was the same person. Combined with the "merge label" step that collapsed same-IDs into one turn, a 79-min interview with host + guest routinely landed as a single "Speaker 1" monologue.
+
+Prior revision tried to paper over this by hiding the `Speaker 1:` prefix when only one speaker was detected and injecting paragraph breaks every 120s of audio. That fixed the symptom (unreadable wall of text) but not the root cause (diarization silently broken). User called it out — correctly.
+
+**What competitors (turboscribe, gladia, otter) actually do:** send the full audio in ONE request to the diarization engine so it has global embedding context and produces globally-consistent speaker IDs. We now do the same.
+
+New flow for URL + file transcription when `enable_diarization=true`:
+
+1. Chunked STT still runs (Groq per-chunk, cheap, fast — gives us text + chunk-level segments for the segment-click-to-seek feature).
+2. At the end, when the job completes, `run_job` locates the full-audio file in Supabase Storage (`url-media/{job_id}/audio.mp3` for URL jobs, `uploads/{job_id}/original.*` for file uploads) and makes ONE `transcribe_full_audio_diarized` call with `paragraphs=true`. Deepgram returns:
+   - utterance-level segments with global speaker IDs (Speaker 0 = always the same person across the whole file)
+   - paragraph-level segments with pause-detected + sentence-aware boundaries (the "logical, gramatical" layout, no time heuristics, no regex)
+3. `_paragraphs_to_labeled_text` formats the paragraphs: multi-speaker gets `Speaker N: …` prefixes; single-speaker drops the prefix. Consecutive same-speaker paragraphs merge into one turn.
+4. Fallback: if the full-audio call fails (network, timeout, Deepgram outage), run_job falls back to the old per-chunk merge path. User still gets a transcript, just without global consistency.
+
+Replaced the previous paragraph-break time heuristic entirely — we now trust Deepgram's paragraph boundaries, which are driven by pause length + sentence endings + speaker turn changes, not by a `≥120s since last break` rule.
+
+`apps/api/app/providers/deepgram.py`: new `transcribe_full_audio_diarized()` + `_extract_paragraph_segments()`.
+`apps/api/app/routers/transcribe.py`: `_find_full_audio_path()`, `_paragraphs_to_labeled_text()`, and the new global-pass block in `run_job` completion. Reverted `_segments_to_labeled_text`'s time-heuristic hack.
+
+Cost: one extra Deepgram call per completed job. For a 79-min audio, Deepgram processes the full file in ~30-60s. We already use Deepgram per-chunk for text diversity; this adds one more. Offsetting win: dropping `STT_CONCURRENCY` / per-chunk Deepgram later is on the table (chunked Groq alone handles text, full-file Deepgram handles speaker labels).
+
+43/43 pytest OK (33 transcribe + 10 deepgram provider).
+
+### Fixed — URL transcription completes cleanly end-to-end (79-min YouTube)
+
+Three follow-up fixes after the `Server disconnected` root cause was killed in the previous revision. All observed on the same John Lennox 79-min YouTube reproducer, which now produces a note with title + audio + readable transcript.
+
+**1. Summary tab showed "Downloaded the media (0.0 MB, 5.7s)"**
+
+The backend used to emit two separate log lines for the yt-dlp download completion — one with `elapsed=`, a second (milliseconds later) with `bytes=`. The humanize regex matched the first and looked for `bytes=` on the SAME line → 0 bytes → `0.0 MB`. Merged both into a single line:
+```
+[transcribe.url] yt_dlp_download done bytes=N (X.Y MB) elapsed=Zs ct=... title=...
+```
+Frontend regex updated to match the new layout with a legacy-fallback rule so users running an older backend still get a sensible summary (with `s=?` instead of fake elapsed).
+
+**2. "Could not load audio" on completed notes**
+
+The `<audio>` player in the note couldn't load the Supabase public URL even though the bucket is configured `public=true` and the file uploaded successfully. Intermittent — the user reported one successful playback and several failures. Root cause likely a combination of RLS policy scope (`audio_select` policy requires `authenticated`, not `anon`, so public URLs hit 401 from anonymous renderer requests) and Supabase caching a bad response.
+
+Fix: switched from `get_public_url` → `create_signed_url` with a 1-year TTL. Signed URLs carry an embedded token and bypass the RLS layer entirely, so they work regardless of bucket/policy configuration. Fallback to public URL if the signed-URL call itself throws.
+
+**3. Transcript was one giant paragraph prefixed "Speaker 1:"**
+
+Two stacked problems:
+
+- `transcribe_chunks` text was joined with a single space → one unreadable wall of text. Now joined with `\n\n` so each 2-min chunk becomes its own paragraph.
+- When diarization returned only one unique speaker (cross-chunk drift, see known issue below), `_segments_to_labeled_text` still produced `Speaker 1: <all text>` as one paragraph. Updated to detect single-speaker case, drop the pointless `Speaker 1:` prefix, and inject paragraph breaks every ~120s of audio based on segment `start` timestamps.
+
+Multi-speaker output (actual interview layout) unchanged.
+
+### Known issue — Cross-chunk diarization drift (still present)
+
+Each chunk's `Speaker 0` / `Speaker 1` IDs are LOCAL to that chunk. The merge step doesn't correlate them across chunks, so a 79-min interview with host-talks-intro + guest-talks-rest collapses into a single "Speaker 1" because every chunk's lone speaker gets relabeled to 1. Fix requires sending the full source.mp3 to Deepgram in parallel with the chunked STT and using its global speaker IDs as the source of truth. Tracked for a dedicated pass — the readable-paragraphs fix above at least makes the single-speaker case look OK.
+
+### Changed — Backend rebuild workflow is now automatic (not manual)
+
+The old `pre-dist.mjs` only *verified* that `backend-bundle/` existed. It did NOT re-sync `apps/api/app/` into the bundle when the Python code changed. Symptom: edit a `.py`, run `pnpm dist:dir`, open the exe → backend still runs old code because `backend-bundle/api/app/` was untouched. Hidden failure mode that burned 2+ rebuild cycles during the "Server disconnected" debug session.
+
+New `pre-dist.mjs` does four things every time (on behalf of `dist:win` and `dist:dir`):
+
+1. Validates bundle skeleton (Python runtime + site-packages + .env).
+2. Syncs `apps/api/app/` → `backend-bundle/api/app/`.
+3. Purges every `__pycache__/*.pyc` from the bundle so the fresh `.py` files can't be shadowed by stale compiled bytecode.
+4. Mirrors the same sync + purge into `release/win-unpacked/resources/backend/api/app/` when that directory already exists. That tree is what the portable .exe actually runs from, so a fast iteration loop can skip electron-builder entirely — edit `.py`, run `pnpm backend:sync`, close & reopen the exe, done.
+
+New `pnpm backend:sync` script exposes step 2-4 directly (runs `pre-dist.mjs` without the full dist pipeline). Seconds, not minutes.
+
+`pnpm bundle:backend` is still needed once on setup and whenever `requirements.txt` changes — that one downloads Python 3.11 and installs pip deps fresh (5-10 min).
+
+Documented in `CLAUDE.md` (Portable build / backend rebuild workflow section).
+
+### Fixed — `Server disconnected` 500 during STT download (79-min YouTube reproducer)
+
+User reproducer: a 79-min John Lennox lecture. Prep fase ran clean (73 MB via yt-dlp, 40 × 2-min chunks, audio.mp3 uploaded, source.mp3 playable). Then `/run` started STT on 10 chunks and the backend crashed with:
+
+```
+httpcore.RemoteProtocolError: Server disconnected
+  at transcribe.py:1126 → db.storage.from_("audio").download(storage_path)
+  (HTTP/2 stream read inside supabase-py's shared httpx.Client)
+```
+
+Root cause: `_process_one_chunk` does `db.storage.download(...)` inside an `asyncio.to_thread`, with `asyncio.Semaphore(STT_CONCURRENCY=5)` fanning out 5 concurrent workers. supabase-py exposes a single shared `httpx.Client`, which is NOT thread-safe on HTTP/2 — concurrent `download()` calls race on the same connection and trip `RemoteProtocolError` mid-stream. Same class of bug as the upload race we fixed earlier by dropping `URL_UPLOAD_CONCURRENCY` to 1, just surfacing on the download side now.
+
+Two-layer fix in `apps/api/app/routers/transcribe.py`:
+
+1. **`_storage_download_with_retry(db, storage_path)`** — new helper that BYPASSES supabase-py entirely and uses a per-call `httpx.Client(http2=False)` with the service role key as Bearer auth. One TCP connection per download, no multiplexing, no shared state → the HTTP/2 race that produced `Server disconnected` is structurally impossible. Retry loop (`STORAGE_DOWNLOAD_RETRIES=3`, exponential backoff from `STORAGE_DOWNLOAD_BACKOFF_BASE=0.5s`) catches `httpx.TransportError` / `ConnectionError` / `TimeoutError` / `OSError` for genuine transient blips. `HTTPStatusError` (403/404) surfaces immediately — no retry. Falls back to the original `db_client.storage.from_("audio").download(...)` path when `SUPABASE_URL` / service role key aren't configured (preserves test-harness behavior).
+2. **`STT_CONCURRENCY` lowered 5 → 3.** Reduces contention at the STT-provider end (Groq / Deepgram rate limits). Now that the storage download path is HTTP/2-free and per-call, the limiter is purely about provider quotas, not about protecting the supabase client.
+
+`_process_one_chunk` now calls `asyncio.to_thread(_storage_download_with_retry, db, storage_path)` instead of the bare `lambda: db.storage.from_("audio").download(storage_path)`.
+
+Frontend note: the `ApiError` from a 500 on `/v1/transcribe/jobs/:id/run` does propagate through `runUrlTranscription`'s catch → job marked failed → user notified. The user's "the job still shows processing" observation was the POST being in flight during the failing STT batch; once the 500 comes back, the UI flips to failed.
+
+### Fixed — "View server logs" now reachable on every transcribe job
+
+User reproducer: a URL transcription fails with `Server disconnected`, the card shows "Retry" + "Open note" buttons, and there's no way to open the logs panel to copy the error or see which stage died. Same thing happens on completed jobs — once `documentId` lands on the row, the primary action slot is taken by "Open note" and `JobDetailModal` becomes unreachable.
+
+Root cause: `ProcessesPage.tsx` built `primaryAction` as `openNoteFn ?? setDetailJobId(...)` — strictly exclusive. So any terminal job with a document (success OR failure that still wrote a placeholder note) lost the entry point.
+
+Fix: added an `onOpenDetail` prop to `ProcessCard` and a dedicated header icon button (`description` glyph, next to the notification bell) that's visible on every transcribe job regardless of status. Click opens `JobDetailModal`, which already renders logs for `failed | canceled | completed | running` — the panel was always there, it was just unreachable.
+
+`apps/desktop/src/components/processes/ProcessCard.tsx`, `apps/desktop/src/pages/ProcessesPage.tsx`, `apps/desktop/src/lib/i18n.ts` (`processes.viewLogs` EN+ES).
+
 ### Fixed — Diarized segments now persist for URL + file transcriptions
 
 User reproducer: 10-min Spanish YouTube interview. Audio + title landed on the note correctly (previous batch), but the segment panel showed "Audio is linked to this note, but there are no diarized segments yet." even though Deepgram had returned segments.

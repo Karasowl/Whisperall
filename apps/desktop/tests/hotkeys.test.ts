@@ -54,6 +54,14 @@ describe('Hotkey registration', () => {
     expect(registered).toContain('Alt+T');
   });
 
+  it('registers the screen translator hotkey (Ctrl+Alt+T)', async () => {
+    const { registerHotkeys } = await import('../electron/modules/hotkeys.js');
+    registerHotkeys();
+
+    const registered = mockGlobalShortcut.register.mock.calls.map((c: unknown[]) => c[0]);
+    expect(registered).toContain('Ctrl+Alt+T');
+  });
+
   it('overlay-toggle callback invokes toggleOverlay', async () => {
     const { registerHotkeys } = await import('../electron/modules/hotkeys.js');
     registerHotkeys();

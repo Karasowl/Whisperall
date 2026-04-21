@@ -1,7 +1,7 @@
 {
   "name": "@whisperall/desktop",
   "private": true,
-  "version": "0.33.1-alpha",
+  "version": "0.36.2-alpha",
   "type": "module",
   "main": "electron-dist/main.js",
   "scripts": {
@@ -16,6 +16,8 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "electron:dev": "tsc -p tsconfig.electron.json && node scripts/electron-dev.mjs",
     "bundle:backend": "node scripts/bundle-backend.mjs",
+    "backend:sync": "node scripts/pre-dist.mjs",
+    "build:full": "pnpm dist:dir",
     "dist:win": "node scripts/pre-dist.mjs && vite build && tsc -p tsconfig.electron.json && npx electron-builder --config electron-builder.yml --win nsis",
     "dist:dir": "node scripts/pre-dist.mjs && vite build && tsc -p tsconfig.electron.json && npx electron-builder --config electron-builder.yml --dir"
   },
@@ -36,6 +38,7 @@
     "marked": "^18.0.0",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
+    "tesseract.js": "^7.0.0",
     "turndown": "^7.2.4",
     "zustand": "^5.0.11"
   },

@@ -1,7 +1,9 @@
 import { globalShortcut } from 'electron';
 import { getMainWindow, showMainWindow } from './windows.js';
 import { showOverlay, getOverlayWindow, toggleOverlay } from './overlay.js';
+import { toggleTranslator } from './translator-window.js';
 import { pasteText } from './clipboard.js';
+import { pushDiag } from './diag.js';
 
 export interface HotkeyConfig {
   dictate?: string;
@@ -12,6 +14,12 @@ export interface HotkeyConfig {
   ai_edit?: string;
   translate?: string;
   overlay_toggle?: string;
+  screen_translator?: string;
+  /** Alternative accelerator for the screen translator — registered alongside
+   *  `screen_translator`. Covers the case where `Ctrl+Alt+T` is swallowed by
+   *  another app or by the OS (AltGr alias on Spanish keyboards, Chrome's
+   *  "reopen tab", etc.). Either key opens the same widget. */
+  screen_translator_alt?: string;
 }
 
 interface SttSettings {
@@ -25,6 +33,8 @@ let currentHotkeys: HotkeyConfig = {
   stt_paste: 'Alt+Shift+S',
   translate: 'Alt+T',
   overlay_toggle: 'Alt+W',
+  screen_translator: 'Ctrl+Alt+T',
+  screen_translator_alt: 'Alt+Shift+T',
 };
 
 let sttSettings: SttSettings = {
@@ -42,6 +52,8 @@ const ACTION_MAP: Record<string, string> = {
   ai_edit: 'ai-edit',
   translate: 'translate',
   overlay_toggle: 'overlay-toggle',
+  screen_translator: 'screen-translator-toggle',
+  screen_translator_alt: 'screen-translator-toggle',
   pause: 'pause',
   stop: 'stop',
 };
@@ -85,6 +97,9 @@ function sendToOverlay(action: string): void {
 
 export function registerHotkeys(): void {
   globalShortcut.unregisterAll();
+
+  const registered: string[] = [];
+  const failed: string[] = [];
 
   for (const [key, accelerator] of Object.entries(currentHotkeys)) {
     if (!accelerator) continue;
@@ -131,6 +146,11 @@ export function registerHotkeys(): void {
           return;
         }
 
+        if (action === 'screen-translator-toggle') {
+          toggleTranslator();
+          return;
+        }
+
         if (action === 'translate') {
           showOverlay('translator');
           sendToOverlay('translate');
@@ -142,13 +162,38 @@ export function registerHotkeys(): void {
       });
       if (ok) {
         console.log(`[Hotkey] Registered ${accelerator} -> ${key}`);
+        if (key === 'screen_translator' || key === 'screen_translator_alt') {
+          registered.push(accelerator);
+        }
       } else {
         console.warn(`[Hotkey] FAILED to register ${accelerator} — already in use by another app`);
+        if (key === 'screen_translator' || key === 'screen_translator_alt') {
+          failed.push(accelerator);
+        }
       }
     } catch (err) {
       console.error(`[Hotkey] Failed to register ${accelerator}:`, (err as Error).message);
+      if (key === 'screen_translator' || key === 'screen_translator_alt') {
+        failed.push(accelerator);
+      }
     }
   }
+
+  // Diagnostic startup event — pushed to the in-app notification bell so
+  // the user always has visibility, independent of Windows toast settings.
+  let body: string;
+  let tone: 'info' | 'warning' | 'error' = 'info';
+  if (registered.length > 0 && failed.length === 0) {
+    body = `Screen Translator hotkeys ready: ${registered.join(' or ')}. Also available via tray > Open Screen Translator.`;
+    tone = 'info';
+  } else if (registered.length > 0 && failed.length > 0) {
+    body = `Screen Translator partially ready. OK: ${registered.join(', ')}. Blocked: ${failed.join(', ')}. Use the working one or tray > Open Screen Translator.`;
+    tone = 'warning';
+  } else {
+    body = `Screen Translator hotkeys BLOCKED by another app (${failed.join(', ')}). Use tray > Open Screen Translator instead.`;
+    tone = 'error';
+  }
+  pushDiag({ message: 'Hotkeys registered', detail: body, context: 'hotkeys', tone });
 }
 
 export function updateHotkeys(hotkeys: Partial<HotkeyConfig>): void {

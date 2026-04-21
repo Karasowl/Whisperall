@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { showMainWindow, setMinimizeToTray } from './windows.js';
 import { showOverlay } from './overlay.js';
+import { showTranslator } from './translator-window.js';
 
 let tray: Tray | null = null;
 
@@ -42,6 +43,7 @@ function createTray(): boolean {
     Menu.buildFromTemplate([
       { label: 'Open Whisperall', click: () => showMainWindow() },
       { label: 'Open Widget', click: () => showOverlay() },
+      { label: 'Open Screen Translator', click: () => showTranslator() },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() },
     ]),
