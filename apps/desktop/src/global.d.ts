@@ -86,6 +86,34 @@ declare global {
       // Desktop Capturer
       getDesktopSources: () => Promise<Array<{ id: string; name: string }>>;
 
+      // Screen Translator (M18)
+      translator: {
+        show: () => void;
+        hide: () => void;
+        toggle: () => void;
+        getBounds: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
+        captureRegion: () => Promise<{ pngBase64: string; width: number; height: number } | null>;
+        dragStart: (payload: { screenX: number; screenY: number }) => void;
+        dragMove: (payload: { screenX: number; screenY: number }) => void;
+        dragEnd: () => void;
+        resizeStart: (payload: { screenX: number; screenY: number; anchor: string }) => void;
+        resizeMove: (payload: { screenX: number; screenY: number }) => void;
+        resizeEnd: () => void;
+        onVisible: (cb: (visible: boolean) => void) => Unsubscribe;
+        reportError: (payload: { message: string; detail?: string }) => void;
+        onError: (cb: (payload: { message: string; detail?: string }) => void) => Unsubscribe;
+      };
+
+      // Generic diagnostic bridge: main process → main window notification bell.
+      onDiag: (
+        cb: (payload: {
+          message: string;
+          detail?: string;
+          context?: string;
+          tone?: 'info' | 'warning' | 'error' | 'success';
+        }) => void,
+      ) => Unsubscribe;
+
       // Backend diagnostics
       backend: {
         getLogTail: (lines?: number) => Promise<string>;

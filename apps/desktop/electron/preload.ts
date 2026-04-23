@@ -118,6 +118,48 @@ contextBridge.exposeInMainWorld('whisperall', {
   // ── Desktop Capturer ───────────────────────────────────────
   getDesktopSources: () => ipcRenderer.invoke('desktop-sources') as Promise<Array<{ id: string; name: string }>>,
 
+  // ── Screen Translator (M18) ────────────────────────────────
+  translator: {
+    show: () => ipcRenderer.send('translator:show'),
+    hide: () => ipcRenderer.send('translator:hide'),
+    toggle: () => ipcRenderer.send('translator:toggle'),
+    getBounds: () => ipcRenderer.invoke('translator:get-bounds') as Promise<{ x: number; y: number; width: number; height: number } | null>,
+    captureRegion: () => ipcRenderer.invoke('translator:capture-region') as Promise<{ pngBase64: string; width: number; height: number } | null>,
+    dragStart: (payload: { screenX: number; screenY: number }) => ipcRenderer.send('translator:drag-start', payload),
+    dragMove: (payload: { screenX: number; screenY: number }) => ipcRenderer.send('translator:drag-move', payload),
+    dragEnd: () => ipcRenderer.send('translator:drag-end'),
+    resizeStart: (payload: { screenX: number; screenY: number; anchor: string }) => ipcRenderer.send('translator:resize-start', payload),
+    resizeMove: (payload: { screenX: number; screenY: number }) => ipcRenderer.send('translator:resize-move', payload),
+    resizeEnd: () => ipcRenderer.send('translator:resize-end'),
+    onVisible: (cb: (visible: boolean) => void): Unsubscribe => {
+      const handler = (_e: Electron.IpcRendererEvent, visible: boolean) => cb(visible);
+      ipcRenderer.on('translator:visible', handler);
+      return () => ipcRenderer.removeListener('translator:visible', handler);
+    },
+    /** Called from the translator overlay renderer — forwarded to the main window. */
+    reportError: (payload: { message: string; detail?: string }) => ipcRenderer.send('translator:error', payload),
+    /** Subscribed by the main window renderer to receive relayed errors. */
+    onError: (cb: (payload: { message: string; detail?: string }) => void): Unsubscribe => {
+      const handler = (_e: Electron.IpcRendererEvent, payload: { message: string; detail?: string }) => cb(payload);
+      ipcRenderer.on('translator:error', handler);
+      return () => ipcRenderer.removeListener('translator:error', handler);
+    },
+  },
+
+  // ── Diagnostic log (main → main-window renderer) ───────────
+  // Main process pushes diagnostic entries (hotkey fired, translator shown,
+  // hotkey registration report, etc.) into the main window's notification
+  // bell. Preferred over native toasts since those depend on Windows
+  // Action Center settings we can't control.
+  onDiag: (cb: (payload: { message: string; detail?: string; context?: string; tone?: 'info' | 'warning' | 'error' | 'success' }) => void): Unsubscribe => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      payload: { message: string; detail?: string; context?: string; tone?: 'info' | 'warning' | 'error' | 'success' },
+    ) => cb(payload);
+    ipcRenderer.on('diag:push', handler);
+    return () => ipcRenderer.removeListener('diag:push', handler);
+  },
+
   // ── Backend diagnostics ─────────────────────────────────────
   backend: {
     getLogTail: (lines: number = 500) => ipcRenderer.invoke('backend:log-tail', lines) as Promise<string>,

@@ -17,6 +17,35 @@ export type ReaderDisplaySettings = {
   captions_on: boolean;
 };
 
+export type ScreenTranslatorSettings = {
+  /** BCP-47 code of the target language for DeepL (e.g. 'es', 'en'). */
+  target_lang: string;
+  /** Refresh cadence in ms (500 / 750 / 1000 / 1500). */
+  refresh_ms: number;
+  /** Whether to show the dashed viewport outline while idle. */
+  show_outline: boolean;
+};
+
+export const DEFAULT_SCREEN_TRANSLATOR: ScreenTranslatorSettings = {
+  target_lang: 'es',
+  refresh_ms: 750,
+  show_outline: true,
+};
+
+function normalizeScreenTranslator(input: unknown): ScreenTranslatorSettings {
+  if (!input || typeof input !== 'object') return { ...DEFAULT_SCREEN_TRANSLATOR };
+  const raw = input as Partial<ScreenTranslatorSettings>;
+  const refresh = Number(raw.refresh_ms);
+  const refresh_ms = [500, 750, 1000, 1500].includes(refresh) ? refresh : DEFAULT_SCREEN_TRANSLATOR.refresh_ms;
+  return {
+    target_lang: typeof raw.target_lang === 'string' && raw.target_lang.length > 0
+      ? raw.target_lang
+      : DEFAULT_SCREEN_TRANSLATOR.target_lang,
+    refresh_ms,
+    show_outline: typeof raw.show_outline === 'boolean' ? raw.show_outline : DEFAULT_SCREEN_TRANSLATOR.show_outline,
+  };
+}
+
 export type SettingsState = {
   theme: Theme;
   uiLanguage: UiLocale;
@@ -35,6 +64,7 @@ export type SettingsState = {
   audioDevice: string | null;
   systemIncludeMic: boolean;
   readerDisplay: ReaderDisplaySettings;
+  screenTranslator: ScreenTranslatorSettings;
 
   setTheme: (theme: Theme) => void;
   setUiLanguage: (lang: UiLocale) => void;
@@ -54,6 +84,7 @@ export type SettingsState = {
   setAudioDevice: (deviceId: string | null) => void;
   setSystemIncludeMic: (enabled: boolean) => void;
   setReaderDisplay: (patch: Partial<ReaderDisplaySettings>) => void;
+  setScreenTranslator: (patch: Partial<ScreenTranslatorSettings>) => void;
   load: () => void;
 };
 
@@ -199,6 +230,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     highlight_mode: 'sentence',
     captions_on: true,
   },
+  screenTranslator: { ...DEFAULT_SCREEN_TRANSLATOR },
 
   setTheme: (theme) => {
     set({ theme });
@@ -297,6 +329,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persist({ readerDisplay: next });
   },
 
+  setScreenTranslator: (patch) => {
+    const next = normalizeScreenTranslator({ ...get().screenTranslator, ...patch });
+    set({ screenTranslator: next });
+    persist({ screenTranslator: next });
+  },
+
   setHotkey: (action, accelerator) => {
     const hotkeys = { ...get().hotkeys, [action]: accelerator };
     set({ hotkeys });
@@ -309,7 +347,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const ttsLanguage = normalizeTtsLanguage((saved as { ttsLanguage?: string })?.ttsLanguage);
     const ttsVoice = normalizeTtsVoice((saved as { ttsVoice?: string })?.ttsVoice);
     const readerDisplay = normalizeReaderDisplay((saved as { readerDisplay?: unknown })?.readerDisplay);
-    set({ ...saved, ttsLanguage, ttsVoice, readerDisplay });
+    const screenTranslator = normalizeScreenTranslator((saved as { screenTranslator?: unknown })?.screenTranslator);
+    set({ ...saved, ttsLanguage, ttsVoice, readerDisplay, screenTranslator });
     // Apply theme
     const theme = (saved.theme as Theme) || 'dark';
     applyTheme(theme);

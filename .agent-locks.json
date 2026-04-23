@@ -1,5 +1,42 @@
 {
-  "locks": [],
+  "locks": [
+    {
+      "file": "apps/desktop/electron/modules/translator-window.ts",
+      "agent": "codex-agent",
+      "task": "Fix screen translator gray oversized window and capture flicker",
+      "since": "2026-04-21T19:41:47Z"
+    },
+    {
+      "file": "apps/desktop/electron/modules/translator-capture.ts",
+      "agent": "codex-agent",
+      "task": "Fix screen translator gray oversized window and capture flicker",
+      "since": "2026-04-21T19:41:47Z"
+    },
+    {
+      "file": "apps/desktop/src/translator/translator.css",
+      "agent": "codex-agent",
+      "task": "Fix screen translator gray oversized window and capture flicker",
+      "since": "2026-04-21T19:41:47Z"
+    },
+    {
+      "file": "apps/desktop/translator-overlay.html",
+      "agent": "codex-agent",
+      "task": "Fix screen translator gray oversized window and capture flicker",
+      "since": "2026-04-21T19:41:47Z"
+    },
+    {
+      "file": "apps/desktop/tests/electron/translator-window.test.ts",
+      "agent": "codex-agent",
+      "task": "Fix screen translator gray oversized window and capture flicker",
+      "since": "2026-04-21T19:41:47Z"
+    },
+    {
+      "file": "CHANGELOG.md",
+      "agent": "codex-agent",
+      "task": "Document screen translator hotfix",
+      "since": "2026-04-21T19:41:47Z"
+    }
+  ],
   "schema": {
     "file": "string - relative path from repo root (e.g. apps/desktop/src/pages/EditorPage.tsx)",
     "agent": "claude-agent | codex-agent",

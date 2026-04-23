@@ -4,6 +4,12 @@ import {
   showOverlay, hideOverlay, toggleOverlay, resizeOverlay, setOverlayIgnoreMouse, sendSubtitleText,
   startOverlayDrag, moveOverlayDrag, endOverlayDrag, resetOverlayPosition, setDockZone, undockToPosition,
 } from './overlay.js';
+import {
+  showTranslator, hideTranslator, toggleTranslator, getTranslatorBounds,
+  startTranslatorDrag, moveTranslatorDrag, endTranslatorDrag,
+  startTranslatorResize, moveTranslatorResize, endTranslatorResize,
+} from './translator-window.js';
+import { captureTranslatorRegion } from './translator-capture.js';
 import { updateHotkeys, updateSttSettings, setLastDictationText } from './hotkeys.js';
 import { updateTraySettings, getTraySettings } from './tray.js';
 import { pasteText, undoPaste, readClipboard, writeClipboard } from './clipboard.js';
@@ -179,6 +185,36 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('desktop-sources', async () => {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     return sources.map((s) => ({ id: s.id, name: s.name }));
+  });
+
+  // --- Screen Translator (M18) ---
+  ipcMain.on('translator:show', () => { showTranslator(); });
+  ipcMain.on('translator:hide', () => { hideTranslator(); });
+  ipcMain.on('translator:toggle', () => { toggleTranslator(); });
+  ipcMain.handle('translator:get-bounds', () => getTranslatorBounds());
+  ipcMain.handle('translator:capture-region', async () => captureTranslatorRegion());
+  ipcMain.on('translator:drag-start', (_e, payload: { screenX: number; screenY: number }) => {
+    startTranslatorDrag(payload.screenX, payload.screenY);
+  });
+  ipcMain.on('translator:drag-move', (_e, payload: { screenX: number; screenY: number }) => {
+    moveTranslatorDrag(payload.screenX, payload.screenY);
+  });
+  ipcMain.on('translator:drag-end', () => { endTranslatorDrag(); });
+  ipcMain.on('translator:resize-start', (_e, payload: { screenX: number; screenY: number; anchor: string }) => {
+    startTranslatorResize(payload.screenX, payload.screenY, payload.anchor as 'n'|'s'|'e'|'w'|'ne'|'nw'|'se'|'sw');
+  });
+  ipcMain.on('translator:resize-move', (_e, payload: { screenX: number; screenY: number }) => {
+    moveTranslatorResize(payload.screenX, payload.screenY);
+  });
+  ipcMain.on('translator:resize-end', () => { endTranslatorResize(); });
+  // Relay translator errors to the main window so the user sees them in the
+  // notifications bell. The translator overlay is a separate renderer with
+  // its own zustand stores, so pushing inside it wouldn't reach the main UI.
+  ipcMain.on('translator:error', (_e, payload: { message: string; detail?: string }) => {
+    const main = getMainWindow();
+    if (main && !main.isDestroyed()) {
+      main.webContents.send('translator:error', payload);
+    }
   });
 
   // --- Window controls ---

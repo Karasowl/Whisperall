@@ -3,10 +3,19 @@ import { createMainWindow, showMainWindow, setQuitting, configureMediaPermission
 import { registerHotkeys } from './modules/hotkeys.js';
 import { syncTray } from './modules/tray.js';
 import { preCreateOverlay, showOverlay } from './modules/overlay.js';
+import { preCreateTranslator } from './modules/translator-window.js';
 import { registerIpcHandlers } from './modules/ipc.js';
 import { initAutoUpdater } from './modules/updater.js';
 import { registerProtocol, handleAuthUrl } from './modules/auth.js';
 import { ensureBundledBackend, stopBundledBackend } from './modules/backend.js';
+
+// Windows requires an AppUserModelID for native toast notifications to
+// appear at all. Without this, calls to `new Notification({...}).show()`
+// silently no-op on portable builds (no installer => no Start Menu entry
+// => no AUMI). Setting it here also fixes taskbar grouping.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.whisperall.desktop');
+}
 
 registerProtocol();
 
@@ -54,6 +63,7 @@ app.whenReady().then(async () => {
   syncTray();
   preCreateOverlay();
   showOverlay();
+  preCreateTranslator();
   initAutoUpdater();
 });
 
